@@ -1,0 +1,181 @@
+"""
+系统设置服务层
+"""
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, List, Tuple, Dict, Any
+from datetime import datetime
+
+from app.crud.system_crud import SysConfigCRUD, SysLoginLogCRUD, SysOperationLogCRUD
+from app.db.models.sys_log import SysConfigModel
+from app.schemas.system import ConfigCreate, ConfigUpdate
+
+
+class SystemConfigService:
+    """系统配置服务"""
+
+    @staticmethod
+    async def create_config(
+        db: AsyncSession,
+        data: ConfigCreate
+    ) -> SysConfigModel:
+        """创建配置"""
+        return await SysConfigCRUD.create(
+            db=db,
+            config_key=data.config_key,
+            config_value=data.config_value,
+            config_type=data.config_type,
+            description=data.description,
+            is_public=data.is_public
+        )
+
+    @staticmethod
+    async def get_config(db: AsyncSession, config_key: str) -> Optional[dict]:
+        """获取单个配置"""
+        config = await SysConfigCRUD.get_by_key(db, config_key)
+        return config.to_dict() if config else None
+
+    @staticmethod
+    async def get_config_value(db: AsyncSession, config_key: str, default: Any = None) -> Any:
+        """获取配置值"""
+        config = await SysConfigCRUD.get_by_key(db, config_key)
+        if config:
+            return config.get_value()
+        return default
+
+    @staticmethod
+    async def get_all_configs(
+        db: AsyncSession,
+        is_public: Optional[bool] = None
+    ) -> List[dict]:
+        """获取所有配置"""
+        configs = await SysConfigCRUD.get_all(db, is_public)
+        return [c.to_dict() for c in configs]
+
+    @staticmethod
+    async def get_configs_as_dict(
+        db: AsyncSession,
+        is_public: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """获取配置为字典格式"""
+        configs = await SysConfigCRUD.get_all(db, is_public)
+        return {c.config_key: c.get_value() for c in configs}
+
+    @staticmethod
+    async def update_config(
+        db: AsyncSession,
+        config_key: str,
+        data: ConfigUpdate
+    ) -> Optional[dict]:
+        """更新配置"""
+        config = await SysConfigCRUD.update(
+            db=db,
+            config_key=config_key,
+            config_value=data.config_value,
+            description=data.description,
+            is_public=data.is_public
+        )
+        return config.to_dict() if config else None
+
+    @staticmethod
+    async def batch_update_configs(
+        db: AsyncSession,
+        configs: Dict[str, Any]
+    ) -> int:
+        """批量更新配置"""
+        return await SysConfigCRUD.batch_update(db, configs)
+
+    @staticmethod
+    async def delete_config(db: AsyncSession, config_key: str) -> bool:
+        """删除配置"""
+        return await SysConfigCRUD.delete(db, config_key)
+
+
+class LoginLogService:
+    """登录日志服务"""
+
+    @staticmethod
+    async def get_logs(
+        db: AsyncSession,
+        user_id: Optional[int] = None,
+        account: Optional[str] = None,
+        is_success: Optional[bool] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取登录日志列表"""
+        logs, total = await SysLoginLogCRUD.get_list(
+            db=db,
+            user_id=user_id,
+            account=account,
+            is_success=is_success,
+            start_time=start_time,
+            end_time=end_time,
+            page=page,
+            page_size=page_size
+        )
+        return [log.to_dict() for log in logs], total
+
+
+class OperationLogService:
+    """操作日志服务"""
+
+    @staticmethod
+    async def log_operation(
+        db: AsyncSession,
+        module: str,
+        action: str,
+        user_id: Optional[int] = None,
+        user_name: Optional[str] = None,
+        target_type: Optional[str] = None,
+        target_id: Optional[int] = None,
+        target_name: Optional[str] = None,
+        detail: Optional[str] = None,
+        ip: Optional[str] = None,
+        is_success: bool = True,
+        error_msg: Optional[str] = None
+    ):
+        """记录操作日志"""
+        await SysOperationLogCRUD.create(
+            db=db,
+            module=module,
+            action=action,
+            user_id=user_id,
+            user_name=user_name,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            detail=detail,
+            ip=ip,
+            is_success=is_success,
+            error_msg=error_msg
+        )
+
+    @staticmethod
+    async def get_logs(
+        db: AsyncSession,
+        user_id: Optional[int] = None,
+        module: Optional[str] = None,
+        action: Optional[str] = None,
+        target_type: Optional[str] = None,
+        is_success: Optional[bool] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取操作日志列表"""
+        logs, total = await SysOperationLogCRUD.get_list(
+            db=db,
+            user_id=user_id,
+            module=module,
+            action=action,
+            target_type=target_type,
+            is_success=is_success,
+            start_time=start_time,
+            end_time=end_time,
+            page=page,
+            page_size=page_size
+        )
+        return [log.to_dict() for log in logs], total

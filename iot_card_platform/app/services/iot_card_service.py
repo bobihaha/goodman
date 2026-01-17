@@ -1,275 +1,253 @@
 """
-物联网卡业务逻辑
+物联网卡服务层
 """
-from typing import List, Tuple, Dict, Any, Optional
-from datetime import datetime, timedelta
+from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_
-
-from app.db.models.iot_card import IoTCardModel, CardStatus
-from app.db.models.package import PackageModel
-from app.db.models.device import DeviceModel
-from app.schemas.iot_card import (
-    IoTCardCreate, IoTCardUpdate, IoTCardInfo, 
-    IoTCardQuery, IoTCardActivate
-)
-from app.schemas.user import UserInfo
+from app.crud.iot_card_crud import iot_card_crud, card_transfer_crud
+from app.db.models.iot_card import IotCardModel
+from app.db.models.sys_user import UserLevel
 from app.utils.exceptions import BusinessException
 
 
-class IoTCardService:
+class IotCardService:
+    """物联网卡服务"""
 
-    @staticmethod
-    async def create_card(db: AsyncSession, data: IoTCardCreate, user_id: int) -> IoTCardInfo:
-        # 检查ICCID是否已存在
-        existing = await db.execute(
-            select(IoTCardModel).where(IoTCardModel.iccid == data.iccid)
-        )
-        if existing.scalar_one_or_none():
-            raise BusinessException(code=400, msg="ICCID已存在")
-        
-        card = IoTCardModel(
-            iccid=data.iccid,
-            imsi=data.imsi,
-            msisdn=data.msisdn,
-            carrier=data.carrier,
-            status=CardStatus.INACTIVE,
-            user_id=user_id,
-            remark=data.remark
-        )
-        db.add(card)
-        await db.flush()
-        return await IoTCardService._to_card_info(db, card)
+    async def get_cards(
+        self,
+        db: AsyncSession,
+        current_user_id: int,
+        user_level: int,
+        keyword: Optional[str] = None,
+        status: Optional[str] = None,
+        carrier: Optional[str] = None,
+        period_type: Optional[str] = None,
+        pool_id: Optional[int] = None,
+        is_pool_member: Optional[bool] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取卡片列表 (根据用户权限过滤)"""
+        # 超级管理员可以看全部，用户/子用户只能看自己的
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
 
-    @staticmethod
-    async def get_card_list(
-        db: AsyncSession, 
-        query: IoTCardQuery, 
-        current_user: UserInfo
-    ) -> Tuple[List[IoTCardInfo], int]:
-        offset = (query.page - 1) * query.page_size
-        
-        conditions = [IoTCardModel.is_deleted == 0]
-        
-        # 非管理员只能查看自己的卡
-        if current_user.role != "admin":
-            conditions.append(IoTCardModel.user_id == current_user.id)
-        
-        if query.iccid:
-            conditions.append(IoTCardModel.iccid.like(f"%{query.iccid}%"))
-        if query.msisdn:
-            conditions.append(IoTCardModel.msisdn.like(f"%{query.msisdn}%"))
-        if query.carrier:
-            conditions.append(IoTCardModel.carrier == query.carrier)
-        if query.status:
-            conditions.append(IoTCardModel.status == query.status)
-        
-        stmt = select(IoTCardModel).where(and_(*conditions)).offset(offset).limit(query.page_size)
-        result = await db.execute(stmt)
-        cards = result.scalars().all()
-        
-        total_stmt = select(func.count(IoTCardModel.id)).where(and_(*conditions))
-        total_result = await db.execute(total_stmt)
-        total = total_result.scalar() or 0
-        
-        card_infos = [await IoTCardService._to_card_info(db, c) for c in cards]
-        return card_infos, total
-
-    @staticmethod
-    async def get_card_by_id(db: AsyncSession, card_id: int) -> IoTCardInfo:
-        result = await db.execute(
-            select(IoTCardModel).where(
-                IoTCardModel.id == card_id,
-                IoTCardModel.is_deleted == 0
-            )
+        items, total = await iot_card_crud.get_list(
+            db=db,
+            user_id=user_filter,
+            keyword=keyword,
+            status=status,
+            carrier=carrier,
+            period_type=period_type,
+            pool_id=pool_id,
+            is_pool_member=is_pool_member,
+            page=page,
+            page_size=page_size
         )
-        card = result.scalar_one_or_none()
+
+        return [item.to_dict() for item in items], total
+
+    async def get_card_detail(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        current_user_id: int,
+        user_level: int
+    ) -> Optional[dict]:
+        """获取卡片详情"""
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        card = await iot_card_crud.get_by_id(db, card_id, user_filter)
         if not card:
-            raise BusinessException(code=404, msg="物联网卡不存在")
-        return await IoTCardService._to_card_info(db, card)
+            raise BusinessException(code=404, message="卡片不存在或无权访问")
+        return card.to_dict()
 
-    @staticmethod
-    async def update_card(db: AsyncSession, card_id: int, data: IoTCardUpdate) -> IoTCardInfo:
-        result = await db.execute(
-            select(IoTCardModel).where(
-                IoTCardModel.id == card_id,
-                IoTCardModel.is_deleted == 0
-            )
-        )
-        card = result.scalar_one_or_none()
+    async def search_cards(
+        self,
+        db: AsyncSession,
+        keyword: str,
+        current_user_id: int,
+        user_level: int,
+        limit: int = 10
+    ) -> List[dict]:
+        """快速搜索卡片"""
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        items = await iot_card_crud.search(db, keyword, user_filter, limit)
+        return [item.to_dict() for item in items]
+
+    async def get_stats(
+        self,
+        db: AsyncSession,
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """获取卡片统计"""
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        return await iot_card_crud.get_stats(db, user_filter)
+
+    async def update_remark(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        remark: str,
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """更新卡片备注"""
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        card = await iot_card_crud.update_remark(db, card_id, remark, user_filter)
         if not card:
-            raise BusinessException(code=404, msg="物联网卡不存在")
-        
-        update_data = data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(card, key, value)
-        
-        await db.flush()
-        return await IoTCardService._to_card_info(db, card)
+            raise BusinessException(code=404, message="卡片不存在或无权操作")
+        return card.to_dict()
 
-    @staticmethod
-    async def activate_card(db: AsyncSession, data: IoTCardActivate) -> IoTCardInfo:
-        # 查询卡片
-        result = await db.execute(
-            select(IoTCardModel).where(
-                IoTCardModel.iccid == data.iccid,
-                IoTCardModel.is_deleted == 0
-            )
-        )
-        card = result.scalar_one_or_none()
-        if not card:
-            raise BusinessException(code=404, msg="物联网卡不存在")
-        
-        if card.status == CardStatus.ACTIVE:
-            raise BusinessException(code=400, msg="卡片已激活")
-        
-        # 查询套餐
-        pkg_result = await db.execute(
-            select(PackageModel).where(
-                PackageModel.id == data.package_id,
-                PackageModel.is_deleted == 0
-            )
-        )
-        package = pkg_result.scalar_one_or_none()
-        if not package:
-            raise BusinessException(code=404, msg="套餐不存在")
-        
-        # 激活卡片
-        now = datetime.now()
-        card.status = CardStatus.ACTIVE
-        card.package_id = package.id
-        card.package_start_date = now
-        card.package_end_date = now + timedelta(days=package.validity_days)
-        card.total_data = package.data_allowance * 1024  # MB 转 KB
-        card.used_data = 0
-        card.activate_date = now
-        
-        await db.flush()
-        return await IoTCardService._to_card_info(db, card)
-
-    @staticmethod
-    async def change_card_status(db: AsyncSession, card_id: int, status: CardStatus):
-        result = await db.execute(
-            select(IoTCardModel).where(
-                IoTCardModel.id == card_id,
-                IoTCardModel.is_deleted == 0
-            )
-        )
-        card = result.scalar_one_or_none()
-        if not card:
-            raise BusinessException(code=404, msg="物联网卡不存在")
-        
-        card.status = status
-        await db.flush()
-
-    @staticmethod
-    async def bind_device(db: AsyncSession, card_id: int, device_id: int):
-        # 查询卡片
-        card_result = await db.execute(
-            select(IoTCardModel).where(
-                IoTCardModel.id == card_id,
-                IoTCardModel.is_deleted == 0
-            )
-        )
-        card = card_result.scalar_one_or_none()
-        if not card:
-            raise BusinessException(code=404, msg="物联网卡不存在")
-        
-        # 查询设备
-        device_result = await db.execute(
-            select(DeviceModel).where(
-                DeviceModel.id == device_id,
-                DeviceModel.is_deleted == 0
-            )
-        )
-        device = device_result.scalar_one_or_none()
-        if not device:
-            raise BusinessException(code=404, msg="设备不存在")
-        
-        card.device_id = device_id
-        await db.flush()
-
-    @staticmethod
-    async def unbind_device(db: AsyncSession, card_id: int):
-        result = await db.execute(
-            select(IoTCardModel).where(
-                IoTCardModel.id == card_id,
-                IoTCardModel.is_deleted == 0
-            )
-        )
-        card = result.scalar_one_or_none()
-        if not card:
-            raise BusinessException(code=404, msg="物联网卡不存在")
-        
-        card.device_id = None
-        await db.flush()
-
-    @staticmethod
-    async def get_statistics(db: AsyncSession, current_user: UserInfo) -> Dict[str, Any]:
-        conditions = [IoTCardModel.is_deleted == 0]
-        if current_user.role != "admin":
-            conditions.append(IoTCardModel.user_id == current_user.id)
-        
-        # 总数
-        total_result = await db.execute(
-            select(func.count(IoTCardModel.id)).where(and_(*conditions))
-        )
-        total = total_result.scalar() or 0
-        
-        # 各状态数量
-        status_stats = {}
-        for status in CardStatus:
-            result = await db.execute(
-                select(func.count(IoTCardModel.id)).where(
-                    and_(*conditions, IoTCardModel.status == status)
-                )
-            )
-            status_stats[status.value] = result.scalar() or 0
-        
+    async def batch_update_remark(
+        self,
+        db: AsyncSession,
+        card_ids: List[int],
+        remark: str,
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """批量更新备注"""
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        count = await iot_card_crud.batch_update_remark(db, card_ids, remark, user_filter)
         return {
-            "total": total,
-            "status_stats": status_stats
+            "success": count,
+            "total": len(card_ids),
+            "failed": len(card_ids) - count
         }
 
-    @staticmethod
-    async def _to_card_info(db: AsyncSession, card: IoTCardModel) -> IoTCardInfo:
-        """转换为卡片信息模型"""
-        package_name = None
-        device_name = None
-        
-        if card.package_id:
-            pkg_result = await db.execute(
-                select(PackageModel).where(PackageModel.id == card.package_id)
-            )
-            package = pkg_result.scalar_one_or_none()
-            package_name = package.name if package else None
-        
-        if card.device_id:
-            dev_result = await db.execute(
-                select(DeviceModel).where(DeviceModel.id == card.device_id)
-            )
-            device = dev_result.scalar_one_or_none()
-            device_name = device.name if device else None
-        
-        return IoTCardInfo(
-            id=card.id,
-            iccid=card.iccid,
-            imsi=card.imsi,
-            msisdn=card.msisdn,
-            carrier=card.carrier,
-            status=card.status,
-            package_id=card.package_id,
-            package_name=package_name,
-            package_start_date=card.package_start_date,
-            package_end_date=card.package_end_date,
-            total_data=card.total_data,
-            used_data=card.used_data,
-            remaining_data=max(0, card.total_data - card.used_data),
-            device_id=card.device_id,
-            device_name=device_name,
-            user_id=card.user_id,
-            activate_date=card.activate_date,
-            remark=card.remark,
-            created_at=card.created_at
+    async def transfer_card(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        to_user_id: int,
+        current_user_id: int,
+        user_level: int,
+        remark: Optional[str] = None
+    ) -> dict:
+        """划拨卡片给子用户"""
+        # 用户只能划拨自己的卡给子用户
+        if user_level == UserLevel.SUB_USER.value:
+            raise BusinessException(code=403, message="子用户无权划拨卡片")
+
+        from_user_id = current_user_id
+        if user_level == UserLevel.SUPER_ADMIN.value:
+            # 超级管理员可以操作任意卡片，需要先获取卡片当前归属
+            card = await iot_card_crud.get_by_id(db, card_id, None)
+            if not card:
+                raise BusinessException(code=404, message="卡片不存在")
+            from_user_id = card.user_id
+
+        card = await iot_card_crud.transfer(
+            db=db,
+            card_id=card_id,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            operator_id=current_user_id,
+            remark=remark
         )
+
+        if not card:
+            raise BusinessException(code=404, message="卡片不存在或无权操作")
+
+        return card.to_dict()
+
+    async def batch_transfer(
+        self,
+        db: AsyncSession,
+        card_ids: List[int],
+        to_user_id: int,
+        current_user_id: int,
+        user_level: int,
+        remark: Optional[str] = None
+    ) -> dict:
+        """批量划拨"""
+        if user_level == UserLevel.SUB_USER.value:
+            raise BusinessException(code=403, message="子用户无权划拨卡片")
+
+        from_user_id = current_user_id
+
+        success, failed = await iot_card_crud.batch_transfer(
+            db=db,
+            card_ids=card_ids,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            operator_id=current_user_id,
+            remark=remark
+        )
+
+        return {
+            "success": success,
+            "failed": failed,
+            "total": len(card_ids)
+        }
+
+    async def export_cards(
+        self,
+        db: AsyncSession,
+        current_user_id: int,
+        user_level: int,
+        card_ids: Optional[List[int]] = None,
+        status: Optional[str] = None,
+        carrier: Optional[str] = None
+    ) -> List[dict]:
+        """导出卡片数据"""
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+
+        if card_ids:
+            # 导出指定卡片
+            items = await iot_card_crud.get_by_ids(db, card_ids, user_filter)
+        else:
+            # 导出全部 (根据筛选条件)
+            items, _ = await iot_card_crud.get_list(
+                db=db,
+                user_id=user_filter,
+                status=status,
+                carrier=carrier,
+                page=1,
+                page_size=10000  # 最多导出1万条
+            )
+
+        # 转换为导出格式
+        export_data = []
+        for item in items:
+            d = item.to_dict()
+            export_data.append({
+                "ICCID": d["iccid"],
+                "IMSI": d["imsi"] or "",
+                "号码": d["msisdn"] or "",
+                "运营商": d["carrier_name"] or "",
+                "套餐规格": d["spec_name"] or "",
+                "状态": d["status_name"] or "",
+                "已用流量(MB)": d["data_used"],
+                "总流量(MB)": d["data_total"],
+                "剩余流量(MB)": d["data_remain"],
+                "使用率(%)": d["data_usage_percent"],
+                "激活日期": d["activated_at"] or "",
+                "到期日期": d["expired_at"] or "",
+                "备注": d["remark"] or ""
+            })
+
+        return export_data
+
+    async def get_card_transfers(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        current_user_id: int,
+        user_level: int,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取卡片划拨记录"""
+        # 先验证卡片访问权限
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        card = await iot_card_crud.get_by_id(db, card_id, user_filter)
+        if not card:
+            raise BusinessException(code=404, message="卡片不存在或无权访问")
+
+        items, total = await card_transfer_crud.get_list(
+            db=db, card_id=card_id, page=page, page_size=page_size
+        )
+        return [item.to_dict() for item in items], total
+
+
+iot_card_service = IotCardService()

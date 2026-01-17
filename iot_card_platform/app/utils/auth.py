@@ -31,7 +31,7 @@ async def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme
 class RequireLevel:
     def __init__(self, allowed_levels: List[int]):
         self.allowed_levels = allowed_levels
-    
+
     async def __call__(self, current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
         if current_user.user_level not in self.allowed_levels:
             raise PermissionDeniedException()
