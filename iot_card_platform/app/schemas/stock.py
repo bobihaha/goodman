@@ -153,3 +153,101 @@ class StockSummary(BaseModel):
     out_cards: int = 0
     by_carrier: Optional[dict] = None
     by_supplier: Optional[dict] = None
+
+
+# ============ 入库记录 ============
+
+class StockInRecordInfo(BaseModel):
+    """入库记录详情"""
+    id: int
+    supplier_id: int
+    supplier_name: Optional[str] = None
+    package_id: int
+    package_name: Optional[str] = None
+    card_count: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    test_expire_date: Optional[str] = None
+    silent_expire_date: Optional[str] = None
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    remark: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StockInRecordDetail(StockInRecordInfo):
+    """入库记录详情（含卡片列表）"""
+    cards: Optional[List[dict]] = None
+
+
+# ============ 出库记录 ============
+
+class StockOutRecordInfo(BaseModel):
+    """出库记录详情"""
+    id: int
+    user_id: int
+    user_name: Optional[str] = None
+    sale_package_id: int
+    sale_package_name: Optional[str] = None
+    card_count: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    unit_price: Optional[float] = None
+    total_amount: Optional[float] = None
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    remark: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StockOutRecordDetail(StockOutRecordInfo):
+    """出库记录详情（含卡片列表）"""
+    cards: Optional[List[dict]] = None
+
+
+# ============ 卡片回收 ============
+
+class StockRecycleCreate(BaseModel):
+    """卡片回收请求"""
+    card_ids: List[int] = Field(..., min_length=1, description="卡片ID列表")
+    recycle_reason: str = Field(..., min_length=1, max_length=500, description="回收原因")
+    remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+
+class StockRecycleResult(BaseModel):
+    """回收结果"""
+    success: int
+    failed: int
+    record_id: int
+
+
+class StockRecycleRecordInfo(BaseModel):
+    """回收记录信息"""
+    id: int
+    card_count: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    recycle_reason: str
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    remark: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ============ 批量查询 ============
+
+class BatchQueryRequest(BaseModel):
+    """批量查询请求"""
+    iccids: List[str] = Field(..., min_length=1, max_length=10000, description="ICCID列表")
+
+
+class BatchQueryResult(BaseModel):
+    """批量查询结果"""
+    found: List[dict]
+    not_found: List[str]

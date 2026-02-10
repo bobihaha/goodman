@@ -57,7 +57,7 @@ class AuthService:
     async def login(cls, db: AsyncSession, request: LoginRequest, ip: Optional[str] = None, user_agent: Optional[str] = None) -> LoginResponse:
         user = await sys_user_crud.get_by_account(db, request.account)
         
-        login_log = SysLoginLogModel(account=request.account, login_type=LoginType.NORMAL, ip=ip, user_agent=user_agent)
+        login_log = SysLoginLogModel(account=request.account, login_type=LoginType.normal, ip=ip, user_agent=user_agent)
         
         if not user:
             login_log.is_success = 0
@@ -126,7 +126,7 @@ class AuthService:
         access_token = cls.create_access_token(token_data, expires_delta=timedelta(minutes=settings.super_login_expire_minutes))
         refresh_token = cls.create_refresh_token(token_data)
         
-        login_log = SysLoginLogModel(user_id=target_user.id, account=target_user.account, login_type=LoginType.SUPER, operator_id=operator.id, is_success=1, ip=ip, user_agent=user_agent)
+        login_log = SysLoginLogModel(user_id=target_user.id, account=target_user.account, login_type=LoginType.super_, operator_id=operator.id, is_success=1, ip=ip, user_agent=user_agent)
         db.add(login_log)
         
         return LoginResponse(

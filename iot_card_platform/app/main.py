@@ -4,7 +4,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse
+from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system, sync
 from app.config import settings
 from app.utils.logger import logger
 from app.utils.exceptions import BusinessException, business_exception_handler, global_exception_handler
@@ -22,8 +24,20 @@ app = FastAPI(
     description="IoT SIM Card Management Platform API - 三级多租户架构",
     version="1.0.0",
     debug=settings.debug,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None,  # 禁用默认的 docs
+    redoc_url="/redoc"
 )
+
+# 自定义 Swagger UI，使用国内 CDN
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - API文档",
+        swagger_js_url="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js",
+        swagger_css_url="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css",
+    )
 
 # 注册路由
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["认证管理"])
@@ -35,6 +49,7 @@ app.include_router(iot_card.router, prefix="/api/v1", tags=["卡片管理"])
 app.include_router(stock.router, prefix="/api/v1/stock", tags=["出入库管理"])
 app.include_router(pool.router, prefix="/api/v1/pools", tags=["流量池管理"])
 app.include_router(suspend.router, prefix="/api/v1/suspend", tags=["停卡策略"])
+app.include_router(sync.router, prefix="/api/v1/sync", tags=["数据同步"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["仪表盘"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["系统设置"])
 

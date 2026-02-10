@@ -87,10 +87,75 @@ CREATE TABLE `sys_login_logs` (
     `ip` VARCHAR(50) DEFAULT NULL COMMENT 'IP地址',
     `user_agent` VARCHAR(500) DEFAULT NULL COMMENT 'User-Agent',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `is_deleted` TINYINT NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
-    KEY `idx_user_id` (`user_id`)
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_account` (`account`),
+    KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='登录日志表';
+
+-- 操作日志表
+DROP TABLE IF EXISTS `sys_operation_logs`;
+CREATE TABLE `sys_operation_logs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '用户ID',
+    `user_name` VARCHAR(50) DEFAULT NULL COMMENT '用户名称',
+    `module` VARCHAR(50) NOT NULL COMMENT '操作模块',
+    `action` VARCHAR(50) NOT NULL COMMENT '操作动作',
+    `target_type` VARCHAR(50) DEFAULT NULL COMMENT '目标类型',
+    `target_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '目标ID',
+    `target_name` VARCHAR(100) DEFAULT NULL COMMENT '目标名称',
+    `detail` TEXT COMMENT '操作详情JSON',
+    `ip` VARCHAR(50) DEFAULT NULL COMMENT 'IP地址',
+    `is_success` TINYINT NOT NULL DEFAULT 1 COMMENT '是否成功',
+    `error_msg` VARCHAR(500) DEFAULT NULL COMMENT '错误信息',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_module` (`module`),
+    KEY `idx_action` (`action`),
+    KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
+
+-- 系统配置表
+DROP TABLE IF EXISTS `sys_configs`;
+CREATE TABLE `sys_configs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `config_key` VARCHAR(100) NOT NULL COMMENT '配置键',
+    `config_value` TEXT COMMENT '配置值',
+    `config_type` VARCHAR(20) NOT NULL DEFAULT 'string' COMMENT '配置类型: string/number/json/boolean',
+    `description` VARCHAR(200) DEFAULT NULL COMMENT '配置描述',
+    `is_public` TINYINT NOT NULL DEFAULT 0 COMMENT '是否公开: 0=否, 1=是',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_config_key` (`config_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统配置表';
+
+-- 通知模板表
+DROP TABLE IF EXISTS `sys_notify_templates`;
+CREATE TABLE `sys_notify_templates` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(50) NOT NULL COMMENT '模板编码',
+    `name` VARCHAR(100) NOT NULL COMMENT '模板名称',
+    `type` ENUM('sms', 'email', 'wechat', 'webhook') NOT NULL DEFAULT 'sms' COMMENT '通知类型',
+    `title` VARCHAR(200) DEFAULT NULL COMMENT '标题模板',
+    `content` TEXT NOT NULL COMMENT '内容模板',
+    `variables` JSON COMMENT '可用变量列表',
+    `is_enabled` TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+    `created_by` BIGINT UNSIGNED DEFAULT NULL COMMENT '创建人ID',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_code` (`code`),
+    KEY `idx_type` (`type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知模板表';
 
 -- ============================================
 -- 供应商与套餐管理模块
@@ -518,6 +583,72 @@ CREATE TABLE `alert_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='告警记录表';
 
 -- ============================================
+-- 数据同步管理模块
+-- ============================================
+
+-- 同步日志表
+DROP TABLE IF EXISTS `sync_logs`;
+CREATE TABLE `sync_logs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '日志ID',
+    `sync_no` VARCHAR(50) NOT NULL COMMENT '同步单号',
+    `sync_type` ENUM('usage', 'lifecycle', 'status', 'single_card') NOT NULL COMMENT '同步类型: usage=流量用量, lifecycle=生命周期, status=状态, single_card=单卡',
+    -- 同步范围
+    `supplier_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '供应商ID',
+    `card_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '卡片ID(单卡同步)',
+    `iccid` VARCHAR(30) DEFAULT NULL COMMENT 'ICCID(单卡同步)',
+    -- 同步统计
+    `total_count` INT NOT NULL DEFAULT 0 COMMENT '总数',
+    `success_count` INT NOT NULL DEFAULT 0 COMMENT '成功数',
+    `fail_count` INT NOT NULL DEFAULT 0 COMMENT '失败数',
+    -- 同步结果
+    `status` ENUM('pending', 'running', 'success', 'failed', 'partial') NOT NULL DEFAULT 'pending' COMMENT '状态',
+    `error_message` TEXT COMMENT '错误信息',
+    `sync_data` JSON COMMENT '同步数据详情',
+    -- 执行时间
+    `started_at` DATETIME DEFAULT NULL COMMENT '开始时间',
+    `finished_at` DATETIME DEFAULT NULL COMMENT '完成时间',
+    `duration` INT DEFAULT NULL COMMENT '耗时(秒)',
+    -- 操作人
+    `triggered_by` BIGINT UNSIGNED DEFAULT NULL COMMENT '触发人ID',
+    `trigger_type` VARCHAR(20) DEFAULT NULL COMMENT '触发方式: manual=手动, auto=自动',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_sync_no` (`sync_no`),
+    KEY `idx_sync_type` (`sync_type`),
+    KEY `idx_supplier_id` (`supplier_id`),
+    KEY `idx_card_id` (`card_id`),
+    KEY `idx_status` (`status`),
+    KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='同步日志表';
+
+-- 同步任务表 (定时任务配置)
+DROP TABLE IF EXISTS `sync_tasks`;
+CREATE TABLE `sync_tasks` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '任务ID',
+    `task_name` VARCHAR(100) NOT NULL COMMENT '任务名称',
+    `sync_type` ENUM('usage', 'lifecycle', 'status', 'single_card') NOT NULL COMMENT '同步类型',
+    -- 任务配置
+    `supplier_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '供应商ID(NULL=全部)',
+    `cron_expression` VARCHAR(100) DEFAULT NULL COMMENT 'Cron表达式',
+    -- 任务状态
+    `is_enabled` TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `last_run_at` DATETIME DEFAULT NULL COMMENT '上次运行时间',
+    `next_run_at` DATETIME DEFAULT NULL COMMENT '下次运行时间',
+    `last_status` ENUM('pending', 'running', 'success', 'failed', 'partial') DEFAULT NULL COMMENT '上次状态',
+    `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+    `created_by` BIGINT UNSIGNED DEFAULT NULL COMMENT '创建人ID',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '删除标记',
+    PRIMARY KEY (`id`),
+    KEY `idx_sync_type` (`sync_type`),
+    KEY `idx_is_enabled` (`is_enabled`),
+    KEY `idx_next_run_at` (`next_run_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='同步任务表';
+
+-- ============================================
 -- 初始化示例数据
 -- ============================================
 
@@ -573,5 +704,40 @@ INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `s
 ('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
 -- 年包卡
 ('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
 
 COMMIT;

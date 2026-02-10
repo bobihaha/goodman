@@ -45,7 +45,7 @@ class PoolService:
         """获取流量池详情"""
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
         return pool.to_dict()
 
     async def get_pools(
@@ -77,7 +77,7 @@ class PoolService:
         """更新流量池"""
         pool = await pool_crud.update(db, pool_id, **kwargs)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
         return pool.to_dict()
 
     async def delete_pool(self, db: AsyncSession, pool_id: int) -> bool:
@@ -85,10 +85,10 @@ class PoolService:
         # 检查池内是否还有卡片
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
 
         if pool.card_count > 0:
-            raise BusinessException(code=400, message=f"流量池内还有 {pool.card_count} 张卡片，请先移除")
+            raise BusinessException(code=400, msg=f"流量池内还有 {pool.card_count} 张卡片，请先移除")
 
         success = await pool_crud.delete(db, pool_id)
         return success
@@ -104,10 +104,10 @@ class PoolService:
         """添加卡片到流量池"""
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
 
         if pool.status.value != "enable":
-            raise BusinessException(code=400, message="流量池已停用")
+            raise BusinessException(code=400, msg="流量池已停用")
 
         success, failed, fail_details = await pool_card_crud.add_cards(
             db=db,
@@ -135,7 +135,7 @@ class PoolService:
         """从流量池移除卡片"""
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
 
         success, failed, fail_details = await pool_card_crud.remove_cards(
             db=db,
@@ -162,7 +162,7 @@ class PoolService:
         """获取流量池内卡片列表"""
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
 
         items, total = await pool_card_crud.get_pool_cards(
             db=db, pool_id=pool_id, page=page, page_size=page_size
@@ -173,7 +173,7 @@ class PoolService:
         """获取流量池用量统计"""
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
 
         # 先更新统计数据
         pool = await pool_crud.update_stats(db, pool_id)
@@ -217,7 +217,7 @@ class PoolService:
         """获取流量池操作日志"""
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
-            raise BusinessException(code=404, message="流量池不存在")
+            raise BusinessException(code=404, msg="流量池不存在")
 
         items, total = await pool_log_crud.get_logs(
             db=db, pool_id=pool_id, action=action, page=page, page_size=page_size

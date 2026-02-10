@@ -130,7 +130,7 @@ class AuthServiceEnhanced:
         # 记录登录日志
         login_log = SysLoginLogModel(
             account=request.account,
-            login_type=LoginType.NORMAL,
+            login_type=LoginType.normal,
             ip=ip,
             user_agent=user_agent
         )
@@ -264,7 +264,7 @@ class AuthServiceEnhanced:
         login_log = SysLoginLogModel(
             user_id=target_user.id,
             account=target_user.account,
-            login_type=LoginType.SUPER,
+            login_type=LoginType.super_,
             operator_id=operator.id,
             is_success=1,
             ip=ip,

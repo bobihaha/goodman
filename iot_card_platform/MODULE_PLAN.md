@@ -180,7 +180,8 @@ DELETE /api/v1/packages/sale/{id}         # 删除销售套餐
 - [x] 关联供应商 + 底层套餐
 - [x] 设置测试期截止日期 (可选，如: 26/1/31)
 - [x] 设置沉默期截止日期 (必填，如: 26/4/30)
-- [x] 生成采购批次
+- [x] Excel模板下载功能
+- [x] 格式校验和详细错误提示
 
 **出库操作**：
 - [x] 选择库存卡片
@@ -192,6 +193,15 @@ DELETE /api/v1/packages/sale/{id}         # 删除销售套餐
 **库存管理**：
 - [x] 库存统计 (按供应商/套餐/运营商)
 - [x] 出入库记录查询
+- [x] 批量查询功能 (最多10000个ICCID)
+- [x] 高级筛选和排序
+- [x] 导出功能 (Excel格式)
+
+**卡片回收**：
+- [x] 已出库卡片回收
+- [x] 回收原因记录
+- [x] 二次确认机制
+- [x] 回收记录查询
 
 **数据同步 (调用供应商API)**：
 - [ ] 批量同步流量使用情况 (单位: MB)
@@ -200,26 +210,30 @@ DELETE /api/v1/packages/sale/{id}         # 删除销售套餐
 
 **API 端点**：
 ```
-# 采购批次
-GET    /api/v1/batches                    # 批次列表
-POST   /api/v1/batches                    # 创建批次
-GET    /api/v1/batches/{id}               # 批次详情
-GET    /api/v1/batches/{id}/cards         # 批次下的卡片
-
 # 入库
-POST   /api/v1/stock/in                   # 批量入库 (导入卡片)
-GET    /api/v1/stock/in                   # 入库记录列表
-GET    /api/v1/stock/in/{id}              # 入库单详情
+POST   /api/v1/stock/in                   # 批量入库 (导入卡片) ✅
+GET    /api/v1/stock/in/records           # 入库记录列表 ✅
+GET    /api/v1/stock/in/records/{id}      # 入库单详情 ✅
+POST   /api/v1/stock/in/records/export    # 导出入库记录 ✅
 
 # 出库
-POST   /api/v1/stock/out                  # 创建出库单
-GET    /api/v1/stock/out                  # 出库记录列表
-GET    /api/v1/stock/out/{id}             # 出库单详情
-POST   /api/v1/stock/out/{id}/confirm     # 确认出库
+POST   /api/v1/stock/out                  # 批量出库 ✅
+GET    /api/v1/stock/out/records          # 出库记录列表 ✅
+GET    /api/v1/stock/out/records/{id}     # 出库单详情 ✅
+POST   /api/v1/stock/out/records/export   # 导出出库记录 ✅
 
-# 库存统计
-GET    /api/v1/stock/summary              # 库存统计
-GET    /api/v1/stock/inventory            # 库存卡片列表
+# 卡片回收
+POST   /api/v1/stock/recycle              # 卡片回收 ✅
+GET    /api/v1/stock/recycle/records      # 回收记录列表 ✅
+
+# 库存管理
+GET    /api/v1/stock/summary              # 库存统计 ✅
+GET    /api/v1/stock/inventory            # 库存卡片列表 ✅
+POST   /api/v1/stock/inventory/batch-query # 批量查询卡片 ✅
+POST   /api/v1/stock/inventory/export     # 导出库存数据 ✅
+
+# Excel模板
+GET    /api/v1/stock/import-template      # 下载Excel导入模板 ✅
 
 # 数据同步
 POST   /api/v1/sync/usage                 # 同步流量用量
@@ -227,6 +241,16 @@ POST   /api/v1/sync/lifecycle             # 同步生命周期日期
 POST   /api/v1/sync/cards/{iccid}         # 同步单卡信息
 GET    /api/v1/sync/logs                  # 同步日志
 ```
+
+**前端页面**：
+- ✅ `/stock/in` - 卡片入库页面
+- ✅ `/stock/out` - 卡片出库页面
+- ✅ `/stock/inventory` - 库存管理页面
+- ✅ `/stock/recycle` - 卡片回收页面
+- ✅ `/stock/records` - 出入库记录页面
+
+**开发文档**：
+- 📄 `STOCK_MODULE_SUMMARY.md` - 模块开发总结文档
 
 ---
 
@@ -447,23 +471,40 @@ GET    /api/v1/dashboard/activities       # 最近活动 ✅
 
 ---
 
-### 模块 9: 系统设置 ⚙️
+### 模块 9: 系统设置 ✅ 已完成
 
 **功能**：
-- [ ] 系统参数配置
-- [ ] 操作日志查询
-- [ ] 登录日志查询
-- [ ] 告警规则设置
-- [ ] 通知模板管理
+- [x] 系统参数配置
+- [x] 操作日志查询
+- [x] 登录日志查询
+- [x] 告警规则设置
+- [x] 通知模板管理
 
 **API 端点**：
 ```
-GET    /api/v1/system/config              # 获取系统配置
-PUT    /api/v1/system/config              # 更新系统配置
-GET    /api/v1/system/logs/operation      # 操作日志
-GET    /api/v1/system/logs/login          # 登录日志
-GET    /api/v1/system/alerts/rules        # 告警规则
-PUT    /api/v1/system/alerts/rules        # 更新告警规则
+# 系统配置
+GET    /api/v1/system/configs             # 获取系统配置列表 ✅
+GET    /api/v1/system/configs/public      # 获取公开配置 ✅
+GET    /api/v1/system/configs/{key}       # 获取单个配置 ✅
+POST   /api/v1/system/configs             # 创建配置 ✅
+PUT    /api/v1/system/configs/{key}       # 更新配置 ✅
+PUT    /api/v1/system/configs             # 批量更新配置 ✅
+DELETE /api/v1/system/configs/{key}       # 删除配置 ✅
+
+# 日志查询
+GET    /api/v1/system/logs/login          # 登录日志 ✅
+GET    /api/v1/system/logs/operation      # 操作日志 ✅
+
+# 告警规则
+GET    /api/v1/system/alerts/rules        # 获取告警规则 ✅
+PUT    /api/v1/system/alerts/rules        # 更新告警规则 ✅
+
+# 通知模板
+GET    /api/v1/system/notify/templates           # 模板列表 ✅
+GET    /api/v1/system/notify/templates/{id}      # 模板详情 ✅
+POST   /api/v1/system/notify/templates           # 创建模板 ✅
+PUT    /api/v1/system/notify/templates/{id}      # 更新模板 ✅
+DELETE /api/v1/system/notify/templates/{id}      # 删除模板 ✅
 ```
 
 ---
@@ -539,10 +580,9 @@ CREATE TABLE `iot_cards` (
     KEY `idx_pool_id` (`pool_id`)
 ) COMMENT='物联网卡表';
 
--- 采购批次表
-CREATE TABLE `purchase_batches` (
+-- 入库记录表
+CREATE TABLE `stock_in_records` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `batch_no` VARCHAR(50) NOT NULL COMMENT '批次号',
     `supplier_id` BIGINT UNSIGNED NOT NULL COMMENT '供应商ID',
     `package_id` BIGINT UNSIGNED NOT NULL COMMENT '底层套餐ID',
     
@@ -551,17 +591,57 @@ CREATE TABLE `purchase_batches` (
     `silent_expire_date` DATE NOT NULL COMMENT '沉默期到期日',
     
     `card_count` INT NOT NULL DEFAULT 0 COMMENT '卡片数量',
-    `purchase_date` DATE NOT NULL COMMENT '采购日期',
+    `success_count` INT NOT NULL DEFAULT 0 COMMENT '成功数量',
+    `failed_count` INT NOT NULL DEFAULT 0 COMMENT '失败数量',
     `remark` VARCHAR(500) DEFAULT NULL,
-    `status` ENUM('pending', 'stocked', 'completed') DEFAULT 'pending',
-    `created_by` BIGINT UNSIGNED DEFAULT NULL,
+    `operator_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '操作人ID',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `is_deleted` TINYINT DEFAULT 0,
     
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_batch_no` (`batch_no`)
-) COMMENT='采购批次表';
+    KEY `idx_supplier_id` (`supplier_id`),
+    KEY `idx_created_at` (`created_at`)
+) COMMENT='入库记录表';
+
+-- 出库记录表
+CREATE TABLE `stock_out_records` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '目标用户ID',
+    `sale_package_id` BIGINT UNSIGNED NOT NULL COMMENT '销售套餐ID',
+    
+    `card_count` INT NOT NULL DEFAULT 0 COMMENT '卡片数量',
+    `success_count` INT NOT NULL DEFAULT 0 COMMENT '成功数量',
+    `failed_count` INT NOT NULL DEFAULT 0 COMMENT '失败数量',
+    `unit_price` DECIMAL(10,2) NOT NULL COMMENT '单价',
+    `total_amount` DECIMAL(10,2) NOT NULL COMMENT '总金额',
+    `remark` VARCHAR(500) DEFAULT NULL,
+    `operator_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '操作人ID',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` TINYINT DEFAULT 0,
+    
+    PRIMARY KEY (`id`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_created_at` (`created_at`)
+) COMMENT='出库记录表';
+
+-- 回收记录表
+CREATE TABLE `stock_recycle_records` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `card_count` INT NOT NULL DEFAULT 0 COMMENT '回收数量',
+    `success_count` INT NOT NULL DEFAULT 0 COMMENT '成功数量',
+    `failed_count` INT NOT NULL DEFAULT 0 COMMENT '失败数量',
+    `recycle_reason` VARCHAR(500) NOT NULL COMMENT '回收原因',
+    `remark` VARCHAR(500) DEFAULT NULL,
+    `operator_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '操作人ID',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` TINYINT DEFAULT 0,
+    
+    PRIMARY KEY (`id`),
+    KEY `idx_created_at` (`created_at`)
+) COMMENT='回收记录表';
 
 -- 流量池表 ✅ 已实现
 CREATE TABLE `traffic_pools` (
@@ -699,13 +779,14 @@ iot_card_platform/
 |------|------|----------|------|
 | Phase 1 | 多租户 + 用户权限 | 2-3天 | ✅ 已完成 |
 | Phase 2 | 套餐管理 | 1-2天 | ✅ 已完成 |
-| Phase 3 | 出入库管理 | 2-3天 | ✅ 已完成 |
+| Phase 3 | 出入库管理 (前端) | 2-3天 | ✅ 已完成 |
+| Phase 3.1 | 出入库管理 (后端数据库) | 2-3天 | ✅ 已完成 |
 | Phase 4 | 卡片管理 | 2-3天 | ✅ 已完成 |
 | Phase 5 | 流量池管理 | 1-2天 | ✅ 已完成 |
 | Phase 6 | 停卡策略 | 1天 | ✅ 已完成 |
 | Phase 7 | 供应商对接 | 3-5天 | 🔄 部分完成 |
 | Phase 8 | 仪表盘 | 1-2天 | ✅ 已完成 |
-| Phase 9 | 系统设置 | 1天 | 📋 待开发 |
+| Phase 9 | 系统设置 | 1天 | ✅ 已完成 |
 
 ---
 

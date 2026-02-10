@@ -2,7 +2,7 @@
 物联网卡管理 API
 用户/代理商侧：查看、搜索、划拨、备注、导出
 """
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
@@ -105,6 +105,29 @@ async def batch_transfer_cards(
         remark=request.remark
     )
     return ResponseModel(data=result, msg=f"成功划拨 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
 
 
 @router.post("/export", summary="导出卡片数据", response_model=ResponseModel)

@@ -1,0 +1,50 @@
+/**
+ * 全局样式入口
+ */
+
+@import './variables.scss';
+@import './reset.scss';
+
+// 全局通用样式
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// 页面容器
+.page-container {
+  padding: $spacing-lg;
+  background: $bg-color;
+  min-height: 100%;
+}
+
+.page-card {
+  background: $bg-white;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+  box-shadow: $box-shadow-sm;
+}
+
+
+

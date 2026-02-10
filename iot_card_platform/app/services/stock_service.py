@@ -4,7 +4,10 @@
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.crud.stock_crud import batch_crud, stock_in_crud, stock_out_crud, stock_summary_crud
+from app.crud.stock_crud import (
+    batch_crud, stock_in_crud, stock_out_crud, stock_summary_crud,
+    stock_in_record_crud, stock_out_record_crud, stock_recycle_crud
+)
 from app.db.models.stock import PurchaseBatchModel
 from app.db.models.package import SupplierPackageModel
 from app.db.models.supplier import SupplierModel
@@ -37,7 +40,7 @@ class StockService:
         pkg_result = await db.execute(pkg_query)
         package = pkg_result.scalar_one_or_none()
         if not package:
-            raise BusinessException(code=404, message="底层套餐不存在")
+            raise BusinessException(code=404, msg="底层套餐不存在")
 
         batch = await batch_crud.create(
             db=db,
@@ -95,7 +98,7 @@ class StockService:
         """获取批次详情"""
         batch = await batch_crud.get_by_id(db, batch_id)
         if not batch:
-            raise BusinessException(code=404, message="批次不存在")
+            raise BusinessException(code=404, msg="批次不存在")
         return batch.to_dict()
 
     # ============ 入库 ============
@@ -125,7 +128,7 @@ class StockService:
                 "fail_details": fail_details if fail_details else None
             }
         except ValueError as e:
-            raise BusinessException(code=400, message=str(e))
+            raise BusinessException(code=400, msg=str(e))
 
     async def get_stock_in_records(
         self,
@@ -191,6 +194,9 @@ class StockService:
         db: AsyncSession,
         supplier_id: Optional[int] = None,
         carrier: Optional[str] = None,
+        package_id: Optional[int] = None,
+        sort_by: str = "stock_in_at",
+        sort_order: str = "desc",
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[dict], int]:
@@ -199,10 +205,198 @@ class StockService:
             db=db,
             supplier_id=supplier_id,
             carrier=carrier,
+            package_id=package_id,
+            sort_by=sort_by,
+            sort_order=sort_order,
             page=page,
             page_size=page_size
         )
-        return [item.to_dict() for item in items], total
+        
+        # 关联供应商名称和批次号
+        result = []
+        for item in items:
+            data = item.to_dict()
+            
+            # 获取供应商名称
+            if item.supplier_id:
+                supplier_query = select(SupplierModel.name).where(
+                    SupplierModel.id == item.supplier_id,
+                    SupplierModel.is_deleted == 0
+                )
+                supplier_result = await db.execute(supplier_query)
+                data["supplier_name"] = supplier_result.scalar_one_or_none()
+            else:
+                data["supplier_name"] = None
+            
+            # 获取批次号
+            if item.batch_id:
+                batch_query = select(PurchaseBatchModel.batch_no).where(
+                    PurchaseBatchModel.id == item.batch_id,
+                    PurchaseBatchModel.is_deleted == 0
+                )
+                batch_result = await db.execute(batch_query)
+                data["batch_no"] = batch_result.scalar_one_or_none()
+            else:
+                data["batch_no"] = None
+            
+            result.append(data)
+        
+        return result, total
+
+    # ============ 入库记录 ============
+
+    async def get_in_records_list(
+        self,
+        db: AsyncSession,
+        supplier_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取入库记录列表"""
+        items, total = await stock_in_record_crud.get_records_list(
+            db=db,
+            supplier_id=supplier_id,
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+            page_size=page_size
+        )
+        return items, total
+
+    async def get_in_record_detail(self, db: AsyncSession, record_id: int) -> dict:
+        """获取入库记录详情"""
+        detail = await stock_in_record_crud.get_record_detail(db, record_id)
+        if not detail:
+            raise BusinessException(code=404, msg="入库记录不存在")
+        return detail
+
+    async def export_in_records(
+        self,
+        db: AsyncSession,
+        supplier_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> List[dict]:
+        """导出入库记录"""
+        return await stock_in_record_crud.export_records(
+            db=db,
+            supplier_id=supplier_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+    # ============ 出库记录 ============
+
+    async def get_out_records_list(
+        self,
+        db: AsyncSession,
+        user_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取出库记录列表"""
+        items, total = await stock_out_record_crud.get_records_list(
+            db=db,
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+            page_size=page_size
+        )
+        return items, total
+
+    async def get_out_record_detail(self, db: AsyncSession, record_id: int) -> dict:
+        """获取出库记录详情"""
+        detail = await stock_out_record_crud.get_record_detail(db, record_id)
+        if not detail:
+            raise BusinessException(code=404, msg="出库记录不存在")
+        return detail
+
+    async def export_out_records(
+        self,
+        db: AsyncSession,
+        user_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> List[dict]:
+        """导出出库记录"""
+        return await stock_out_record_crud.export_records(
+            db=db,
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+    # ============ 卡片回收 ============
+
+    async def recycle_cards(
+        self,
+        db: AsyncSession,
+        card_ids: List[int],
+        recycle_reason: str,
+        operator_id: int,
+        remark: Optional[str] = None
+    ) -> dict:
+        """卡片回收"""
+        result = await stock_recycle_crud.recycle_cards(
+            db=db,
+            card_ids=card_ids,
+            recycle_reason=recycle_reason,
+            operator_id=operator_id,
+            remark=remark
+        )
+        return result
+
+    async def get_recycle_records(
+        self,
+        db: AsyncSession,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        """获取回收记录列表"""
+        items, total = await stock_recycle_crud.get_records_list(
+            db=db,
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+            page_size=page_size
+        )
+        return items, total
+
+    # ============ 批量查询 ============
+
+    async def batch_query_cards(
+        self,
+        db: AsyncSession,
+        iccids: List[str]
+    ) -> dict:
+        """批量查询卡片"""
+        return await stock_summary_crud.batch_query_cards(db, iccids)
+
+    async def export_inventory(
+        self,
+        db: AsyncSession,
+        supplier_id: Optional[int] = None,
+        carrier: Optional[str] = None,
+        package_id: Optional[int] = None,
+        sort_by: str = "stock_in_at",
+        sort_order: str = "desc"
+    ) -> List[dict]:
+        """导出库存数据"""
+        return await stock_summary_crud.export_inventory(
+            db=db,
+            supplier_id=supplier_id,
+            carrier=carrier,
+            package_id=package_id,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
 
 
 stock_service = StockService()

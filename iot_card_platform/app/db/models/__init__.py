@@ -5,8 +5,8 @@ from app.db.models.base import Base, BaseModel
 from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
 from app.db.models.sys_menu import SysMenuModel, SysUserMenuModel, MenuType, MenuStatus
 from app.db.models.sys_log import (
-    SysLoginLogModel, SysOperationLogModel, SysConfigModel,
-    LoginType, LOGIN_TYPE_NAMES
+    SysLoginLogModel, SysOperationLogModel, SysConfigModel, SysNotifyTemplateModel,
+    LoginType, NotifyType, LOGIN_TYPE_NAMES, NOTIFY_TYPE_NAMES
 )
 from app.db.models.supplier import SupplierModel, SupplierType, SupplierStatus
 from app.db.models.package import (
@@ -35,8 +35,8 @@ __all__ = [
     "Base", "BaseModel",
     "SysUserModel", "UserLevel", "UserStatus",
     "SysMenuModel", "SysUserMenuModel", "MenuType", "MenuStatus",
-    "SysLoginLogModel", "SysOperationLogModel", "SysConfigModel",
-    "LoginType", "LOGIN_TYPE_NAMES",
+    "SysLoginLogModel", "SysOperationLogModel", "SysConfigModel", "SysNotifyTemplateModel",
+    "LoginType", "NotifyType", "LOGIN_TYPE_NAMES", "NOTIFY_TYPE_NAMES",
     "SupplierModel", "SupplierType", "SupplierStatus",
     "SupplierPackageModel", "SalePackageModel",
     "CarrierType", "PeriodType", "PackageStatus",

@@ -12,9 +12,25 @@ class LoginType(str, PyEnum):
     super_ = "super"
 
 
+class NotifyType(str, PyEnum):
+    """通知类型"""
+    sms = "sms"
+    email = "email"
+    wechat = "wechat"
+    webhook = "webhook"
+
+
 LOGIN_TYPE_NAMES = {
     "normal": "普通登录",
     "super_": "超级登录"
+}
+
+
+NOTIFY_TYPE_NAMES = {
+    "sms": "短信",
+    "email": "邮件",
+    "wechat": "微信",
+    "webhook": "Webhook"
 }
 
 
@@ -24,7 +40,7 @@ class SysLoginLogModel(BaseModel):
 
     user_id = Column(BigInteger, nullable=True, index=True, comment="用户ID")
     account = Column(String(50), nullable=True, index=True, comment="登录账户")
-    login_type = Column(Enum(LoginType), default=LoginType.NORMAL, comment="登录类型")
+    login_type = Column(Enum(LoginType), default=LoginType.normal, comment="登录类型")
     operator_id = Column(BigInteger, nullable=True, comment="操作人ID")
     is_success = Column(SmallInteger, default=1, comment="是否成功")
     fail_reason = Column(String(200), nullable=True, comment="失败原因")
@@ -119,3 +135,36 @@ class SysConfigModel(BaseModel):
             except:
                 return {}
         return self.config_value
+
+
+class SysNotifyTemplateModel(BaseModel):
+    """通知模板"""
+    __tablename__ = "sys_notify_templates"
+
+    code = Column(String(50), nullable=False, unique=True, index=True, comment="模板编码")
+    name = Column(String(100), nullable=False, comment="模板名称")
+    type = Column(Enum(NotifyType), nullable=False, default=NotifyType.sms, comment="通知类型")
+    title = Column(String(200), nullable=True, comment="标题模板")
+    content = Column(Text, nullable=False, comment="内容模板")
+    variables = Column(JSON, nullable=True, comment="可用变量列表")
+    is_enabled = Column(SmallInteger, default=1, comment="是否启用")
+    remark = Column(String(500), nullable=True, comment="备注")
+    created_by = Column(BigInteger, nullable=True, comment="创建人ID")
+
+    def to_dict(self):
+        import json
+        return {
+            "id": self.id,
+            "code": self.code,
+            "name": self.name,
+            "type": self.type.value if self.type else None,
+            "type_name": NOTIFY_TYPE_NAMES.get(self.type.value, "") if self.type else "",
+            "title": self.title,
+            "content": self.content,
+            "variables": self.variables if isinstance(self.variables, list) else json.loads(self.variables) if self.variables else [],
+            "is_enabled": self.is_enabled == 1,
+            "remark": self.remark,
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

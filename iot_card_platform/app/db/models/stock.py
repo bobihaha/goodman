@@ -102,8 +102,8 @@ class PurchaseBatchModel(BaseModel):
 
 
 class StockInRecordModel(BaseModel):
-    """入库记录模型"""
-    __tablename__ = "stock_in_records"
+    """入库记录模型（旧版-批次入库）"""
+    __tablename__ = "stock_in_records_old_backup"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="记录ID")
     record_no = Column(String(50), nullable=False, unique=True, comment="入库单号")
@@ -141,8 +141,8 @@ class StockInRecordModel(BaseModel):
 
 
 class StockOutRecordModel(BaseModel):
-    """出库记录模型"""
-    __tablename__ = "stock_out_records"
+    """出库记录模型（旧版-批次出库）"""
+    __tablename__ = "stock_out_records_old_backup"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="记录ID")
     record_no = Column(String(50), nullable=False, unique=True, comment="出库单号")
@@ -175,3 +175,60 @@ class StockOutRecordModel(BaseModel):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# ============ 新增模型 ============
+
+class StockRecycleRecordModel(BaseModel):
+    """回收记录模型"""
+    __tablename__ = "stock_recycle_records"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    card_count = Column(Integer, default=0, comment="回收数量")
+    success_count = Column(Integer, default=0, comment="成功数量")
+    failed_count = Column(Integer, default=0, comment="失败数量")
+    recycle_reason = Column(String(500), nullable=False, comment="回收原因")
+    remark = Column(String(500), nullable=True, comment="备注")
+    operator_id = Column(BigInteger, nullable=True, comment="操作人ID")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "card_count": self.card_count,
+            "success_count": self.success_count,
+            "failed_count": self.failed_count,
+            "recycle_reason": self.recycle_reason,
+            "remark": self.remark,
+            "operator_id": self.operator_id,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class StockInRecordCardModel(BaseModel):
+    """入库记录卡片关联模型"""
+    __tablename__ = "stock_in_record_cards"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    record_id = Column(BigInteger, nullable=False, index=True, comment="入库记录ID")
+    card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
+    iccid = Column(String(30), nullable=False, comment="ICCID")
+
+
+class StockOutRecordCardModel(BaseModel):
+    """出库记录卡片关联模型"""
+    __tablename__ = "stock_out_record_cards"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    record_id = Column(BigInteger, nullable=False, index=True, comment="出库记录ID")
+    card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
+    iccid = Column(String(30), nullable=False, comment="ICCID")
+
+
+class StockRecycleRecordCardModel(BaseModel):
+    """回收记录卡片关联模型"""
+    __tablename__ = "stock_recycle_record_cards"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    record_id = Column(BigInteger, nullable=False, index=True, comment="回收记录ID")
+    card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
+    iccid = Column(String(30), nullable=False, comment="ICCID")

@@ -14,7 +14,11 @@ from app.schemas.stock import (
     BatchCreate, BatchInfo,
     StockInCreate, StockInInfo, StockInResult,
     StockOutCreate, StockOutInfo, StockOutResult,
-    StockSummary
+    StockSummary,
+    StockInRecordInfo, StockInRecordDetail,
+    StockOutRecordInfo, StockOutRecordDetail,
+    StockRecycleCreate, StockRecycleResult, StockRecycleRecordInfo,
+    BatchQueryRequest, BatchQueryResult
 )
 
 router = APIRouter(tags=["出入库管理"])
@@ -172,6 +176,9 @@ async def get_stock_summary(
 async def get_inventory(
     supplier_id: Optional[int] = Query(None, description="供应商ID"),
     carrier: Optional[str] = Query(None, description="运营商"),
+    package_id: Optional[int] = Query(None, description="套餐ID"),
+    sort_by: Optional[str] = Query("stock_in_at", description="排序字段"),
+    sort_order: Optional[str] = Query("desc", description="排序方式: asc/desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -179,6 +186,220 @@ async def get_inventory(
 ):
     """获取库存卡片列表 (未出库的卡)"""
     items, total = await stock_service.get_inventory(
-        db=db, supplier_id=supplier_id, carrier=carrier, page=page, page_size=page_size
+        db=db, 
+        supplier_id=supplier_id, 
+        carrier=carrier,
+        package_id=package_id,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page, 
+        page_size=page_size
     )
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+
+# ============ 入库记录 ============
+
+@router.get("/in/records", summary="获取入库记录列表", response_model=ResponseModel)
+async def get_stock_in_records_list(
+    supplier_id: Optional[int] = Query(None, description="供应商ID"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """获取入库记录列表"""
+    items, total = await stock_service.get_in_records_list(
+        db=db,
+        supplier_id=supplier_id,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+
+@router.get("/in/records/{record_id}", summary="获取入库记录详情", response_model=ResponseModel)
+async def get_stock_in_record_detail(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """获取入库记录详情（含卡片列表）"""
+    detail = await stock_service.get_in_record_detail(db, record_id)
+    return ResponseModel(data=detail)
+
+
+@router.post("/in/records/export", summary="导出入库记录", response_model=ResponseModel)
+async def export_stock_in_records(
+    supplier_id: Optional[int] = Body(None, description="供应商ID"),
+    start_date: Optional[str] = Body(None, description="开始日期"),
+    end_date: Optional[str] = Body(None, description="结束日期"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """导出入库记录（返回JSON数据，前端用xlsx生成Excel）"""
+    data = await stock_service.export_in_records(
+        db=db,
+        supplier_id=supplier_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+    return ResponseModel(data=data, msg="导出成功")
+
+
+# ============ 出库记录 ============
+
+@router.get("/out/records", summary="获取出库记录列表", response_model=ResponseModel)
+async def get_stock_out_records_list(
+    user_id: Optional[int] = Query(None, description="目标用户ID"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """获取出库记录列表"""
+    items, total = await stock_service.get_out_records_list(
+        db=db,
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+
+@router.get("/out/records/{record_id}", summary="获取出库记录详情", response_model=ResponseModel)
+async def get_stock_out_record_detail(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """获取出库记录详情（含卡片列表）"""
+    detail = await stock_service.get_out_record_detail(db, record_id)
+    return ResponseModel(data=detail)
+
+
+@router.post("/out/records/export", summary="导出出库记录", response_model=ResponseModel)
+async def export_stock_out_records(
+    user_id: Optional[int] = Body(None, description="目标用户ID"),
+    start_date: Optional[str] = Body(None, description="开始日期"),
+    end_date: Optional[str] = Body(None, description="结束日期"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """导出出库记录（返回JSON数据，前端用xlsx生成Excel）"""
+    data = await stock_service.export_out_records(
+        db=db,
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+    return ResponseModel(data=data, msg="导出成功")
+
+
+# ============ 卡片回收 ============
+
+@router.post("/recycle", summary="卡片回收", response_model=ResponseModel)
+async def recycle_cards(
+    request: StockRecycleCreate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """
+    卡片回收 (仅超级管理员)
+    
+    - 将已出库的卡片回收到库存
+    - 回收后状态恢复为"库存"
+    - 记录回收原因
+    """
+    result = await stock_service.recycle_cards(
+        db=db,
+        card_ids=request.card_ids,
+        recycle_reason=request.recycle_reason,
+        operator_id=current_user.id,
+        remark=request.remark
+    )
+    return ResponseModel(data=result, msg=f"成功回收 {result['success']} 张卡片")
+
+
+@router.get("/recycle/records", summary="获取回收记录列表", response_model=ResponseModel)
+async def get_recycle_records(
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """获取回收记录列表"""
+    items, total = await stock_service.get_recycle_records(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+
+# ============ 批量查询 ============
+
+@router.post("/inventory/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    request: BatchQueryRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    result = await stock_service.batch_query_cards(db, request.iccids)
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/inventory/export", summary="导出库存数据", response_model=ResponseModel)
+async def export_inventory(
+    supplier_id: Optional[int] = Body(None, description="供应商ID"),
+    carrier: Optional[str] = Body(None, description="运营商"),
+    package_id: Optional[int] = Body(None, description="套餐ID"),
+    sort_by: Optional[str] = Body("stock_in_at", description="排序字段"),
+    sort_order: Optional[str] = Body("desc", description="排序方式"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """导出库存数据（返回JSON数据，前端用xlsx生成Excel）"""
+    data = await stock_service.export_inventory(
+        db=db,
+        supplier_id=supplier_id,
+        carrier=carrier,
+        package_id=package_id,
+        sort_by=sort_by,
+        sort_order=sort_order
+    )
+    return ResponseModel(data=data, msg="导出成功")
+
+
+@router.get("/import-template", summary="下载Excel导入模板")
+async def download_import_template():
+    """
+    下载Excel导入模板
+    
+    返回模板数据，前端使用xlsx库生成Excel文件
+    """
+    template_data = [
+        ["ICCID", "IMSI", "电话号码"],
+        ["89860123456789012345", "460012345678901", "13800138000"],
+        ["89860123456789012346", "460012345678902", "13800138001"]
+    ]
+    return ResponseModel(data=template_data, msg="模板数据获取成功")

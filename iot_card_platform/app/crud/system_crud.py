@@ -7,7 +7,7 @@ from sqlalchemy.sql import func
 from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime
 
-from app.db.models.sys_log import SysLoginLogModel, SysOperationLogModel, SysConfigModel
+from app.db.models.sys_log import SysLoginLogModel, SysOperationLogModel, SysConfigModel, SysNotifyTemplateModel
 
 
 class SysConfigCRUD:
@@ -303,3 +303,153 @@ class SysOperationLogCRUD:
         logs = result.scalars().all()
 
         return list(logs), total
+
+
+class SysNotifyTemplateCRUD:
+    """通知模板 CRUD"""
+
+    @staticmethod
+    async def create(
+        db: AsyncSession,
+        code: str,
+        name: str,
+        content: str,
+        type: str = "sms",
+        title: Optional[str] = None,
+        variables: Optional[list] = None,
+        is_enabled: bool = True,
+        remark: Optional[str] = None,
+        created_by: Optional[int] = None
+    ) -> SysNotifyTemplateModel:
+        """创建通知模板"""
+        import json
+        from app.db.models.sys_log import NotifyType
+        
+        template = SysNotifyTemplateModel(
+            code=code,
+            name=name,
+            type=NotifyType(type),
+            title=title,
+            content=content,
+            variables=json.dumps(variables) if variables else None,
+            is_enabled=1 if is_enabled else 0,
+            remark=remark,
+            created_by=created_by
+        )
+        db.add(template)
+        await db.commit()
+        await db.refresh(template)
+        return template
+
+    @staticmethod
+    async def get_by_id(db: AsyncSession, template_id: int) -> Optional[SysNotifyTemplateModel]:
+        """根据ID获取模板"""
+        result = await db.execute(
+            select(SysNotifyTemplateModel).where(
+                SysNotifyTemplateModel.id == template_id,
+                SysNotifyTemplateModel.is_deleted == 0
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_code(db: AsyncSession, code: str) -> Optional[SysNotifyTemplateModel]:
+        """根据编码获取模板"""
+        result = await db.execute(
+            select(SysNotifyTemplateModel).where(
+                SysNotifyTemplateModel.code == code,
+                SysNotifyTemplateModel.is_deleted == 0
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_list(
+        db: AsyncSession,
+        type: Optional[str] = None,
+        is_enabled: Optional[bool] = None,
+        keyword: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[SysNotifyTemplateModel], int]:
+        """获取模板列表"""
+        from app.db.models.sys_log import NotifyType
+        
+        query = select(SysNotifyTemplateModel).where(SysNotifyTemplateModel.is_deleted == 0)
+        count_query = select(func.count(SysNotifyTemplateModel.id)).where(SysNotifyTemplateModel.is_deleted == 0)
+
+        if type:
+            query = query.where(SysNotifyTemplateModel.type == NotifyType(type))
+            count_query = count_query.where(SysNotifyTemplateModel.type == NotifyType(type))
+
+        if is_enabled is not None:
+            query = query.where(SysNotifyTemplateModel.is_enabled == (1 if is_enabled else 0))
+            count_query = count_query.where(SysNotifyTemplateModel.is_enabled == (1 if is_enabled else 0))
+
+        if keyword:
+            query = query.where(
+                (SysNotifyTemplateModel.name.like(f"%{keyword}%")) |
+                (SysNotifyTemplateModel.code.like(f"%{keyword}%"))
+            )
+            count_query = count_query.where(
+                (SysNotifyTemplateModel.name.like(f"%{keyword}%")) |
+                (SysNotifyTemplateModel.code.like(f"%{keyword}%"))
+            )
+
+        # 总数
+        count_result = await db.execute(count_query)
+        total = count_result.scalar()
+
+        # 分页
+        query = query.order_by(SysNotifyTemplateModel.id)
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        result = await db.execute(query)
+        templates = result.scalars().all()
+
+        return list(templates), total
+
+    @staticmethod
+    async def update(
+        db: AsyncSession,
+        template_id: int,
+        name: Optional[str] = None,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        variables: Optional[list] = None,
+        is_enabled: Optional[bool] = None,
+        remark: Optional[str] = None
+    ) -> Optional[SysNotifyTemplateModel]:
+        """更新模板"""
+        import json
+        
+        template = await SysNotifyTemplateCRUD.get_by_id(db, template_id)
+        if not template:
+            return None
+
+        if name is not None:
+            template.name = name
+        if title is not None:
+            template.title = title
+        if content is not None:
+            template.content = content
+        if variables is not None:
+            template.variables = json.dumps(variables)
+        if is_enabled is not None:
+            template.is_enabled = 1 if is_enabled else 0
+        if remark is not None:
+            template.remark = remark
+
+        await db.commit()
+        await db.refresh(template)
+        return template
+
+    @staticmethod
+    async def delete(db: AsyncSession, template_id: int) -> bool:
+        """删除模板"""
+        template = await SysNotifyTemplateCRUD.get_by_id(db, template_id)
+        if not template:
+            return False
+        template.is_deleted = 1
+        await db.commit()
+        return True

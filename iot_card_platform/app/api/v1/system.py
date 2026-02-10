@@ -9,9 +9,13 @@ from datetime import datetime
 from app.db.database import get_db
 from app.utils.auth import get_current_user, require_super_admin
 from app.schemas.common import ResponseModel, PageResponseModel
-from app.schemas.system import ConfigCreate, ConfigUpdate, ConfigBatchUpdate
+from app.schemas.system import (
+    ConfigCreate, ConfigUpdate, ConfigBatchUpdate,
+    AlertRulesUpdate, NotifyTemplateCreate, NotifyTemplateUpdate
+)
 from app.services.system_service import (
-    SystemConfigService, LoginLogService, OperationLogService
+    SystemConfigService, LoginLogService, OperationLogService,
+    AlertRulesService, NotifyTemplateService
 )
 
 router = APIRouter()
@@ -181,3 +185,111 @@ async def get_operation_logs(
         page=page,
         page_size=page_size
     )
+
+
+# ============ 告警规则 ============
+
+@router.get("/alerts/rules", summary="获取告警规则")
+async def get_alert_rules(
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """获取告警规则配置 (仅管理员)"""
+    rules = await AlertRulesService.get_rules(db)
+    return ResponseModel(data=rules)
+
+
+@router.put("/alerts/rules", summary="更新告警规则")
+async def update_alert_rules(
+    data: AlertRulesUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """更新告警规则配置 (仅管理员)"""
+    rules = await AlertRulesService.update_rules(db, data.model_dump(exclude_none=True))
+    return ResponseModel(data=rules, msg="更新成功")
+
+
+# ============ 通知模板 ============
+
+@router.get("/notify/templates", summary="获取通知模板列表")
+async def get_notify_templates(
+    type: Optional[str] = Query(None, description="通知类型: sms/email/wechat/webhook"),
+    is_enabled: Optional[bool] = Query(None, description="是否启用"),
+    keyword: Optional[str] = Query(None, description="关键词搜索"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """获取通知模板列表 (仅管理员)"""
+    templates, total = await NotifyTemplateService.get_templates(
+        db=db,
+        type=type,
+        is_enabled=is_enabled,
+        keyword=keyword,
+        page=page,
+        page_size=page_size
+    )
+    return PageResponseModel(
+        data=templates,
+        total=total,
+        page=page,
+        page_size=page_size
+    )
+
+
+@router.get("/notify/templates/{template_id}", summary="获取通知模板详情")
+async def get_notify_template(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """获取单个通知模板 (仅管理员)"""
+    template = await NotifyTemplateService.get_template(db, template_id)
+    if not template:
+        return ResponseModel(code=404, msg="模板不存在")
+    return ResponseModel(data=template)
+
+
+@router.post("/notify/templates", summary="创建通知模板")
+async def create_notify_template(
+    data: NotifyTemplateCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """创建通知模板 (仅管理员)"""
+    # 检查编码是否已存在
+    existing = await NotifyTemplateService.get_template_by_code(db, data.code)
+    if existing:
+        return ResponseModel(code=400, msg="模板编码已存在")
+    
+    template = await NotifyTemplateService.create_template(db, data, created_by=current_user.id)
+    return ResponseModel(data=template.to_dict(), msg="创建成功")
+
+
+@router.put("/notify/templates/{template_id}", summary="更新通知模板")
+async def update_notify_template(
+    template_id: int,
+    data: NotifyTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """更新通知模板 (仅管理员)"""
+    template = await NotifyTemplateService.update_template(db, template_id, data)
+    if not template:
+        return ResponseModel(code=404, msg="模板不存在")
+    return ResponseModel(data=template, msg="更新成功")
+
+
+@router.delete("/notify/templates/{template_id}", summary="删除通知模板")
+async def delete_notify_template(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """删除通知模板 (仅管理员)"""
+    success = await NotifyTemplateService.delete_template(db, template_id)
+    if not success:
+        return ResponseModel(code=404, msg="模板不存在")
+    return ResponseModel(msg="删除成功")

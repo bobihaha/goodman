@@ -56,7 +56,7 @@ class IotCardService:
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         card = await iot_card_crud.get_by_id(db, card_id, user_filter)
         if not card:
-            raise BusinessException(code=404, message="卡片不存在或无权访问")
+            raise BusinessException(code=404, msg="卡片不存在或无权访问")
         return card.to_dict()
 
     async def search_cards(
@@ -94,7 +94,7 @@ class IotCardService:
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         card = await iot_card_crud.update_remark(db, card_id, remark, user_filter)
         if not card:
-            raise BusinessException(code=404, message="卡片不存在或无权操作")
+            raise BusinessException(code=404, msg="卡片不存在或无权操作")
         return card.to_dict()
 
     async def batch_update_remark(
@@ -126,14 +126,14 @@ class IotCardService:
         """划拨卡片给子用户"""
         # 用户只能划拨自己的卡给子用户
         if user_level == UserLevel.SUB_USER.value:
-            raise BusinessException(code=403, message="子用户无权划拨卡片")
+            raise BusinessException(code=403, msg="子用户无权划拨卡片")
 
         from_user_id = current_user_id
         if user_level == UserLevel.SUPER_ADMIN.value:
             # 超级管理员可以操作任意卡片，需要先获取卡片当前归属
             card = await iot_card_crud.get_by_id(db, card_id, None)
             if not card:
-                raise BusinessException(code=404, message="卡片不存在")
+                raise BusinessException(code=404, msg="卡片不存在")
             from_user_id = card.user_id
 
         card = await iot_card_crud.transfer(
@@ -146,7 +146,7 @@ class IotCardService:
         )
 
         if not card:
-            raise BusinessException(code=404, message="卡片不存在或无权操作")
+            raise BusinessException(code=404, msg="卡片不存在或无权操作")
 
         return card.to_dict()
 
@@ -161,7 +161,7 @@ class IotCardService:
     ) -> dict:
         """批量划拨"""
         if user_level == UserLevel.SUB_USER.value:
-            raise BusinessException(code=403, message="子用户无权划拨卡片")
+            raise BusinessException(code=403, msg="子用户无权划拨卡片")
 
         from_user_id = current_user_id
 
@@ -242,12 +242,47 @@ class IotCardService:
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         card = await iot_card_crud.get_by_id(db, card_id, user_filter)
         if not card:
-            raise BusinessException(code=404, message="卡片不存在或无权访问")
+            raise BusinessException(code=404, msg="卡片不存在或无权访问")
 
         items, total = await card_transfer_crud.get_list(
             db=db, card_id=card_id, page=page, page_size=page_size
         )
         return [item.to_dict() for item in items], total
+
+    async def batch_query_cards(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """批量查询卡片"""
+        from sqlalchemy import select
+        
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        
+        # 查询所有匹配的卡片
+        query = select(IotCardModel).where(
+            IotCardModel.iccid.in_(iccids),
+            IotCardModel.is_deleted == 0
+        )
+        
+        if user_filter is not None:
+            query = query.where(IotCardModel.user_id == user_filter)
+        
+        result = await db.execute(query)
+        found_cards = list(result.scalars().all())
+        
+        # 找到的ICCID
+        found_iccids = {card.iccid for card in found_cards}
+        
+        # 未找到的ICCID
+        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
+        
+        return {
+            "found": [card.to_dict() for card in found_cards],
+            "not_found": not_found
+        }
 
 
 iot_card_service = IotCardService()
