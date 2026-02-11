@@ -150,7 +150,6 @@
           </el-button>
           <el-button
             type="success"
-            :disabled="selectedCards.length === 0"
             @click="showBatchTransferDialog"
           >
             <el-icon><Connection /></el-icon>
@@ -158,7 +157,6 @@
           </el-button>
           <el-button
             type="warning"
-            :disabled="selectedCards.length === 0"
             @click="showBatchRemarkDialog"
           >
             <el-icon><Edit /></el-icon>
@@ -166,7 +164,6 @@
           </el-button>
           <el-button
             type="primary"
-            :disabled="selectedCards.length === 0"
             @click="showBatchRenewDialog"
           >
             <el-icon><Refresh /></el-icon>
@@ -174,16 +171,14 @@
           </el-button>
           <el-button
             type="danger"
-            :disabled="selectedCards.length === 0"
-            @click="handleBatchSuspend"
+            @click="showBatchSuspendDialog"
           >
             <el-icon><CircleClose /></el-icon>
             批量停机
           </el-button>
           <el-button
             type="success"
-            :disabled="selectedCards.length === 0"
-            @click="handleBatchResume"
+            @click="showBatchResumeDialog"
           >
             <el-icon><CircleCheck /></el-icon>
             批量复机
@@ -226,6 +221,17 @@
 
         <el-table-column prop="msisdn" label="号码" width="130" />
 
+        <el-table-column prop="card_type" label="卡片类型" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.card_type === 'pool'" type="success" size="small">
+              流量池卡
+            </el-tag>
+            <el-tag v-else type="info" size="small">
+              单卡
+            </el-tag>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="carrier" label="运营商" width="100">
           <template #default="{ row }">
             {{ CARRIER_MAP[row.carrier] }}
@@ -237,6 +243,24 @@
             <el-tag :type="CARD_STATUS_MAP[row.status].type">
               {{ CARD_STATUS_MAP[row.status].label }}
             </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="本月用量" width="120">
+          <template #default="{ row }">
+            {{ formatFlow(row.data_used_month) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="套餐总量" width="120">
+          <template #default="{ row }">
+            {{ formatFlow(row.data_total) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="已用量" width="120">
+          <template #default="{ row }">
+            {{ formatFlow(row.data_used) }}
           </template>
         </el-table-column>
 
@@ -260,10 +284,38 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="test_expire_date" label="测试期" width="110">
+          <template #default="{ row }">
+            <span v-if="row.test_expire_date">{{ row.test_expire_date }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="silent_expire_date" label="沉默期" width="110">
+          <template #default="{ row }">
+            <span v-if="row.silent_expire_date">{{ row.silent_expire_date }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="activated_at" label="激活日期" width="110">
+          <template #default="{ row }">
+            <span v-if="row.activated_at">{{ row.activated_at }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="stock_out_at" label="出库日期" width="110">
+          <template #default="{ row }">
+            <span v-if="row.stock_out_at">{{ formatDateShort(row.stock_out_at) }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="expired_at" label="到期日期" width="110">
           <template #default="{ row }">
             <span :class="{ 'text-danger': isExpired(row.expired_at) }">
-              {{ formatDateShort(row.expired_at) }}
+              {{ row.expired_at || '-' }}
             </span>
           </template>
         </el-table-column>
@@ -319,22 +371,31 @@
     <!-- 批量划拨对话框 -->
     <BatchTransferDialog
       v-model="batchTransferVisible"
-      :card-ids="selectedCardIds"
       @success="handleBatchTransferSuccess"
     />
 
     <!-- 批量备注对话框 -->
     <BatchRemarkDialog
       v-model="batchRemarkVisible"
-      :card-ids="selectedCardIds"
       @success="handleBatchRemarkSuccess"
     />
 
     <!-- 批量续费对话框 -->
     <BatchRenewDialog
       v-model="batchRenewVisible"
-      :card-ids="selectedCardIds"
       @success="handleBatchRenewSuccess"
+    />
+
+    <!-- 批量停机对话框 -->
+    <BatchSuspendDialog
+      v-model="batchSuspendVisible"
+      @success="handleBatchSuspendSuccess"
+    />
+
+    <!-- 批量复机对话框 -->
+    <BatchResumeDialog
+      v-model="batchResumeVisible"
+      @success="handleBatchResumeSuccess"
     />
 
     <!-- 单卡划拨对话框 -->
@@ -385,6 +446,8 @@ import BatchQueryDialog from './components/BatchQueryDialog.vue'
 import BatchTransferDialog from './components/BatchTransferDialog.vue'
 import BatchRemarkDialog from './components/BatchRemarkDialog.vue'
 import BatchRenewDialog from './components/BatchRenewDialog.vue'
+import BatchSuspendDialog from './components/BatchSuspendDialog.vue'
+import BatchResumeDialog from './components/BatchResumeDialog.vue'
 import TransferDialog from './components/TransferDialog.vue'
 import RemarkDialog from './components/RemarkDialog.vue'
 
@@ -434,6 +497,8 @@ const batchQueryVisible = ref(false)
 const batchTransferVisible = ref(false)
 const batchRemarkVisible = ref(false)
 const batchRenewVisible = ref(false)
+const batchSuspendVisible = ref(false)
+const batchResumeVisible = ref(false)
 const transferVisible = ref(false)
 const remarkVisible = ref(false)
 
@@ -527,93 +592,27 @@ const showBatchQueryDialog = () => {
 
 // 显示批量划拨对话框
 const showBatchTransferDialog = () => {
-  if (selectedCards.value.length === 0) {
-    ElMessage.warning('请先选择要划拨的卡片')
-    return
-  }
   batchTransferVisible.value = true
 }
 
 // 显示批量备注对话框
 const showBatchRemarkDialog = () => {
-  if (selectedCards.value.length === 0) {
-    ElMessage.warning('请先选择要备注的卡片')
-    return
-  }
   batchRemarkVisible.value = true
 }
 
 // 显示批量续费对话框
 const showBatchRenewDialog = () => {
-  if (selectedCards.value.length === 0) {
-    ElMessage.warning('请先选择要续费的卡片')
-    return
-  }
   batchRenewVisible.value = true
 }
 
-// 批量停机
-const handleBatchSuspend = async () => {
-  if (selectedCards.value.length === 0) {
-    ElMessage.warning('请先选择要停机的卡片')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要停机选中的 ${selectedCards.value.length} 张卡片吗？`,
-      '批量停机确认',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-
-    const result = await cardApi.batchSuspend({
-      card_ids: selectedCardIds.value
-    })
-
-    ElMessage.success(`成功停机 ${result.success} 张卡片`)
-    clearSelection()
-    fetchCardList()
-    fetchStats()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error('批量停机失败:', error)
-    }
-  }
+// 显示批量停机对话框
+const showBatchSuspendDialog = () => {
+  batchSuspendVisible.value = true
 }
 
-// 批量复机
-const handleBatchResume = async () => {
-  if (selectedCards.value.length === 0) {
-    ElMessage.warning('请先选择要复机的卡片')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要复机选中的 ${selectedCards.value.length} 张卡片吗？`,
-      '批量复机确认',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-
-    const result = await cardApi.batchResume(selectedCardIds.value)
-
-    ElMessage.success(`成功复机 ${result.success} 张卡片`)
-    clearSelection()
-    fetchCardList()
-    fetchStats()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error('批量复机失败:', error)
-    }
-  }
+// 显示批量复机对话框
+const showBatchResumeDialog = () => {
+  batchResumeVisible.value = true
 }
 
 // 导出
@@ -674,6 +673,20 @@ const handleBatchRemarkSuccess = () => {
 const handleBatchRenewSuccess = () => {
   clearSelection()
   fetchCardList()
+}
+
+// 批量停机成功回调
+const handleBatchSuspendSuccess = () => {
+  clearSelection()
+  fetchCardList()
+  fetchStats()
+}
+
+// 批量复机成功回调
+const handleBatchResumeSuccess = () => {
+  clearSelection()
+  fetchCardList()
+  fetchStats()
 }
 
 // 单卡划拨成功回调
@@ -816,6 +829,10 @@ onMounted(() => {
 
 .text-danger {
   color: #F56C6C;
+}
+
+.text-muted {
+  color: #909399;
 }
 
 .pagination {

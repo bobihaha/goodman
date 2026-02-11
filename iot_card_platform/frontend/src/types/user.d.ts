@@ -12,6 +12,7 @@ export interface User {
   phone?: string        // 手机号
   email?: string        // 邮箱
   parent_id?: number    // 父级用户ID
+  user_level: number    // 用户级别：1-超管，2-用户，3-子用户
   status: UserStatus    // 状态：enable/disable
   remark?: string       // 备注
   alert_notify?: {      // 告警通知设置
@@ -22,6 +23,9 @@ export interface User {
     max_cards: number
     max_sub_users: number
   }
+  permissions?: string[]     // 用户权限列表
+  is_super_login?: boolean   // 是否超级登录模式
+  original_user_id?: number  // 原用户ID（超级登录时）
   created_at: string
   updated_at?: string
 }
@@ -87,11 +91,20 @@ export interface UserListParams {
 // 用户权限
 export type Permission = string
 
-// 用户菜单
+// 用户菜单（与后端sys_menus表对应）
 export interface Menu {
-  id: string
+  id: number
+  parent_id: number
+  user_level: number
+  code: string
   name: string
-  path: string
+  type: 'directory' | 'menu' | 'button'
   icon?: string
+  path?: string
+  component?: string
+  permission?: string
+  sort_order: number
+  is_visible?: number
+  status?: string
   children?: Menu[]
 }

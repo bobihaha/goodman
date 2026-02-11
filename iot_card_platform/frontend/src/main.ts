@@ -12,6 +12,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 import App from './App.vue'
 import router from './router'
+import { setupDirectives } from '@/directives'
 import '@/assets/styles/global.scss'
 
 // 创建应用实例
@@ -29,6 +30,9 @@ app.use(ElementPlus, {
   locale: zhCn,
   size: 'default'
 })
+
+// 注册全局指令
+setupDirectives(app)
 
 // 挂载应用
 app.mount('#app')

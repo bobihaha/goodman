@@ -129,43 +129,36 @@ export const routes: RouteRecordRaw[] = [
           title: '出入库记录',
           requiresAuth: true
         }
+      },
+      // 流量池管理
+      {
+        path: 'pools/list',
+        name: 'PoolList',
+        component: () => import('@/views/pools/list/index.vue'),
+        meta: {
+          title: '流量池列表',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'pools/detail/:id',
+        name: 'PoolDetail',
+        component: () => import('@/views/pools/detail/index.vue'),
+        meta: {
+          title: '流量池详情',
+          requiresAuth: true
+        }
+      },
+      // 权限管理
+      {
+        path: 'permissions',
+        name: 'Permissions',
+        component: () => import('@/views/permissions/index.vue'),
+        meta: {
+          title: '权限管理',
+          requiresAuth: true
+        }
       }
-      // {
-      //   path: 'pools',
-      //   name: 'Pools',
-      //   component: () => import('@/views/pools/index.vue'),
-      //   meta: {
-      //     title: '流量池管理',
-      //     requiresAuth: true
-      //   }
-      // },
-      // {
-      //   path: 'users',
-      //   name: 'Users',
-      //   component: () => import('@/views/users/index.vue'),
-      //   meta: {
-      //     title: '用户管理',
-      //     requiresAuth: true
-      //   }
-      // },
-      // {
-      //   path: 'suppliers',
-      //   name: 'Suppliers',
-      //   component: () => import('@/views/suppliers/index.vue'),
-      //   meta: {
-      //     title: '供应商管理',
-      //     requiresAuth: true
-      //   }
-      // },
-      // {
-      //   path: 'system',
-      //   name: 'System',
-      //   component: () => import('@/views/system/index.vue'),
-      //   meta: {
-      //     title: '系统设置',
-      //     requiresAuth: true
-      //   }
-      // }
     ]
   }
 ]

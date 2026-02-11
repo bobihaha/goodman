@@ -228,6 +228,9 @@ class SyncService:
                         if card.iccid in lifecycle_map:
                             data = lifecycle_map[card.iccid]
                             
+                            # 记录旧状态
+                            old_status = card.status
+                            
                             # 更新生命周期日期
                             if data.get("test_expire_date"):
                                 card.test_expire_date = datetime.strptime(
@@ -249,6 +252,15 @@ class SyncService:
                             # 更新状态
                             if data.get("status"):
                                 card.status = CardStatus(data["status"])
+                            
+                            # 如果卡片从非激活状态变为激活状态，且是流量池卡，自动加入流量池
+                            from app.db.models.iot_card import CardType
+                            if (old_status != CardStatus.activated and 
+                                card.status == CardStatus.activated and
+                                card.card_type == CardType.pool and
+                                card.pool_id is None and
+                                card.user_id is not None):
+                                await self._auto_join_pool(db, card)
                             
                             success_count += 1
                             sync_details.append({
@@ -352,6 +364,9 @@ class SyncService:
             card.data_total = usage_data.get("data_total", card.data_total)
             card.data_sync_at = datetime.now()
 
+            # 记录旧状态
+            old_status = card.status
+
             # 同步生命周期
             lifecycle_data = await client.get_card_lifecycle(iccid)
             if lifecycle_data.get("test_expire_date"):
@@ -372,6 +387,15 @@ class SyncService:
                 ).date()
             if lifecycle_data.get("status"):
                 card.status = CardStatus(lifecycle_data["status"])
+
+            # 如果卡片从非激活状态变为激活状态，且是流量池卡，自动加入流量池
+            from app.db.models.iot_card import CardType
+            if (old_status != CardStatus.activated and 
+                card.status == CardStatus.activated and
+                card.card_type == CardType.pool and
+                card.pool_id is None and
+                card.user_id is not None):
+                await self._auto_join_pool(db, card)
 
             await db.commit()
 
@@ -528,6 +552,61 @@ class SyncService:
         result = await db.execute(query)
         return result.scalar_one_or_none()
 
+    async def _auto_join_pool(self, db: AsyncSession, card: IotCardModel) -> None:
+        """自动将流量池卡加入到对应的流量池"""
+        try:
+            from app.crud.pool_crud import pool_crud, pool_card_crud
+            from app.db.models.iot_card import CardType
+            
+            # 确认是流量池卡
+            if card.card_type != CardType.pool:
+                return
+            
+            # 确认卡片已激活且有用户
+            if card.status != CardStatus.activated or card.user_id is None:
+                return
+            
+            # 确认卡片未加入流量池
+            if card.pool_id is not None:
+                return
+            
+            # 查找或创建对应的流量池
+            pool = await pool_crud.find_or_create_pool(
+                db=db,
+                user_id=card.user_id,
+                carrier=card.carrier.value,
+                flow_size=card.flow_size,
+                period_type=card.period_type.value,
+                created_by=card.user_id  # 使用卡片所属用户作为创建者
+            )
+            
+            # 将卡片加入流量池
+            card.pool_id = pool.id
+            card.is_pool_member = 1
+            
+            # 记录日志
+            from app.db.models.pool import PoolCardLogModel
+            log = PoolCardLogModel(
+                pool_id=pool.id,
+                card_id=card.id,
+                iccid=card.iccid,
+                action="add",
+                operator_id=card.user_id,
+                remark="激活后自动加入流量池"
+            )
+            db.add(log)
+            
+            # 更新流量池统计（在commit后）
+            await db.flush()
+            await pool_crud.update_stats(db, pool.id)
+            
+        except Exception as e:
+            # 自动加入失败不影响同步流程，只记录日志
+            print(f"自动加入流量池失败 - ICCID: {card.iccid}, 错误: {str(e)}")
+
 
 sync_service = SyncService()
+
+
+
 

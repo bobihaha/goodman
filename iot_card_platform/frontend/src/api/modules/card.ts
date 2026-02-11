@@ -52,6 +52,11 @@ export const cardApi = {
     return post<{ success: number; failed: number }>('/cards/batch/transfer', data)
   },
 
+  // 通过ICCID批量划拨
+  batchTransferByIccids(data: { iccids: string[]; to_user_id: number; remark?: string }): Promise<any> {
+    return post('/cards/batch/transfer-by-iccids', data)
+  },
+
   // 单卡备注
   updateRemark(id: number, remark: string): Promise<void> {
     return put<void>(`/cards/${id}/remark`, { remark })
@@ -62,9 +67,19 @@ export const cardApi = {
     return put<{ success: number; failed: number }>('/cards/batch/remark', data)
   },
 
+  // 通过ICCID批量备注
+  batchRemarkByIccids(data: { iccids: string[]; remark: string }): Promise<any> {
+    return post('/cards/batch/remark-by-iccids', data)
+  },
+
   // 批量续费
   batchRenew(data: CardBatchRenewRequest): Promise<{ success: number; failed: number }> {
     return post<{ success: number; failed: number }>('/cards/batch-renew', data)
+  },
+
+  // 通过ICCID批量续费
+  batchRenewByIccids(data: { iccids: string[]; renew_months: number }): Promise<any> {
+    return post('/cards/batch/renew-by-iccids', data)
   },
 
   // 批量停机
@@ -72,9 +87,19 @@ export const cardApi = {
     return post<{ success: number; failed: number }>('/cards/batch-suspend', data)
   },
 
+  // 通过ICCID批量停机
+  batchSuspendByIccids(data: { iccids: string[]; reason?: string }): Promise<any> {
+    return post('/cards/batch/suspend-by-iccids', data)
+  },
+
   // 批量复机
   batchResume(cardIds: number[], reason?: string): Promise<{ success: number; failed: number }> {
     return post<{ success: number; failed: number }>('/cards/batch-resume', { card_ids: cardIds, reason })
+  },
+
+  // 通过ICCID批量复机
+  batchResumeByIccids(data: { iccids: string[] }): Promise<any> {
+    return post('/cards/batch/resume-by-iccids', data)
   },
 
   // 获取划拨记录

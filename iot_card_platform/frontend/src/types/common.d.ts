@@ -35,6 +35,9 @@ export type CardStatus = 'stock' | 'testing' | 'silent' | 'activated' | 'expired
 // 套餐周期类型
 export type PeriodType = 'monthly' | 'yearly'
 
+// 卡片类型
+export type CardType = 'single' | 'pool'
+
 // 用户状态
 export type UserStatus = 'enable' | 'disable'
 

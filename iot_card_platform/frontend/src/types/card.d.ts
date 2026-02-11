@@ -8,6 +8,9 @@ export type Carrier = 'cmcc' | 'cucc' | 'ctcc'
 // 周期类型
 export type PeriodType = 'monthly' | 'yearly'
 
+// 卡片类型
+export type CardType = 'single' | 'pool'
+
 // 卡片状态
 export type CardStatus = 'stock' | 'testing' | 'silent' | 'activated' | 'expired' | 'suspended' | 'cancelled'
 
@@ -27,12 +30,15 @@ export interface Card {
   carrier: Carrier
   flow_size: number
   period_type: PeriodType
-  test_expire_date?: string
-  silent_expire_date?: string
-  activated_at?: string
-  expired_at?: string
-  data_used: number
-  data_total: number
+  card_type: CardType             // 卡片类型
+  card_type_name?: string         // 卡片类型名称
+  test_expire_date?: string       // 测试期到期日（格式：26/1/31）
+  silent_expire_date?: string     // 沉默期到期日（格式：26/1/31）
+  activated_at?: string           // 激活日期（格式：26/1/31）
+  expired_at?: string             // 到期日期（格式：26/1/31）
+  data_used: number               // 已用流量
+  data_total: number              // 套餐总量
+  data_used_month: number         // 本月用量
   data_sync_at?: string
   status: CardStatus
   suspend_type?: SuspendType
@@ -41,8 +47,8 @@ export interface Card {
   pool_id?: number
   is_pool_member: boolean
   remark?: string
-  stock_in_at?: string
-  stock_out_at?: string
+  stock_in_at?: string            // 入库时间（ISO格式）
+  stock_out_at?: string           // 出库时间（ISO格式）
   created_at: string
   updated_at?: string
   // 前端计算字段

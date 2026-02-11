@@ -18,7 +18,8 @@ from app.schemas.stock import (
     StockInRecordInfo, StockInRecordDetail,
     StockOutRecordInfo, StockOutRecordDetail,
     StockRecycleCreate, StockRecycleResult, StockRecycleRecordInfo,
-    BatchQueryRequest, BatchQueryResult
+    BatchQueryRequest, BatchQueryResult,
+    ExcelStockOutCreate, ExcelStockOutResult
 )
 
 router = APIRouter(tags=["出入库管理"])
@@ -133,12 +134,19 @@ async def stock_out(
     - 选择库存卡片
     - 分配给目标用户
     - 关联销售套餐
+    - 设置套餐周期和卡类型
+    - 设置出库日期、测试期、沉默期
     """
     result = await stock_service.stock_out(
         db=db,
         card_ids=request.card_ids,
         to_user_id=request.to_user_id,
         sale_package_id=request.sale_package_id,
+        period_count=request.period_count,
+        card_type=request.card_type,
+        stock_out_date=request.stock_out_date,
+        test_expire_date=request.test_expire_date,
+        silent_expire_date=request.silent_expire_date,
         created_by=current_user.id,
         remark=request.remark
     )
@@ -403,3 +411,39 @@ async def download_import_template():
         ["89860123456789012346", "460012345678902", "13800138001"]
     ]
     return ResponseModel(data=template_data, msg="模板数据获取成功")
+
+
+@router.get("/out/template", summary="下载Excel出库模板")
+async def download_stock_out_template():
+    """
+    下载Excel出库模板
+    
+    返回模板数据，前端使用xlsx库生成Excel文件
+    """
+    template_data = [
+        ["ICCID", "用户ID", "销售套餐ID", "套餐周期", "卡类型", "出库日期", "测试期截止日期", "沉默期截止日期", "备注"],
+        ["89860123456789012345", "10", "5", "12", "single", "2026-02-11", "2026-03-11", "2026-04-11", "测试卡"],
+        ["89860123456789012346", "10", "5", "12", "pool", "2026-02-11", "", "2026-04-11", "正式卡"]
+    ]
+    return ResponseModel(data=template_data, msg="出库模板数据获取成功")
+
+
+@router.post("/out/batch-import", summary="Excel批量出库", response_model=ResponseModel)
+async def batch_stock_out_import(
+    request: ExcelStockOutCreate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """
+    Excel批量出库 (仅超级管理员)
+    
+    - 上传Excel文件数据
+    - 批量处理出库
+    - 返回成功和失败详情
+    """
+    result = await stock_service.batch_stock_out_import(
+        db=db,
+        items=request.items,
+        created_by=current_user.id
+    )
+    return ResponseModel(data=result, msg=f"批量出库完成：成功 {result['success']} 张，失败 {result['failed']} 张")

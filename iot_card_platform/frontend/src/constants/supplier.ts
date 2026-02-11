@@ -32,3 +32,6 @@ export const SUPPLIER_STATUS_MAP: Record<string, { label: string; type: string }
   disable: { label: '禁用', type: 'info' }
 }
 
+
+
+

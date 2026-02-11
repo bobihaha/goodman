@@ -108,3 +108,6 @@ CREATE TABLE IF NOT EXISTS `stock_recycle_record_cards` (
     KEY `idx_card_id` (`card_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='回收记录卡片关联表';
 
+
+
+

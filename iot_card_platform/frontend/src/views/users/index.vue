@@ -78,7 +78,7 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="420" fixed="right">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -87,6 +87,24 @@
               @click="handleEdit(row)"
             >
               编辑
+            </el-button>
+            <el-button
+              v-if="canAssignPermission()"
+              type="primary"
+              link
+              :icon="Setting"
+              @click="handleAssignPermission(row)"
+            >
+              分配权限
+            </el-button>
+            <el-button
+              v-if="canSuperLogin(row)"
+              type="success"
+              link
+              :icon="SwitchButton"
+              @click="handleSuperLogin(row)"
+            >
+              超级登录
             </el-button>
             <el-button
               type="warning"
@@ -153,18 +171,32 @@
       :user="currentUser"
       @success="handlePasswordSuccess"
     />
+
+    <!-- 权限分配弹窗 -->
+    <UserPermissionDialog
+      v-model="permissionDialogVisible"
+      :user-id="currentUser?.id || null"
+      :user-name="currentUser?.name || ''"
+      @success="handlePermissionSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock } from '@element-plus/icons-vue'
+import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock, SwitchButton, Setting } from '@element-plus/icons-vue'
 import { userApi } from '@/api/modules/user'
 import { formatDateTime } from '@/utils/formatter'
 import type { User, UserListParams } from '@/types/user'
 import UserFormDialog from './components/UserFormDialog.vue'
 import ResetPasswordDialog from './components/ResetPasswordDialog.vue'
+import UserPermissionDialog from './components/UserPermissionDialog.vue'
+import { useAuthStore } from '@/stores/modules/auth'
+import { useRouter } from 'vue-router'
+
+const authStore = useAuthStore()
+const router = useRouter()
 
 // 搜索表单
 const searchForm = reactive<UserListParams>({
@@ -186,6 +218,7 @@ const loading = ref(false)
 // 弹窗控制
 const formDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
+const permissionDialogVisible = ref(false)
 const currentUser = ref<User | null>(null)
 
 /**
@@ -208,6 +241,92 @@ const fetchUserList = async () => {
     ElMessage.error('获取用户列表失败')
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 检查是否可以分配权限
+ * 只有超级管理员可以分配权限
+ */
+const canAssignPermission = (): boolean => {
+  const currentUser = authStore.userInfo
+  if (!currentUser) {
+    return false
+  }
+  
+  // 只有超级管理员（user_level = 1）可以分配权限
+  return currentUser.user_level === 1
+}
+
+/**
+ * 检查是否可以超级登录
+ */
+const canSuperLogin = (user: User): boolean => {
+  const currentUser = authStore.userInfo
+  if (!currentUser) {
+    console.log('当前用户信息未加载')
+    return false
+  }
+  
+  console.log('当前用户:', currentUser.name, 'user_level:', currentUser.user_level)
+  console.log('目标用户:', user.name, 'user_level:', user.user_level, 'parent_id:', user.parent_id)
+  
+  // 超级管理员可以登录到普通用户 (user_level = 2)
+  if (currentUser.user_level === 1 && user.user_level === 2) {
+    console.log('✅ 超级管理员可以登录到普通用户')
+    return true
+  }
+  
+  // 普通用户可以登录到自己的子用户 (user_level = 3)
+  if (currentUser.user_level === 2 && user.user_level === 3 && user.parent_id === currentUser.id) {
+    console.log('✅ 普通用户可以登录到子用户')
+    return true
+  }
+  
+  console.log('❌ 不满足超级登录条件')
+  return false
+}
+
+/**
+ * 超级登录
+ */
+const handleSuperLogin = async (user: User) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要超级登录到用户 "${user.name}" (${user.account}) 吗？`,
+      '超级登录确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    const loading = ElMessage({
+      message: '正在切换用户...',
+      type: 'info',
+      duration: 0
+    })
+    
+    try {
+      await authStore.superLogin(user.id)
+      loading.close()
+      ElMessage.success(`已切换到用户 "${user.name}"`)
+      
+      // 刷新页面以更新界面
+      setTimeout(() => {
+        router.push('/dashboard')
+        router.go(0)
+      }, 500)
+    } catch (error) {
+      loading.close()
+      console.error('超级登录失败:', error)
+      ElMessage.error('超级登录失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('超级登录失败:', error)
+    }
   }
 }
 
@@ -250,6 +369,14 @@ const handleEdit = (user: User) => {
 const handleResetPassword = (user: User) => {
   currentUser.value = user
   passwordDialogVisible.value = true
+}
+
+/**
+ * 分配权限
+ */
+const handleAssignPermission = (user: User) => {
+  currentUser.value = user
+  permissionDialogVisible.value = true
 }
 
 /**
@@ -322,8 +449,25 @@ const handlePasswordSuccess = () => {
   passwordDialogVisible.value = false
 }
 
+/**
+ * 权限分配成功
+ */
+const handlePermissionSuccess = () => {
+  permissionDialogVisible.value = false
+  ElMessage.success('权限分配成功')
+}
+
 // 初始化
-onMounted(() => {
+onMounted(async () => {
+  // 确保获取当前用户信息
+  if (!authStore.userInfo) {
+    try {
+      await authStore.getUserInfo()
+    } catch (error) {
+      console.error('获取当前用户信息失败:', error)
+    }
+  }
+  
   fetchUserList()
 })
 </script>
@@ -345,5 +489,7 @@ onMounted(() => {
   }
 }
 </style>
+
+
 
 

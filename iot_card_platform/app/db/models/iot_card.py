@@ -9,6 +9,12 @@ from app.db.models.base import BaseModel
 from app.db.models.package import CarrierType, PeriodType, CARRIER_NAMES, PERIOD_CONFIG
 
 
+class CardType(str, PyEnum):
+    """卡片类型"""
+    single = "single"         # 单卡 (达量停机)
+    pool = "pool"             # 流量池卡
+
+
 class CardStatus(str, PyEnum):
     """卡片状态"""
     stock = "stock"           # 库存 (未出库)
@@ -30,6 +36,11 @@ class SuspendType(str, PyEnum):
 
 
 # 状态显示名称
+CARD_TYPE_NAMES = {
+    "single": "单卡",
+    "pool": "流量池卡"
+}
+
 CARD_STATUS_NAMES = {
     "stock": "库存",
     "testing": "测试期",
@@ -70,6 +81,10 @@ class IotCardModel(BaseModel):
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
     flow_size = Column(BigInteger, nullable=False, comment="套餐流量(MB)")
     period_type = Column(Enum(PeriodType), nullable=False, comment="周期类型")
+    period_count = Column(Integer, nullable=False, default=1, comment="套餐周期数量: 月包=月数(3/6/12等), 年包=年数(1/2/3等)")
+    
+    # 卡片类型
+    card_type = Column(Enum(CardType), nullable=False, default=CardType.single, comment="卡片类型: single=单卡, pool=流量池卡")
     
     # 生命周期日期 (格式: YYYY-MM-DD, 显示为 26/1/31)
     test_expire_date = Column(Date, nullable=True, comment="测试期到期日")
@@ -80,6 +95,7 @@ class IotCardModel(BaseModel):
     # 流量使用 (单位: MB)
     data_used = Column(BigInteger, nullable=False, default=0, comment="已用流量(MB)")
     data_total = Column(BigInteger, nullable=False, comment="总流量(MB)")
+    data_used_month = Column(BigInteger, nullable=False, default=0, comment="本月已用流量(MB)")
     data_sync_at = Column(DateTime, nullable=True, comment="流量同步时间")
     
     # 状态
@@ -100,6 +116,7 @@ class IotCardModel(BaseModel):
     # 出入库时间
     stock_in_at = Column(DateTime, nullable=True, comment="入库时间")
     stock_out_at = Column(DateTime, nullable=True, comment="出库时间")
+    stock_out_date = Column(Date, nullable=True, comment="出库日期")
     
     # 创建人
     created_by = Column(BigInteger, nullable=True, comment="创建人ID")
@@ -150,8 +167,12 @@ class IotCardModel(BaseModel):
             "flow_size": self.flow_size,
             "flow_size_display": self._format_flow_size(),
             "period_type": self.period_type.value if self.period_type else None,
+            "period_count": self.period_count,
             "period_name": PERIOD_CONFIG.get(self.period_type.value, {}).get("name", "") if self.period_type else None,
             "spec_name": self.get_spec_name(),
+            # 卡片类型
+            "card_type": self.card_type.value if self.card_type else None,
+            "card_type_name": CARD_TYPE_NAMES.get(self.card_type.value, "") if self.card_type else None,
             # 生命周期日期
             "test_expire_date": self._format_date(self.test_expire_date),
             "silent_expire_date": self._format_date(self.silent_expire_date),
@@ -160,6 +181,7 @@ class IotCardModel(BaseModel):
             # 流量使用
             "data_used": self.data_used,
             "data_total": self.data_total,
+            "data_used_month": self.data_used_month,
             "data_remain": self.data_total - self.data_used if self.data_total else 0,
             "data_usage_percent": self.get_data_usage_percent(),
             "data_sync_at": self.data_sync_at.isoformat() if self.data_sync_at else None,
@@ -179,6 +201,7 @@ class IotCardModel(BaseModel):
             # 时间
             "stock_in_at": self.stock_in_at.isoformat() if self.stock_in_at else None,
             "stock_out_at": self.stock_out_at.isoformat() if self.stock_out_at else None,
+            "stock_out_date": self._format_date(self.stock_out_date),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

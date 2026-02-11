@@ -53,6 +53,20 @@ export const stockApi = {
   },
 
   /**
+   * 下载Excel出库模板
+   */
+  downloadStockOutTemplate() {
+    return request.get('/stock/out/template')
+  },
+
+  /**
+   * Excel批量出库
+   */
+  batchStockOutImport(data: any) {
+    return request.post('/stock/out/batch-import', data)
+  },
+
+  /**
    * 获取出库记录
    */
   getStockOutRecords(params: any) {

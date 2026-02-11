@@ -33,6 +33,7 @@ class TrafficPoolModel(BaseModel):
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
     flow_size = Column(BigInteger, nullable=False, comment="套餐流量(MB)")
     period_type = Column(Enum(PeriodType), nullable=False, comment="周期类型")
+    sale_package_id = Column(BigInteger, nullable=True, index=True, comment="销售套餐ID（组池依据）")
     
     # 归属
     user_id = Column(BigInteger, nullable=True, index=True, comment="所属用户ID(NULL=平台池)")
@@ -41,6 +42,8 @@ class TrafficPoolModel(BaseModel):
     card_count = Column(Integer, nullable=False, default=0, comment="卡片数量")
     data_total = Column(BigInteger, nullable=False, default=0, comment="总流量(MB)")
     data_used = Column(BigInteger, nullable=False, default=0, comment="已用流量(MB)")
+    package_flow = Column(BigInteger, nullable=False, default=0, comment="套餐流量(MB)")
+    addon_flow = Column(BigInteger, nullable=False, default=0, comment="叠加流量包(MB)")
     
     # 阈值设置
     alert_threshold = Column(Integer, nullable=True, comment="告警阈值百分比")
@@ -51,6 +54,9 @@ class TrafficPoolModel(BaseModel):
     
     # 备注
     remark = Column(String(500), nullable=True, comment="备注")
+    
+    # 同步时间
+    last_sync_at = Column(DateTime, nullable=True, comment="最近同步时间")
     
     # 创建人
     created_by = Column(BigInteger, nullable=True, comment="创建人ID")
@@ -106,11 +112,14 @@ class TrafficPoolModel(BaseModel):
             "period_type": self.period_type.value if self.period_type else None,
             "period_name": PERIOD_CONFIG.get(self.period_type.value, {}).get("name", "") if self.period_type else None,
             "spec_name": self.get_spec_name(),
+            "sale_package_id": self.sale_package_id,
             "user_id": self.user_id,
             "card_count": self.card_count,
             "data_total": self.data_total,
             "data_used": self.data_used,
-            "data_remain": self.get_data_remain(),
+            "data_remaining": self.get_data_remain(),
+            "package_flow": self.package_flow,
+            "addon_flow": self.addon_flow,
             "usage_percent": self.get_usage_percent(),
             "alert_threshold": self.alert_threshold,
             "stop_threshold": self.stop_threshold,
@@ -119,6 +128,7 @@ class TrafficPoolModel(BaseModel):
             "status": self.status.value if self.status else None,
             "status_name": POOL_STATUS_NAMES.get(self.status.value, "") if self.status else None,
             "remark": self.remark,
+            "last_sync_at": self.last_sync_at.isoformat() if self.last_sync_at else None,
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

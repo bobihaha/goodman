@@ -40,7 +40,9 @@ class IotCardCRUD:
         keyword: Optional[str] = None,
         status: Optional[str] = None,
         carrier: Optional[str] = None,
+        flow_size: Optional[int] = None,
         period_type: Optional[str] = None,
+        card_type: Optional[str] = None,
         pool_id: Optional[int] = None,
         is_pool_member: Optional[bool] = None,
         page: int = 1,
@@ -84,10 +86,20 @@ class IotCardCRUD:
             query = query.where(IotCardModel.carrier == carrier)
             count_query = count_query.where(IotCardModel.carrier == carrier)
 
+        # 流量大小过滤
+        if flow_size is not None:
+            query = query.where(IotCardModel.flow_size == flow_size)
+            count_query = count_query.where(IotCardModel.flow_size == flow_size)
+
         # 周期类型过滤
         if period_type:
             query = query.where(IotCardModel.period_type == period_type)
             count_query = count_query.where(IotCardModel.period_type == period_type)
+
+        # 卡片类型过滤
+        if card_type:
+            query = query.where(IotCardModel.card_type == card_type)
+            count_query = count_query.where(IotCardModel.card_type == card_type)
 
         # 流量池过滤
         if pool_id is not None:

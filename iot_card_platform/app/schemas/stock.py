@@ -115,6 +115,11 @@ class StockOutCreate(BaseModel):
     card_ids: List[int] = Field(..., min_length=1, description="卡片ID列表")
     to_user_id: int = Field(..., description="目标用户ID")
     sale_package_id: int = Field(..., description="销售套餐ID")
+    period_count: int = Field(..., ge=1, description="套餐周期数量")
+    card_type: Optional[str] = Field(None, description="卡类型: single=单卡, pool=流量池卡（仅月包需要）")
+    stock_out_date: date = Field(..., description="出库日期")
+    test_expire_date: Optional[date] = Field(None, description="测试期截止日期")
+    silent_expire_date: date = Field(..., description="沉默期截止日期")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
 
 
@@ -251,3 +256,31 @@ class BatchQueryResult(BaseModel):
     """批量查询结果"""
     found: List[dict]
     not_found: List[str]
+
+
+# ============ Excel批量出库 ============
+
+class ExcelStockOutItem(BaseModel):
+    """Excel出库单条数据"""
+    iccid: str = Field(..., description="ICCID")
+    user_id: int = Field(..., description="目标用户ID")
+    sale_package_id: int = Field(..., description="销售套餐ID")
+    period_count: int = Field(..., description="套餐周期数量")
+    card_type: Optional[str] = Field(None, description="卡类型")
+    stock_out_date: date = Field(..., description="出库日期")
+    test_expire_date: Optional[date] = Field(None, description="测试期截止日期")
+    silent_expire_date: date = Field(..., description="沉默期截止日期")
+    remark: Optional[str] = Field(None, description="备注")
+
+
+class ExcelStockOutCreate(BaseModel):
+    """Excel批量出库请求"""
+    items: List[ExcelStockOutItem] = Field(..., min_length=1, description="出库数据列表")
+
+
+class ExcelStockOutResult(BaseModel):
+    """Excel批量出库结果"""
+    total: int
+    success: int
+    failed: int
+    fail_details: Optional[List[dict]] = None

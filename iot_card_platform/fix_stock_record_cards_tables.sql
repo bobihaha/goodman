@@ -18,3 +18,4 @@ SHOW COLUMNS FROM stock_in_record_cards;
 SHOW COLUMNS FROM stock_out_record_cards;
 SHOW COLUMNS FROM stock_recycle_record_cards;
 
+

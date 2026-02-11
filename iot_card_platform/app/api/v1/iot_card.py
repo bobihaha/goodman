@@ -24,7 +24,9 @@ async def get_cards(
     keyword: Optional[str] = Query(None, description="关键词 (ICCID/MSISDN/后6位)"),
     status: Optional[str] = Query(None, description="卡片状态"),
     carrier: Optional[str] = Query(None, description="运营商"),
+    flow_size: Optional[int] = Query(None, description="流量大小(MB)"),
     period_type: Optional[str] = Query(None, description="周期类型"),
+    card_type: Optional[str] = Query(None, description="卡片类型: single/pool"),
     pool_id: Optional[int] = Query(None, description="流量池ID"),
     is_pool_member: Optional[bool] = Query(None, description="是否加入流量池"),
     page: int = Query(1, ge=1, description="页码"),
@@ -40,7 +42,9 @@ async def get_cards(
         keyword=keyword,
         status=status,
         carrier=carrier,
+        flow_size=flow_size,
         period_type=period_type,
+        card_type=card_type,
         pool_id=pool_id,
         is_pool_member=is_pool_member,
         page=page,
@@ -105,6 +109,97 @@ async def batch_transfer_cards(
         remark=request.remark
     )
     return ResponseModel(data=result, msg=f"成功划拨 {result['success']} 张卡片")
+
+
+@router.post("/batch/transfer-by-iccids", summary="通过ICCID批量划拨", response_model=ResponseModel)
+async def batch_transfer_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    to_user_id: int = Body(..., description="目标用户ID"),
+    remark: Optional[str] = Body(None, description="备注"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量划拨卡片"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多划拨10000张卡片")
+    
+    result = await iot_card_service.batch_transfer_by_iccids(
+        db=db, iccids=iccids, to_user_id=to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=remark
+    )
+    return ResponseModel(data=result, msg=f"成功划拨 {result['success']} 张卡片")
+
+
+@router.post("/batch/remark-by-iccids", summary="通过ICCID批量备注", response_model=ResponseModel)
+async def batch_remark_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    remark: str = Body(..., description="备注内容"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量备注"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多备注10000张卡片")
+    
+    result = await iot_card_service.batch_remark_by_iccids(
+        db=db, iccids=iccids, remark=remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功备注 {result['success']} 张卡片")
+
+
+@router.post("/batch/renew-by-iccids", summary="通过ICCID批量续费", response_model=ResponseModel)
+async def batch_renew_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    renew_months: int = Body(..., description="续费月数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量续费"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多续费10000张卡片")
+    
+    result = await iot_card_service.batch_renew_by_iccids(
+        db=db, iccids=iccids, renew_months=renew_months,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功续费 {result['success']} 张卡片")
+
+
+@router.post("/batch/suspend-by-iccids", summary="通过ICCID批量停机", response_model=ResponseModel)
+async def batch_suspend_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    reason: Optional[str] = Body(None, description="停机原因"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量停机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多停机10000张卡片")
+    
+    result = await iot_card_service.batch_suspend_by_iccids(
+        db=db, iccids=iccids, reason=reason,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功停机 {result['success']} 张卡片")
+
+
+@router.post("/batch/resume-by-iccids", summary="通过ICCID批量复机", response_model=ResponseModel)
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
 
 
 @router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)

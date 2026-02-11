@@ -169,6 +169,15 @@ class PoolService:
         )
         return [item.to_dict() for item in items], total
 
+    async def get_pool_stats(
+        self,
+        db: AsyncSession,
+        user_id: Optional[int] = None
+    ) -> dict:
+        """获取流量池总体统计"""
+        stats = await pool_crud.get_stats(db, user_id)
+        return stats
+
     async def get_pool_usage(self, db: AsyncSession, pool_id: int) -> dict:
         """获取流量池用量统计"""
         pool = await pool_crud.get_by_id(db, pool_id)

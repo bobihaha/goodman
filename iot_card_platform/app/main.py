@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
-from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system, sync
+from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system, sync, permission
 from app.config import settings
 from app.utils.logger import logger
 from app.utils.exceptions import BusinessException, business_exception_handler, global_exception_handler
@@ -43,6 +43,7 @@ async def custom_swagger_ui_html():
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["认证管理"])
 app.include_router(sys_user.router, prefix="/api/v1/users", tags=["用户管理"])
 app.include_router(sys_menu.router, prefix="/api/v1/menus", tags=["菜单管理"])
+app.include_router(permission.router, prefix="/api/v1/permissions", tags=["权限管理"])
 app.include_router(supplier.router, prefix="/api/v1/suppliers", tags=["供应商管理"])
 app.include_router(package.router, prefix="/api/v1/packages", tags=["套餐管理"])
 app.include_router(iot_card.router, prefix="/api/v1", tags=["卡片管理"])

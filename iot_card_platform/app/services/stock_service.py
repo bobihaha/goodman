@@ -151,6 +151,11 @@ class StockService:
         card_ids: List[int],
         to_user_id: int,
         sale_package_id: int,
+        period_count: int,
+        card_type: Optional[str],
+        stock_out_date,
+        test_expire_date,
+        silent_expire_date,
         created_by: int,
         remark: Optional[str] = None
     ) -> dict:
@@ -160,6 +165,11 @@ class StockService:
             card_ids=card_ids,
             to_user_id=to_user_id,
             sale_package_id=sale_package_id,
+            period_count=period_count,
+            card_type=card_type,
+            stock_out_date=stock_out_date,
+            test_expire_date=test_expire_date,
+            silent_expire_date=silent_expire_date,
             created_by=created_by,
             remark=remark
         )
@@ -397,6 +407,95 @@ class StockService:
             sort_by=sort_by,
             sort_order=sort_order
         )
+
+    # ============ Excel批量出库 ============
+
+    async def batch_stock_out_import(
+        self,
+        db: AsyncSession,
+        items: List,
+        created_by: int
+    ) -> dict:
+        """Excel批量出库"""
+        from app.db.models.iot_card import IotCardModel, CardStatus, CardType
+        from app.db.models.package import SalePackageModel
+        
+        total = len(items)
+        success = 0
+        failed = 0
+        fail_details = []
+        
+        for idx, item in enumerate(items):
+            try:
+                # 1. 根据ICCID查找卡片
+                card_query = select(IotCardModel).where(
+                    IotCardModel.iccid == item.iccid,
+                    IotCardModel.status == CardStatus.stock,
+                    IotCardModel.is_deleted == 0
+                )
+                card_result = await db.execute(card_query)
+                card = card_result.scalar_one_or_none()
+                
+                if not card:
+                    fail_details.append({
+                        "row": idx + 2,  # Excel行号（从2开始，因为第1行是表头）
+                        "iccid": item.iccid,
+                        "reason": "卡片不存在或不在库存状态"
+                    })
+                    failed += 1
+                    continue
+                
+                # 2. 验证销售套餐
+                pkg_query = select(SalePackageModel).where(
+                    SalePackageModel.id == item.sale_package_id,
+                    SalePackageModel.is_deleted == 0
+                )
+                pkg_result = await db.execute(pkg_query)
+                package = pkg_result.scalar_one_or_none()
+                
+                if not package:
+                    fail_details.append({
+                        "row": idx + 2,
+                        "iccid": item.iccid,
+                        "reason": f"销售套餐ID {item.sale_package_id} 不存在"
+                    })
+                    failed += 1
+                    continue
+                
+                # 3. 更新卡片信息
+                card.user_id = item.user_id
+                card.sale_package_id = item.sale_package_id
+                card.period_count = item.period_count
+                
+                # 设置卡类型（如果提供）
+                if item.card_type:
+                    card.card_type = CardType(item.card_type)
+                
+                # 设置日期
+                card.stock_out_date = item.stock_out_date
+                card.test_expire_date = item.test_expire_date
+                card.silent_expire_date = item.silent_expire_date
+                card.status = CardStatus.silent  # 出库后进入沉默期
+                card.stock_out_at = datetime.now()
+                
+                success += 1
+                
+            except Exception as e:
+                fail_details.append({
+                    "row": idx + 2,
+                    "iccid": item.iccid,
+                    "reason": str(e)
+                })
+                failed += 1
+        
+        await db.commit()
+        
+        return {
+            "total": total,
+            "success": success,
+            "failed": failed,
+            "fail_details": fail_details if fail_details else None
+        }
 
 
 stock_service = StockService()

@@ -140,6 +140,36 @@ class TrafficPoolCRUD:
         await db.refresh(pool)
         return pool
 
+    async def get_stats(
+        self,
+        db: AsyncSession,
+        user_id: Optional[int] = None
+    ) -> dict:
+        """获取流量池总体统计"""
+        query = select(TrafficPoolModel).where(TrafficPoolModel.is_deleted == 0)
+        
+        if user_id is not None:
+            query = query.where(TrafficPoolModel.user_id == user_id)
+        
+        result = await db.execute(query)
+        pools = result.scalars().all()
+        
+        total_pools = len(pools)
+        total_cards = sum(pool.card_count for pool in pools)
+        total_flow = sum(pool.data_total for pool in pools)
+        used_flow = sum(pool.data_used for pool in pools)
+        remaining_flow = total_flow - used_flow
+        alert_pools = sum(1 for pool in pools if pool.is_alert())
+        
+        return {
+            "total_pools": total_pools,
+            "total_cards": total_cards,
+            "total_flow": total_flow,
+            "used_flow": used_flow,
+            "remaining_flow": remaining_flow,
+            "alert_pools": alert_pools
+        }
+
 
 class PoolCardCRUD:
     """流量池卡片操作 CRUD"""
@@ -153,6 +183,8 @@ class PoolCardCRUD:
         remark: Optional[str] = None
     ) -> Tuple[int, int, List[dict]]:
         """添加卡片到流量池"""
+        from app.db.models.iot_card import CardType
+        
         success = 0
         failed = 0
         fail_details = []
@@ -169,6 +201,16 @@ class PoolCardCRUD:
             if not card:
                 failed += 1
                 fail_details.append({"card_id": card_id, "reason": "卡片不存在"})
+                continue
+
+            # 检查卡片类型：只有流量池卡才能加入流量池
+            if card.card_type != CardType.pool:
+                failed += 1
+                fail_details.append({
+                    "card_id": card_id,
+                    "iccid": card.iccid,
+                    "reason": "单卡类型不能加入流量池，只有流量池卡才能加入"
+                })
                 continue
 
             # 检查卡片是否已在其他池中
@@ -338,6 +380,56 @@ class PoolLogCRUD:
         items = result.scalars().all()
 
         return list(items), total
+
+
+    async def find_or_create_pool(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        carrier: str,
+        flow_size: int,
+        period_type: str,
+        created_by: int
+    ) -> TrafficPoolModel:
+        """查找或创建流量池（用于自动加入）"""
+        # 查找是否已存在相同规格的流量池
+        query = select(TrafficPoolModel).where(
+            TrafficPoolModel.user_id == user_id,
+            TrafficPoolModel.carrier == carrier,
+            TrafficPoolModel.flow_size == flow_size,
+            TrafficPoolModel.period_type == period_type,
+            TrafficPoolModel.status == PoolStatus.active,
+            TrafficPoolModel.is_deleted == 0
+        )
+        result = await db.execute(query)
+        pool = result.scalar_one_or_none()
+        
+        if pool:
+            return pool
+        
+        # 不存在则创建新流量池
+        from app.db.models.package import CARRIER_NAMES, PERIOD_CONFIG
+        
+        carrier_name = CARRIER_NAMES.get(carrier, carrier)
+        flow_display = f"{flow_size}MB" if flow_size < 1024 else f"{flow_size // 1024}GB"
+        period_name = PERIOD_CONFIG.get(period_type, {}).get("name", period_type)
+        
+        pool_name = f"{carrier_name}-{flow_display}-{period_name}-自动池"
+        
+        pool = await self.create(
+            db=db,
+            name=pool_name,
+            carrier=carrier,
+            flow_size=flow_size,
+            period_type=period_type,
+            user_id=user_id,
+            alert_threshold=80,  # 默认80%告警
+            stop_threshold=95,   # 默认95%停机
+            created_by=created_by,
+            remark="系统自动创建的流量池"
+        )
+        
+        return pool
 
 
 pool_crud = TrafficPoolCRUD()

@@ -44,6 +44,22 @@ async def get_pools(
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
 
 
+@router.get("/stats", summary="获取流量池总体统计", response_model=ResponseModel)
+async def get_pool_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    获取流量池总体统计
+    - 总流量池数、总卡片数
+    - 总流量、已用流量、剩余流量
+    - 告警流量池数
+    """
+    user_id = None if current_user.user_level == 1 else current_user.id
+    stats = await pool_service.get_pool_stats(db, user_id)
+    return ResponseModel(data=stats)
+
+
 @router.post("", summary="创建流量池", response_model=ResponseModel)
 async def create_pool(
     request: PoolCreate = Body(...),

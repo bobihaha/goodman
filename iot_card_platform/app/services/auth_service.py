@@ -11,6 +11,7 @@ from jwt.exceptions import PyJWTError
 from app.config import settings
 from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
 from app.db.models.sys_log import SysLoginLogModel, LoginType
+from app.db.models.log import SuperLoginLogModel
 from app.crud.sys_user_crud import sys_user_crud
 from app.crud.sys_menu_crud import sys_menu_crud
 from app.schemas.auth import LoginRequest, LoginResponse, CurrentUser, RefreshTokenRequest
@@ -126,8 +127,20 @@ class AuthService:
         access_token = cls.create_access_token(token_data, expires_delta=timedelta(minutes=settings.super_login_expire_minutes))
         refresh_token = cls.create_refresh_token(token_data)
         
+        # 记录登录日志
         login_log = SysLoginLogModel(user_id=target_user.id, account=target_user.account, login_type=LoginType.super_, operator_id=operator.id, is_success=1, ip=ip, user_agent=user_agent)
         db.add(login_log)
+        
+        # 记录超级登录日志
+        super_login_log = SuperLoginLogModel(
+            original_user_id=operator.id,
+            target_user_id=target_user.id,
+            login_at=datetime.now(),
+            ip=ip,
+            user_agent=user_agent
+        )
+        db.add(super_login_log)
+        await db.commit()
         
         return LoginResponse(
             access_token=access_token,
@@ -137,6 +150,53 @@ class AuthService:
                 id=target_user.id, parent_id=target_user.parent_id, user_level=target_user.user_level,
                 name=target_user.name, account=target_user.account, phone=target_user.phone, email=target_user.email,
                 avatar=target_user.avatar, status=target_user.status.value, permissions=permissions, is_super_login=True, original_user_id=operator.id
+            )
+        )
+    
+    @classmethod
+    async def exit_super_login(cls, db: AsyncSession, current_user: CurrentUser) -> LoginResponse:
+        """退出超级登录，恢复到原用户身份"""
+        if not current_user.is_super_login or not current_user.original_user_id:
+            raise BusinessException(code=400, msg="当前不在超级登录模式")
+        
+        # 获取原用户信息
+        original_user = await sys_user_crud.get_by_id(db, current_user.original_user_id)
+        if not original_user:
+            raise UserNotFoundException()
+        
+        if original_user.status != UserStatus.enable:
+            raise BusinessException(code=403, msg="原用户已被禁用")
+        
+        # 更新超级登录日志的退出时间
+        from sqlalchemy import select, update
+        stmt = (
+            update(SuperLoginLogModel)
+            .where(
+                SuperLoginLogModel.original_user_id == current_user.original_user_id,
+                SuperLoginLogModel.target_user_id == current_user.id,
+                SuperLoginLogModel.logout_at.is_(None)
+            )
+            .values(logout_at=datetime.now())
+        )
+        await db.execute(stmt)
+        await db.commit()
+        
+        # 获取原用户权限
+        permissions = await cls._get_user_permissions(db, original_user)
+        
+        # 生成新的token（不再是超级登录模式）
+        token_data = {"sub": str(original_user.id), "account": original_user.account, "user_level": original_user.user_level, "is_super_login": False}
+        access_token = cls.create_access_token(token_data)
+        refresh_token = cls.create_refresh_token(token_data)
+        
+        return LoginResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=settings.access_token_expire_minutes * 60,
+            user=CurrentUser(
+                id=original_user.id, parent_id=original_user.parent_id, user_level=original_user.user_level,
+                name=original_user.name, account=original_user.account, phone=original_user.phone, email=original_user.email,
+                avatar=original_user.avatar, status=original_user.status.value, permissions=permissions, is_super_login=False
             )
         )
     

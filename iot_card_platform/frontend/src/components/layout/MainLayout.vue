@@ -51,6 +51,9 @@
 
       <!-- 主内容区 -->
       <el-container class="main-container">
+        <!-- 超级登录横幅 -->
+        <SuperLoginBanner />
+        
         <!-- 顶部导航栏 -->
         <el-header class="header">
           <div class="header-left">
@@ -144,6 +147,7 @@ import {
   Setting as SettingIcon
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores'
+import SuperLoginBanner from '@/components/common/SuperLoginBanner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -161,63 +165,60 @@ const userInfo = computed(() => authStore.userInfo)
 // 当前激活的菜单
 const activeMenu = computed(() => route.path)
 
+// 图标映射（根据菜单code或path匹配图标）
+const iconMap: Record<string, any> = {
+  'dashboard': DataBoard,
+  'cards': CreditCard,
+  'card': CreditCard,
+  'packages': Box,
+  'package': Box,
+  'stock': Box,
+  'pools': Connection,
+  'pool': Connection,
+  'users': UserFilled,
+  'user': UserFilled,
+  'suppliers': OfficeBuilding,
+  'supplier': OfficeBuilding,
+  'system': SettingIcon,
+  'permissions': SettingIcon
+}
+
+// 从后端菜单数据转换为前端菜单格式
+const convertMenus = (menus: any[]) => {
+  return menus
+    .filter(menu => {
+      // 只显示 menu 和 directory 类型，过滤掉 button 类型
+      const type = menu.type?.value || menu.type
+      return type === 'menu' || type === 'directory'
+    })
+    .map(menu => {
+      // 根据菜单code或path匹配图标
+      const iconKey = menu.code || menu.path?.split('/')[1] || ''
+      const icon = iconMap[iconKey] || DataBoard
+
+      const converted: any = {
+        path: menu.path || `/${menu.code}`,
+        name: menu.name,
+        icon: icon
+      }
+
+      // 递归处理子菜单
+      if (menu.children && menu.children.length > 0) {
+        const childMenus = convertMenus(menu.children)
+        if (childMenus.length > 0) {
+          converted.children = childMenus
+        }
+      }
+
+      return converted
+    })
+}
+
 // 菜单列表（根据用户权限动态生成）
-// 使用 shallowRef 避免图标组件被深度响应式化
-const menuList = shallowRef([
-  {
-    path: '/dashboard',
-    name: '仪表盘',
-    icon: DataBoard
-  },
-  {
-    path: '/cards',
-    name: '卡片管理',
-    icon: CreditCard,
-    children: [
-      { path: '/cards/list', name: '卡片列表', icon: CreditCard },
-      { path: '/cards/transfer', name: '卡片划拨', icon: Connection }
-    ]
-  },
-  {
-    path: '/packages',
-    name: '套餐管理',
-    icon: Box,
-    children: [
-      { path: '/packages/supplier', name: '底层套餐', icon: Box },
-      { path: '/packages/sale', name: '销售套餐', icon: Box }
-    ]
-  },
-  {
-    path: '/stock',
-    name: '出入库',
-    icon: Box,
-    children: [
-      { path: '/stock/in', name: '卡片入库', icon: Box },
-      { path: '/stock/out', name: '卡片出库', icon: Box },
-      { path: '/stock/inventory', name: '库存管理', icon: Box }
-    ]
-  },
-  {
-    path: '/pools',
-    name: '流量池',
-    icon: Connection
-  },
-  {
-    path: '/users',
-    name: '客户管理',
-    icon: UserFilled
-  },
-  {
-    path: '/suppliers',
-    name: '供应商',
-    icon: OfficeBuilding
-  },
-  {
-    path: '/system',
-    name: '系统设置',
-    icon: SettingIcon
-  }
-])
+const menuList = computed(() => {
+  const userMenus = authStore.menus || []
+  return convertMenus(userMenus)
+})
 
 // 面包屑
 const breadcrumbs = computed(() => {

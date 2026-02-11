@@ -348,3 +348,6 @@ curl -X POST http://localhost:8000/api/v1/stock/recycle \
 **开发者**: AI Assistant
 **预计剩余时间**: 2-3小时（创建表 + 实现CRUD + 测试）
 
+
+
+

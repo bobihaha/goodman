@@ -278,6 +278,11 @@ class StockOutCRUD:
         card_ids: List[int],
         to_user_id: int,
         sale_package_id: int,
+        period_count: int,
+        card_type: Optional[str],
+        stock_out_date,
+        test_expire_date,
+        silent_expire_date,
         created_by: int,
         remark: Optional[str] = None
     ) -> Tuple[StockOutRecordModel, int, int]:
@@ -316,6 +321,15 @@ class StockOutCRUD:
             if card:
                 card.user_id = to_user_id
                 card.sale_package_id = sale_package_id
+                card.period_count = period_count
+                # 设置卡类型（如果提供）
+                if card_type:
+                    from app.db.models.iot_card import CardType
+                    card.card_type = CardType(card_type)
+                # 设置日期
+                card.stock_out_date = stock_out_date
+                card.test_expire_date = test_expire_date
+                card.silent_expire_date = silent_expire_date
                 card.status = CardStatus.silent  # 出库后进入沉默期
                 card.stock_out_at = datetime.now()
                 success_count += 1
@@ -664,6 +678,7 @@ class StockInRecordCRUD:
     async def get_record_detail(self, db: AsyncSession, record_id: int) -> Optional[dict]:
         """获取入库记录详情"""
         from sqlalchemy import text
+        from app.db.models.iot_card import CARD_STATUS_NAMES
         
         query_sql = """
             SELECT 
@@ -705,7 +720,8 @@ class StockInRecordCRUD:
                 "iccid": card_row.iccid,
                 "imsi": card_row.imsi,
                 "msisdn": card_row.msisdn,
-                "status": card_row.status
+                "status": card_row.status,
+                "status_name": CARD_STATUS_NAMES.get(card_row.status, card_row.status)
             })
         
         data = {
@@ -837,6 +853,7 @@ class StockOutRecordCRUD:
     async def get_record_detail(self, db: AsyncSession, record_id: int) -> Optional[dict]:
         """获取出库记录详情"""
         from sqlalchemy import text
+        from app.db.models.iot_card import CARD_STATUS_NAMES
         
         query_sql = """
             SELECT 
@@ -878,7 +895,8 @@ class StockOutRecordCRUD:
                 "iccid": card_row.iccid,
                 "imsi": card_row.imsi,
                 "msisdn": card_row.msisdn,
-                "status": card_row.status
+                "status": card_row.status,
+                "status_name": CARD_STATUS_NAMES.get(card_row.status, card_row.status)
             })
         
         data = {

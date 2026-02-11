@@ -47,6 +47,13 @@ async def super_login(request: Request, data: SuperLoginRequest = Body(...), db:
     return ResponseModel(data=result.model_dump())
 
 
+@router.post("/exit-super-login", summary="退出超级登录", response_model=ResponseModel)
+async def exit_super_login(db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    """退出超级登录，恢复到原用户身份"""
+    result = await auth_service.exit_super_login(db, current_user)
+    return ResponseModel(data=result.model_dump(), msg="已退出超级登录")
+
+
 @router.get("/profile", summary="获取当前用户信息", response_model=ResponseModel)
 async def get_profile(current_user: CurrentUser = Depends(get_current_user)):
     return ResponseModel(data=current_user.model_dump())
