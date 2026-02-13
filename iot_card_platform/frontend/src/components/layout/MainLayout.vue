@@ -9,7 +9,7 @@
             <h1 v-else class="logo-title-mini">IoT</h1>
           </transition>
         </div>
-        
+
         <el-scrollbar class="menu-scrollbar">
           <el-menu
             :default-active="activeMenu"
@@ -36,7 +36,7 @@
                   </template>
                 </el-menu-item>
               </el-sub-menu>
-              
+
               <!-- 无子菜单 -->
               <el-menu-item v-else :index="item.path">
                 <template #default>
@@ -53,7 +53,7 @@
       <el-container class="main-container">
         <!-- 超级登录横幅 -->
         <SuperLoginBanner />
-        
+
         <!-- 顶部导航栏 -->
         <el-header class="header">
           <div class="header-left">
@@ -61,7 +61,7 @@
               <Fold v-if="!isCollapse" />
               <Expand v-else />
             </el-icon>
-            
+
             <!-- 面包屑 -->
             <el-breadcrumb separator="/" class="breadcrumb">
               <el-breadcrumb-item
@@ -127,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, shallowRef } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -144,7 +144,8 @@ import {
   Connection,
   UserFilled,
   OfficeBuilding,
-  Setting as SettingIcon
+  Setting as SettingIcon,
+  WarningFilled
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores'
 import SuperLoginBanner from '@/components/common/SuperLoginBanner.vue'
@@ -179,7 +180,12 @@ const iconMap: Record<string, any> = {
   'user': UserFilled,
   'suppliers': OfficeBuilding,
   'supplier': OfficeBuilding,
+  'suspend': WarningFilled,
+  'suspend_policy': SettingIcon,
+  'suspend_logs': CreditCard,
+  'suspend_alerts': WarningFilled,
   'system': SettingIcon,
+  'system_config': SettingIcon,
   'permissions': SettingIcon
 }
 
@@ -227,12 +233,12 @@ const breadcrumbs = computed(() => {
     name: item.meta.title as string,
     path: item.path
   }))
-  
+
   // 如果不是首页，添加首页到面包屑
   if (route.path !== '/dashboard') {
     breadcrumbList.unshift({ name: '首页', path: '/dashboard' })
   }
-  
+
   return breadcrumbList
 })
 
@@ -361,7 +367,7 @@ watch(
         color: #fff;
         font-weight: 600;
         box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-        
+
         &::before {
           content: '';
           position: absolute;
@@ -388,14 +394,14 @@ watch(
 
     :deep(.el-menu--inline) {
       background: rgba(0, 0, 0, 0.2);
-      
+
       .el-menu-item {
         padding-left: 48px !important;
-        
+
         &.is-active {
           background: rgba(102, 126, 234, 0.25) !important;
           color: #a8b5ff;
-          
+
           &::before {
             left: 8px;
             width: 3px;
@@ -533,4 +539,3 @@ watch(
   transform: translateX(30px);
 }
 </style>
-

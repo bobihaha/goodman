@@ -22,6 +22,7 @@ export interface User {
   quota?: {             // 配额设置
     max_cards: number
     max_sub_users: number
+    pool_stop_threshold?: number  // 流量池停卡阈值(%)，如120表示用量达120%时全池停卡
   }
   permissions?: string[]     // 用户权限列表
   is_super_login?: boolean   // 是否超级登录模式
@@ -58,6 +59,7 @@ export interface UserCreateRequest {
   quota?: {             // 配额设置
     max_cards: number
     max_sub_users: number
+    pool_stop_threshold?: number  // 流量池停卡阈值(%)
   }
   remark?: string       // 备注
   status?: UserStatus   // 状态（默认enable）
@@ -75,6 +77,7 @@ export interface UserUpdateRequest {
   quota?: {
     max_cards: number
     max_sub_users: number
+    pool_stop_threshold?: number  // 流量池停卡阈值(%)
   }
   remark?: string
   status?: UserStatus

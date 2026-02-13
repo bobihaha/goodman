@@ -46,8 +46,9 @@ class TrafficPoolModel(BaseModel):
     addon_flow = Column(BigInteger, nullable=False, default=0, comment="叠加流量包(MB)")
     
     # 阈值设置
-    alert_threshold = Column(Integer, nullable=True, comment="告警阈值百分比")
-    stop_threshold = Column(Integer, nullable=True, comment="停卡阈值百分比")
+    alert_threshold_1 = Column(Integer, nullable=True, comment="告警阈值1百分比")
+    alert_threshold_2 = Column(Integer, nullable=True, comment="告警阈值2百分比")
+    alert_threshold_3 = Column(Integer, nullable=True, comment="告警阈值3百分比")
     
     # 状态
     status = Column(Enum(PoolStatus), nullable=False, default=PoolStatus.enable, comment="状态")
@@ -91,18 +92,28 @@ class TrafficPoolModel(BaseModel):
 
     def is_alert(self) -> bool:
         """是否达到告警阈值"""
-        if not self.alert_threshold:
-            return False
-        return self.get_usage_percent() >= self.alert_threshold
+        usage = self.get_usage_percent()
+        if self.alert_threshold_1 and usage >= self.alert_threshold_1:
+            return True
+        if self.alert_threshold_2 and usage >= self.alert_threshold_2:
+            return True
+        if self.alert_threshold_3 and usage >= self.alert_threshold_3:
+            return True
+        return False
 
     def is_exceed(self) -> bool:
-        """是否超过停卡阈值"""
-        if not self.stop_threshold:
+        """是否超过最高阈值"""
+        if not self.alert_threshold_3:
             return False
-        return self.get_usage_percent() >= self.stop_threshold
+        return self.get_usage_percent() >= self.alert_threshold_3
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_card_stats=False, card_stats=None):
+        """
+        转换为字典
+        :param include_card_stats: 是否包含卡片统计信息
+        :param card_stats: 卡片统计数据（如果已经查询过）
+        """
+        result = {
             "id": self.id,
             "name": self.name,
             "carrier": self.carrier.value if self.carrier else None,
@@ -121,8 +132,9 @@ class TrafficPoolModel(BaseModel):
             "package_flow": self.package_flow,
             "addon_flow": self.addon_flow,
             "usage_percent": self.get_usage_percent(),
-            "alert_threshold": self.alert_threshold,
-            "stop_threshold": self.stop_threshold,
+            "alert_threshold_1": self.alert_threshold_1,
+            "alert_threshold_2": self.alert_threshold_2,
+            "alert_threshold_3": self.alert_threshold_3,
             "is_alert": self.is_alert(),
             "is_exceed": self.is_exceed(),
             "status": self.status.value if self.status else None,
@@ -133,6 +145,12 @@ class TrafficPoolModel(BaseModel):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+        
+        # 如果需要包含卡片统计信息
+        if include_card_stats and card_stats:
+            result["card_stats"] = card_stats
+        
+        return result
 
 
 class PoolCardLogModel(BaseModel):

@@ -257,8 +257,3 @@ export const useAuthStore = defineStore('auth', () => {
     hasPermission
   }
 })
-
-
-
-
-

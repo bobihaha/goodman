@@ -66,10 +66,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dashboardApi, type OverUsageCard } from '@/api'
 import { formatCarrier, formatFlowSize, formatPercent } from '@/utils/formatter'
 
+const router = useRouter()
 const loading = ref(false)
 const overUsageCards = ref<OverUsageCard[]>([])
 
@@ -97,7 +99,7 @@ const handleRecharge = (card: OverUsageCard) => {
 
 // 查看全部
 const handleViewAll = () => {
-  ElMessage.info('跳转到卡片管理页面')
+  router.push('/cards/list')
 }
 
 onMounted(() => {
@@ -113,9 +115,3 @@ onMounted(() => {
   font-weight: 600;
 }
 </style>
-
-
-
-
-
-

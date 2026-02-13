@@ -56,3 +56,6 @@ class PermissionModule(BaseModel):
     permissions: List[PermissionInfo] = Field(default_factory=list, description="权限列表")
 
 
+
+
+

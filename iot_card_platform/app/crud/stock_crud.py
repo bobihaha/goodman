@@ -238,7 +238,6 @@ class StockInCRUD:
         await db.refresh(record)
 
         # 更新批次计数
-        batch_crud = PurchaseBatchCRUD()
         await batch_crud.update_counts(db, batch_id, stocked_delta=success_count)
 
         return record, fail_details
@@ -306,6 +305,7 @@ class StockOutCRUD:
         success_count = 0
         batch_updates = {}
         out_card_infos = []  # 记录成功出库的卡片信息
+        first_card_spec = None  # 保存第一张卡的规格信息，用于预创建流量池
 
         for card_id in card_ids:
             # 获取卡片
@@ -319,6 +319,13 @@ class StockOutCRUD:
             card = card_result.scalar_one_or_none()
 
             if card:
+                # 保存第一张卡的规格信息（在 commit 前提取，避免 session expired 问题）
+                if first_card_spec is None:
+                    first_card_spec = {
+                        "carrier": card.carrier.value if card.carrier else None,
+                        "flow_size": card.flow_size,
+                        "period_type": card.period_type.value if card.period_type else None,
+                    }
                 card.user_id = to_user_id
                 card.sale_package_id = sale_package_id
                 card.period_count = period_count
@@ -384,9 +391,37 @@ class StockOutCRUD:
         await db.refresh(record)
 
         # 更新批次计数
-        batch_crud = PurchaseBatchCRUD()
         for batch_id, count in batch_updates.items():
             await batch_crud.update_counts(db, batch_id, out_delta=count)
+
+        # 如果是流量池卡，预创建流量池并将卡片加入
+        if card_type == "pool" and success_count > 0 and first_card_spec:
+            try:
+                from app.crud.pool_crud import pool_crud
+                pool = await pool_crud.find_or_create_pool(
+                    db=db,
+                    user_id=to_user_id,
+                    carrier=first_card_spec["carrier"],
+                    flow_size=first_card_spec["flow_size"],
+                    period_type=first_card_spec["period_type"],
+                    created_by=created_by,
+                    sale_package_id=sale_package_id
+                )
+                # 将出库的卡片加入流量池
+                if pool:
+                    out_card_ids = [info["card_id"] for info in out_card_infos]
+                    await db.execute(
+                        IotCardModel.__table__.update()
+                        .where(IotCardModel.id.in_(out_card_ids))
+                        .values(pool_id=pool.id, is_pool_member=1)
+                    )
+                    # 更新流量池卡片数
+                    pool.card_count = (pool.card_count or 0) + len(out_card_ids)
+                    await db.commit()
+            except Exception as e:
+                import traceback
+                print(f"出库预创建流量池失败: {str(e)}")
+                traceback.print_exc()
 
         return record, success_count, len(card_ids) - success_count
 

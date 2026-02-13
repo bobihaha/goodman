@@ -112,4 +112,3 @@ export const cardApi = {
     return post<Blob>('/cards/export', params, { responseType: 'blob' })
   }
 }
-

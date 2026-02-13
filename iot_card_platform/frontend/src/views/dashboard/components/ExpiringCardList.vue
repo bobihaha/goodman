@@ -52,10 +52,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dashboardApi, type ExpiringCard } from '@/api'
 import { formatCarrier, formatDateShort } from '@/utils/formatter'
 
+const router = useRouter()
 const loading = ref(false)
 const expiringCards = ref<ExpiringCard[]>([])
 
@@ -85,7 +87,7 @@ const handleRenew = (card: ExpiringCard) => {
 
 // 查看全部
 const handleViewAll = () => {
-  ElMessage.info('跳转到卡片管理页面')
+  router.push('/cards/list')
 }
 
 onMounted(() => {
@@ -101,9 +103,3 @@ onMounted(() => {
   font-weight: 600;
 }
 </style>
-
-
-
-
-
-

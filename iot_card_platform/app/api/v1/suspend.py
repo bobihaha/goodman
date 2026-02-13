@@ -8,7 +8,7 @@ from datetime import datetime
 
 from app.db.database import get_db
 from app.utils.auth import get_current_user, require_super_admin
-from app.schemas.common import ResponseModel, PageResponseModel
+from app.schemas.common import ResponseModel
 from app.schemas.suspend import (
     PolicyCreate, PolicyUpdate, ManualSuspend, ManualResume, AlertHandle
 )
@@ -44,12 +44,12 @@ async def get_policies(
         page_size=page_size
     )
     
-    return PageResponseModel(
-        data=policies,
-        total=total,
-        page=page,
-        page_size=page_size
-    )
+    return ResponseModel(data={
+        "items": policies,
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    })
 
 
 @router.post("/policies", summary="创建停卡策略")
@@ -147,7 +147,7 @@ async def manual_resume(
     """手动复机"""
     is_admin = current_user.user_level == 1
     user_id = current_user.id
-    
+
     result = await SuspendActionService.manual_resume(
         db=db,
         data=data,
@@ -155,7 +155,7 @@ async def manual_resume(
         user_id=user_id,
         is_admin=is_admin
     )
-    
+
     return ResponseModel(
         data={
             "success_count": result.success_count,
@@ -164,6 +164,32 @@ async def manual_resume(
             "fail_cards": result.fail_cards
         },
         msg=f"复机完成，成功{result.success_count}张，失败{result.fail_count}张"
+    )
+
+
+@router.post("/cards/force-activate", summary="批量强制激活")
+async def force_activate(
+    data: ManualResume,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_super_admin)
+):
+    """批量强制激活 (仅超级管理员)"""
+    result = await SuspendActionService.manual_resume(
+        db=db,
+        data=data,
+        operator_id=current_user.id,
+        user_id=current_user.id,
+        is_admin=True
+    )
+
+    return ResponseModel(
+        data={
+            "success_count": result.success_count,
+            "fail_count": result.fail_count,
+            "success_cards": result.success_cards,
+            "fail_cards": result.fail_cards
+        },
+        msg=f"强制激活完成，成功{result.success_count}张，失败{result.fail_count}张"
     )
 
 
@@ -223,12 +249,12 @@ async def get_suspend_logs(
         page_size=page_size
     )
     
-    return PageResponseModel(
-        data=logs,
-        total=total,
-        page=page,
-        page_size=page_size
-    )
+    return ResponseModel(data={
+        "items": logs,
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    })
 
 
 # ============ 告警管理 ============
@@ -261,12 +287,12 @@ async def get_alerts(
         page_size=page_size
     )
     
-    return PageResponseModel(
-        data=alerts,
-        total=total,
-        page=page,
-        page_size=page_size
-    )
+    return ResponseModel(data={
+        "items": alerts,
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    })
 
 
 @router.get("/alerts/stats", summary="获取未处理告警统计")

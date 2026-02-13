@@ -1,5 +1,10 @@
 <template>
-  <el-card class="stat-card" :body-style="{ padding: '20px' }">
+  <el-card 
+    class="stat-card" 
+    :class="{ 'is-clickable': clickable }"
+    :body-style="{ padding: '20px' }"
+    @click="handleClick"
+  >
     <div class="stat-content">
       <div class="stat-icon" :style="{ background: iconBg }">
         <el-icon :size="32" :color="iconColor">
@@ -28,19 +33,33 @@ interface Props {
   iconBg: string
   extra?: string
   extraColor?: string
+  clickable?: boolean
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  (e: 'click'): void
+}>()
+
+const handleClick = () => {
+  if (props.clickable) {
+    emit('click')
+  }
+}
 </script>
 
 <style scoped lang="scss">
 .stat-card {
-  cursor: pointer;
   transition: all 0.3s;
 
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  &.is-clickable {
+    cursor: pointer;
+
+    &:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
   }
 
   .stat-content {
@@ -83,9 +102,3 @@ defineProps<Props>()
   }
 }
 </style>
-
-
-
-
-
-

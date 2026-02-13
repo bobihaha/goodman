@@ -116,7 +116,7 @@ class StockOutCreate(BaseModel):
     to_user_id: int = Field(..., description="目标用户ID")
     sale_package_id: int = Field(..., description="销售套餐ID")
     period_count: int = Field(..., ge=1, description="套餐周期数量")
-    card_type: Optional[str] = Field(None, description="卡类型: single=单卡, pool=流量池卡（仅月包需要）")
+    card_type: Optional[str] = Field(None, description="卡类型: single=单卡, pool=流量池卡")
     stock_out_date: date = Field(..., description="出库日期")
     test_expire_date: Optional[date] = Field(None, description="测试期截止日期")
     silent_expire_date: date = Field(..., description="沉默期截止日期")

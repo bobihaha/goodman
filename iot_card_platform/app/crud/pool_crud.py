@@ -19,8 +19,10 @@ class TrafficPoolCRUD:
         flow_size: int,
         period_type: str,
         user_id: Optional[int] = None,
-        alert_threshold: Optional[int] = None,
-        stop_threshold: Optional[int] = None,
+        sale_package_id: Optional[int] = None,
+        alert_threshold_1: Optional[int] = None,
+        alert_threshold_2: Optional[int] = None,
+        alert_threshold_3: Optional[int] = None,
         created_by: Optional[int] = None,
         remark: Optional[str] = None
     ) -> TrafficPoolModel:
@@ -31,8 +33,10 @@ class TrafficPoolCRUD:
             flow_size=flow_size,
             period_type=period_type,
             user_id=user_id,
-            alert_threshold=alert_threshold,
-            stop_threshold=stop_threshold,
+            sale_package_id=sale_package_id,
+            alert_threshold_1=alert_threshold_1,
+            alert_threshold_2=alert_threshold_2,
+            alert_threshold_3=alert_threshold_3,
             created_by=created_by,
             remark=remark
         )
@@ -54,6 +58,7 @@ class TrafficPoolCRUD:
         self,
         db: AsyncSession,
         user_id: Optional[int] = None,
+        name: Optional[str] = None,
         carrier: Optional[str] = None,
         status: Optional[str] = None,
         page: int = 1,
@@ -66,6 +71,9 @@ class TrafficPoolCRUD:
         if user_id is not None:
             query = query.where(TrafficPoolModel.user_id == user_id)
             count_query = count_query.where(TrafficPoolModel.user_id == user_id)
+        if name:
+            query = query.where(TrafficPoolModel.name.like(f"%{name}%"))
+            count_query = count_query.where(TrafficPoolModel.name.like(f"%{name}%"))
         if carrier:
             query = query.where(TrafficPoolModel.carrier == carrier)
             count_query = count_query.where(TrafficPoolModel.carrier == carrier)
@@ -115,7 +123,7 @@ class TrafficPoolCRUD:
         return True
 
     async def update_stats(self, db: AsyncSession, pool_id: int) -> Optional[TrafficPoolModel]:
-        """更新流量池统计数据"""
+        """更新流量池统计数据，并检查是否需要停卡"""
         pool = await self.get_by_id(db, pool_id)
         if not pool:
             return None
@@ -138,7 +146,55 @@ class TrafficPoolCRUD:
 
         await db.commit()
         await db.refresh(pool)
+
+        # 检查是否需要根据用户设置的停卡阈值进行停卡
+        await self._check_pool_stop_threshold(db, pool)
+
         return pool
+
+    async def _check_pool_stop_threshold(self, db: AsyncSession, pool: TrafficPoolModel) -> None:
+        """检查流量池是否超过用户设置的停卡阈值，超过则全池停卡"""
+        if not pool.user_id:
+            return
+
+        usage_percent = pool.get_usage_percent()
+        if usage_percent <= 0:
+            return
+
+        # 查询用户的 quota 配置获取 pool_stop_threshold
+        from sqlalchemy import text
+        user_query = text("SELECT quota FROM sys_users WHERE id = :user_id AND is_deleted = 0")
+        user_result = await db.execute(user_query, {"user_id": pool.user_id})
+        user_row = user_result.fetchone()
+
+        if not user_row or not user_row.quota:
+            return
+
+        import json
+        quota = user_row.quota if isinstance(user_row.quota, dict) else json.loads(user_row.quota)
+        pool_stop_threshold = quota.get("pool_stop_threshold")
+
+        if pool_stop_threshold is None:
+            return
+
+        if usage_percent >= pool_stop_threshold:
+            # 超过阈值，将池内所有已激活卡片停卡
+            from app.db.models.iot_card import SuspendType
+            suspend_stmt = (
+                update(IotCardModel)
+                .where(
+                    IotCardModel.pool_id == pool.id,
+                    IotCardModel.status == CardStatus.activated,
+                    IotCardModel.is_deleted == 0
+                )
+                .values(
+                    status=CardStatus.suspended,
+                    suspend_type=SuspendType.pool_exceed,
+                    suspend_reason=f"流量池用量超限停卡(用量{usage_percent}%，阈值{pool_stop_threshold}%)"
+                )
+            )
+            await db.execute(suspend_stmt)
+            await db.commit()
 
     async def get_stats(
         self,
@@ -158,17 +214,80 @@ class TrafficPoolCRUD:
         total_cards = sum(pool.card_count for pool in pools)
         total_flow = sum(pool.data_total for pool in pools)
         used_flow = sum(pool.data_used for pool in pools)
-        remaining_flow = total_flow - used_flow
         alert_pools = sum(1 for pool in pools if pool.is_alert())
-        
+        enabled_count = sum(1 for p in pools if p.status == PoolStatus.enable)
+        disabled_count = sum(1 for p in pools if p.status == PoolStatus.disable)
+
+        by_carrier = {"cmcc": 0, "cucc": 0, "ctcc": 0}
+        for p in pools:
+            carrier_val = p.carrier.value if p.carrier else None
+            if carrier_val in by_carrier:
+                by_carrier[carrier_val] += 1
+
         return {
-            "total_pools": total_pools,
+            "total": total_pools,
+            "enabled": enabled_count,
+            "disabled": disabled_count,
+            "alert_count": alert_pools,
             "total_cards": total_cards,
             "total_flow": total_flow,
             "used_flow": used_flow,
-            "remaining_flow": remaining_flow,
-            "alert_pools": alert_pools
+            "by_carrier": by_carrier
         }
+
+    async def find_or_create_pool(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        carrier: str,
+        flow_size: int,
+        period_type: str,
+        created_by: int,
+        sale_package_id: Optional[int] = None
+    ) -> TrafficPoolModel:
+        """查找或创建流量池（用于自动加入）"""
+        # 查找是否已存在相同规格的流量池
+        query = select(TrafficPoolModel).where(
+            TrafficPoolModel.user_id == user_id,
+            TrafficPoolModel.carrier == carrier,
+            TrafficPoolModel.flow_size == flow_size,
+            TrafficPoolModel.period_type == period_type,
+            TrafficPoolModel.status == PoolStatus.enable,
+            TrafficPoolModel.is_deleted == 0
+        )
+        if sale_package_id is not None:
+            query = query.where(TrafficPoolModel.sale_package_id == sale_package_id)
+        result = await db.execute(query)
+        pool = result.scalar_one_or_none()
+
+        if pool:
+            return pool
+
+        # 不存在则创建新流量池
+        from app.db.models.package import CARRIER_NAMES, PERIOD_CONFIG
+
+        carrier_name = CARRIER_NAMES.get(carrier, carrier)
+        flow_display = f"{flow_size}MB" if flow_size < 1024 else f"{flow_size // 1024}GB"
+        period_name = PERIOD_CONFIG.get(period_type, {}).get("name", period_type)
+
+        pool_name = f"{carrier_name}-{flow_display}-{period_name}-自动池"
+
+        pool = await self.create(
+            db=db,
+            name=pool_name,
+            carrier=carrier,
+            flow_size=flow_size,
+            period_type=period_type,
+            user_id=user_id,
+            sale_package_id=sale_package_id,
+            alert_threshold_1=80,
+            alert_threshold_2=90,
+            alert_threshold_3=95,
+            created_by=created_by,
+            remark="系统自动创建的流量池"
+        )
+
+        return pool
 
 
 class PoolCardCRUD:
@@ -380,56 +499,6 @@ class PoolLogCRUD:
         items = result.scalars().all()
 
         return list(items), total
-
-
-    async def find_or_create_pool(
-        self,
-        db: AsyncSession,
-        user_id: int,
-        carrier: str,
-        flow_size: int,
-        period_type: str,
-        created_by: int
-    ) -> TrafficPoolModel:
-        """查找或创建流量池（用于自动加入）"""
-        # 查找是否已存在相同规格的流量池
-        query = select(TrafficPoolModel).where(
-            TrafficPoolModel.user_id == user_id,
-            TrafficPoolModel.carrier == carrier,
-            TrafficPoolModel.flow_size == flow_size,
-            TrafficPoolModel.period_type == period_type,
-            TrafficPoolModel.status == PoolStatus.active,
-            TrafficPoolModel.is_deleted == 0
-        )
-        result = await db.execute(query)
-        pool = result.scalar_one_or_none()
-        
-        if pool:
-            return pool
-        
-        # 不存在则创建新流量池
-        from app.db.models.package import CARRIER_NAMES, PERIOD_CONFIG
-        
-        carrier_name = CARRIER_NAMES.get(carrier, carrier)
-        flow_display = f"{flow_size}MB" if flow_size < 1024 else f"{flow_size // 1024}GB"
-        period_name = PERIOD_CONFIG.get(period_type, {}).get("name", period_type)
-        
-        pool_name = f"{carrier_name}-{flow_display}-{period_name}-自动池"
-        
-        pool = await self.create(
-            db=db,
-            name=pool_name,
-            carrier=carrier,
-            flow_size=flow_size,
-            period_type=period_type,
-            user_id=user_id,
-            alert_threshold=80,  # 默认80%告警
-            stop_threshold=95,   # 默认95%停机
-            created_by=created_by,
-            remark="系统自动创建的流量池"
-        )
-        
-        return pool
 
 
 pool_crud = TrafficPoolCRUD()

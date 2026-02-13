@@ -2,6 +2,7 @@
 出入库管理服务层
 """
 from typing import Optional, List, Tuple
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.crud.stock_crud import (
@@ -32,7 +33,6 @@ class StockService:
         remark: Optional[str] = None
     ) -> dict:
         """创建采购批次"""
-        # 获取底层套餐信息
         pkg_query = select(SupplierPackageModel).where(
             SupplierPackageModel.id == package_id,
             SupplierPackageModel.is_deleted == 0
@@ -74,21 +74,16 @@ class StockService:
             page_size=page_size
         )
 
-        # 关联供应商和套餐名称
         result = []
         for item in items:
             data = item.to_dict()
-            # 获取供应商名称
             supplier_query = select(SupplierModel.name).where(SupplierModel.id == item.supplier_id)
             supplier_result = await db.execute(supplier_query)
-            supplier_name = supplier_result.scalar_one_or_none()
-            data["supplier_name"] = supplier_name
+            data["supplier_name"] = supplier_result.scalar_one_or_none()
 
-            # 获取套餐名称
             pkg_query = select(SupplierPackageModel.name).where(SupplierPackageModel.id == item.package_id)
             pkg_result = await db.execute(pkg_query)
-            pkg_name = pkg_result.scalar_one_or_none()
-            data["package_name"] = pkg_name
+            data["package_name"] = pkg_result.scalar_one_or_none()
 
             result.append(data)
 
@@ -221,13 +216,11 @@ class StockService:
             page=page,
             page_size=page_size
         )
-        
-        # 关联供应商名称和批次号
+
         result = []
         for item in items:
             data = item.to_dict()
-            
-            # 获取供应商名称
+
             if item.supplier_id:
                 supplier_query = select(SupplierModel.name).where(
                     SupplierModel.id == item.supplier_id,
@@ -237,8 +230,7 @@ class StockService:
                 data["supplier_name"] = supplier_result.scalar_one_or_none()
             else:
                 data["supplier_name"] = None
-            
-            # 获取批次号
+
             if item.batch_id:
                 batch_query = select(PurchaseBatchModel.batch_no).where(
                     PurchaseBatchModel.id == item.batch_id,
@@ -248,9 +240,9 @@ class StockService:
                 data["batch_no"] = batch_result.scalar_one_or_none()
             else:
                 data["batch_no"] = None
-            
+
             result.append(data)
-        
+
         return result, total
 
     # ============ 入库记录 ============
@@ -419,15 +411,14 @@ class StockService:
         """Excel批量出库"""
         from app.db.models.iot_card import IotCardModel, CardStatus, CardType
         from app.db.models.package import SalePackageModel
-        
+
         total = len(items)
         success = 0
         failed = 0
         fail_details = []
-        
+
         for idx, item in enumerate(items):
             try:
-                # 1. 根据ICCID查找卡片
                 card_query = select(IotCardModel).where(
                     IotCardModel.iccid == item.iccid,
                     IotCardModel.status == CardStatus.stock,
@@ -435,24 +426,23 @@ class StockService:
                 )
                 card_result = await db.execute(card_query)
                 card = card_result.scalar_one_or_none()
-                
+
                 if not card:
                     fail_details.append({
-                        "row": idx + 2,  # Excel行号（从2开始，因为第1行是表头）
+                        "row": idx + 2,
                         "iccid": item.iccid,
                         "reason": "卡片不存在或不在库存状态"
                     })
                     failed += 1
                     continue
-                
-                # 2. 验证销售套餐
+
                 pkg_query = select(SalePackageModel).where(
                     SalePackageModel.id == item.sale_package_id,
                     SalePackageModel.is_deleted == 0
                 )
                 pkg_result = await db.execute(pkg_query)
                 package = pkg_result.scalar_one_or_none()
-                
+
                 if not package:
                     fail_details.append({
                         "row": idx + 2,
@@ -461,25 +451,22 @@ class StockService:
                     })
                     failed += 1
                     continue
-                
-                # 3. 更新卡片信息
+
                 card.user_id = item.user_id
                 card.sale_package_id = item.sale_package_id
                 card.period_count = item.period_count
-                
-                # 设置卡类型（如果提供）
+
                 if item.card_type:
                     card.card_type = CardType(item.card_type)
-                
-                # 设置日期
+
                 card.stock_out_date = item.stock_out_date
                 card.test_expire_date = item.test_expire_date
                 card.silent_expire_date = item.silent_expire_date
-                card.status = CardStatus.silent  # 出库后进入沉默期
+                card.status = CardStatus.silent
                 card.stock_out_at = datetime.now()
-                
+
                 success += 1
-                
+
             except Exception as e:
                 fail_details.append({
                     "row": idx + 2,
@@ -487,9 +474,9 @@ class StockService:
                     "reason": str(e)
                 })
                 failed += 1
-        
+
         await db.commit()
-        
+
         return {
             "total": total,
             "success": success,

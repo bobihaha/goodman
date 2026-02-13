@@ -743,3 +743,479 @@ INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, 
 ('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
 
 COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;
+
+INSERT INTO `sale_packages` (`id`, `user_id`, `base_package_id`, `name`, `code`, `carrier`, `flow_size`, `period_type`, `effective_days`, `price_cost`, `price_sale`, `is_public`, `sort_order`, `remark`) VALUES
+(1, NULL, 1, '标准移动1G/月', 'SALE_CMCC_1G_M', 'cmcc', 1024, 'monthly', 30, 10.00, 15.00, 1, 1, '销售用移动1GB月套餐'),
+(2, NULL, 2, '标准移动3G/月', 'SALE_CMCC_3G_M', 'cmcc', 3072, 'monthly', 30, 25.00, 35.00, 1, 2, '销售用移动3GB月套餐'),
+(3, NULL, 4, '标准移动1G/年', 'SALE_CMCC_1G_Y', 'cmcc', 1024, 'yearly', 360, 80.00, 120.00, 1, 3, '销售用移动1GB年套餐'),
+(4, NULL, 6, '标准联通1G/月', 'SALE_CUCC_1G_M', 'cucc', 1024, 'monthly', 30, 9.00, 14.00, 1, 4, '销售用联通1GB月套餐');
+
+-- 测试用户 (代理商)
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (2, 1, 2, '测试代理商', 'agent01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138001', 'enable', '测试代理商账号');
+
+-- 测试子用户
+INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `remark`)
+VALUES (3, 2, 3, '测试子用户', 'subuser01', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138002', 'enable', '测试子用户账号');
+
+-- 物联网卡示例数据 (分配给测试代理商)
+INSERT INTO `iot_cards` (`iccid`, `imsi`, `msisdn`, `user_id`, `supplier_id`, `sale_package_id`, `carrier`, `flow_size`, `period_type`, `card_type`, `test_expire_date`, `silent_expire_date`, `activated_at`, `expired_at`, `data_used`, `data_total`, `data_used_month`, `status`, `remark`, `stock_in_at`, `stock_out_at`) VALUES
+-- 已激活的卡
+('89860012345678901234', '460001234567890', '14712345678', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 512, 1024, 512, 'activated', '设备A-路灯监控', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901235', '460001234567891', '14712345679', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 800, 1024, 800, 'activated', '设备B-水表监测', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+('89860012345678901236', '460001234567892', '14712345680', 2, 1, 2, 'cmcc', 3072, 'monthly', 'single', '2026-01-20', '2026-03-20', '2026-01-15', '2026-02-15', 1500, 3072, 1500, 'activated', '设备C-摄像头', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 沉默期的卡
+('89860012345678901237', '460001234567893', '14712345681', 2, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', '待分配设备', '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+('89860012345678901238', '460001234567894', '14712345682', 2, 2, 4, 'cucc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'silent', NULL, '2026-01-10 10:00:00', '2026-01-12 10:00:00'),
+-- 库存卡 (未出库)
+('89860012345678901239', '460001234567895', '14712345683', NULL, 1, NULL, 'cmcc', 1024, 'monthly', 'single', '2026-01-31', '2026-04-30', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+('89860012345678901240', '460001234567896', '14712345684', NULL, 3, NULL, 'ctcc', 1024, 'monthly', 'single', '2026-01-31', '2026-05-31', NULL, NULL, 0, 1024, 0, 'stock', NULL, '2026-01-14 10:00:00', NULL),
+-- 分配给子用户的卡
+('89860012345678901241', '460001234567897', '14712345685', 3, 1, 1, 'cmcc', 1024, 'monthly', 'single', '2026-01-15', '2026-02-15', '2026-01-10', '2026-02-10', 256, 1024, 256, 'activated', '子用户设备', '2026-01-01 10:00:00', '2026-01-05 10:00:00'),
+-- 年包卡
+('89860012345678901242', '460001234567898', '14712345686', 2, 1, 3, 'cmcc', 1024, 'yearly', 'single', '2026-01-31', '2026-04-30', '2026-01-01', '2026-12-27', 100, 1024, 100, 'activated', '年包设备-智能电表', '2026-01-01 10:00:00', '2026-01-05 10:00:00');
+
+-- ============================================
+-- 系统配置初始化
+-- ============================================
+
+INSERT INTO `sys_configs` (`config_key`, `config_value`, `config_type`, `description`, `is_public`) VALUES
+-- 告警规则配置
+('alert_warning_threshold', '80', 'number', '流量告警阈值(百分比)', 0),
+('alert_critical_threshold', '90', 'number', '流量紧急阈值(百分比)', 0),
+('alert_stop_threshold', '100', 'number', '流量停卡阈值(百分比)', 0),
+('alert_expired_days', '7', 'number', '到期预警天数', 0),
+('alert_auto_suspend', 'true', 'boolean', '超限自动停卡', 0),
+('alert_auto_notify', 'true', 'boolean', '告警自动通知', 0),
+-- 系统参数配置
+('system_name', '物联网卡管理平台', 'string', '系统名称', 1),
+('system_logo', '/logo.png', 'string', '系统Logo', 1),
+('system_copyright', 'Copyright © 2026', 'string', '版权信息', 1),
+('page_size_default', '20', 'number', '默认分页大小', 0),
+('session_timeout', '7200', 'number', '会话超时(秒)', 0),
+('password_min_length', '6', 'number', '密码最小长度', 0),
+-- 通知配置
+('notify_sms_enabled', 'false', 'boolean', '启用短信通知', 0),
+('notify_email_enabled', 'false', 'boolean', '启用邮件通知', 0),
+('notify_wechat_enabled', 'false', 'boolean', '启用微信通知', 0),
+('notify_webhook_enabled', 'false', 'boolean', '启用Webhook通知', 0);
+
+-- 通知模板初始化
+INSERT INTO `sys_notify_templates` (`code`, `name`, `type`, `title`, `content`, `variables`, `is_enabled`, `remark`) VALUES
+('alert_warning', '流量预警通知', 'sms', '流量预警', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，请注意监控。', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到告警阈值时发送'),
+('alert_critical', '流量紧急通知', 'sms', '流量紧急', '【物联网卡】您的卡片{iccid}流量已使用{usage_percent}%，即将停卡，请及时处理！', '["iccid", "usage_percent", "data_used", "data_total"]', 1, '流量达到紧急阈值时发送'),
+('alert_suspend', '停卡通知', 'sms', '卡片停机通知', '【物联网卡】您的卡片{iccid}已被停机，原因：{reason}。', '["iccid", "reason", "suspend_time"]', 1, '卡片停机时发送'),
+('alert_resume', '复机通知', 'sms', '卡片复机通知', '【物联网卡】您的卡片{iccid}已恢复正常使用。', '["iccid", "resume_time"]', 1, '卡片复机时发送'),
+('alert_expired', '到期预警通知', 'sms', '卡片到期预警', '【物联网卡】您的卡片{iccid}将于{expire_date}到期，请及时续费。', '["iccid", "expire_date", "days_left"]', 1, '卡片即将到期时发送'),
+('pool_warning', '流量池预警', 'sms', '流量池预警', '【物联网卡】流量池"{pool_name}"用量已达{usage_percent}%，请注意监控。', '["pool_name", "usage_percent", "data_used", "data_total"]', 1, '流量池达到告警阈值时发送'),
+('pool_suspend', '流量池停卡通知', 'sms', '流量池停卡', '【物联网卡】流量池"{pool_name}"已超限，池内所有卡片已停机。', '["pool_name", "card_count"]', 1, '流量池超限停卡时发送');
+
+COMMIT;

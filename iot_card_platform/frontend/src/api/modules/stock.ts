@@ -5,7 +5,7 @@ import request from '@/utils/request'
 
 export const stockApi = {
   // ============ 批次管理 ============
-  
+
   /**
    * 创建采购批次
    */
@@ -14,7 +14,7 @@ export const stockApi = {
   },
 
   // ============ 入库 ============
-  
+
   /**
    * 批量入库
    */
@@ -44,7 +44,7 @@ export const stockApi = {
   },
 
   // ============ 出库 ============
-  
+
   /**
    * 批量出库
    */
@@ -88,7 +88,7 @@ export const stockApi = {
   },
 
   // ============ 卡片回收 ============
-  
+
   /**
    * 卡片回收
    */
@@ -104,7 +104,7 @@ export const stockApi = {
   },
 
   // ============ 库存管理 ============
-  
+
   /**
    * 获取库存统计
    */
@@ -134,7 +134,7 @@ export const stockApi = {
   },
 
   // ============ Excel模板 ============
-  
+
   /**
    * 下载Excel导入模板
    */
@@ -142,4 +142,3 @@ export const stockApi = {
     return request.get('/stock/import-template', { responseType: 'blob' })
   }
 }
-

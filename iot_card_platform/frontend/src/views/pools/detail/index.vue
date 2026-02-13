@@ -237,7 +237,7 @@ const fetchCards = async () => {
       params.iccid = iccidKeyword.value
     }
     const response = await getPoolCards(poolId, params)
-    cardList.value = response.list || []
+    cardList.value = response.items || response.list || []
     pagination.total = response.total || 0
   } catch (error) {
     console.error('获取卡片列表失败:', error)

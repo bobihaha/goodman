@@ -303,3 +303,829 @@ async def get_card_transfers(
         page=page, page_size=page_size
     )
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+async def batch_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """通过ICCID批量复机"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+    
+    result = await iot_card_service.batch_resume_by_iccids(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
+async def batch_query_cards(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    批量查询卡片
+    
+    - 根据多个ICCID查询卡片信息
+    - 返回找到的卡片和未找到的ICCID列表
+    - 最多支持10000个ICCID
+    """
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+    
+    result = await iot_card_service.batch_query_cards(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
+
+
+@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+async def export_cards(
+    request: CardExportRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片数据"""
+    data = await iot_card_service.export_cards(
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level,
+        card_ids=request.card_ids,
+        status=request.status.value if request.status else None,
+        carrier=request.carrier.value if request.carrier else None
+    )
+    return ResponseModel(data={"count": len(data), "items": data})
+
+
+# === 单个卡片操作 ===
+
+@router.get("/{card_id}", summary="获取卡片详情", response_model=ResponseModel)
+async def get_card_detail(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取卡片详情"""
+    card = await iot_card_service.get_card_detail(
+        db=db, card_id=card_id, current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=card)
+
+
+@router.put("/{card_id}/remark", summary="更新卡片备注", response_model=ResponseModel)
+async def update_card_remark(
+    card_id: int,
+    request: CardRemarkRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新单卡备注"""
+    card = await iot_card_service.update_remark(
+        db=db, card_id=card_id, remark=request.remark,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=card, msg="备注更新成功")
+
+
+@router.post("/{card_id}/transfer", summary="划拨卡片", response_model=ResponseModel)
+async def transfer_card(
+    card_id: int,
+    request: CardTransferRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """划拨卡片给子用户"""
+    card = await iot_card_service.transfer_card(
+        db=db, card_id=card_id, to_user_id=request.to_user_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(data=card, msg="卡片划拨成功")
+
+
+@router.get("/{card_id}/transfers", summary="获取卡片划拨记录", response_model=ResponseModel)
+async def get_card_transfers(
+    card_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单张卡片的划拨记录"""
+    items, total = await iot_card_service.get_card_transfers(
+        db=db, card_id=card_id,
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        page=page, page_size=page_size
+    )
+    return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})

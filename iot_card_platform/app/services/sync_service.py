@@ -577,7 +577,8 @@ class SyncService:
                 carrier=card.carrier.value,
                 flow_size=card.flow_size,
                 period_type=card.period_type.value,
-                created_by=card.user_id  # 使用卡片所属用户作为创建者
+                created_by=card.user_id,
+                sale_package_id=card.sale_package_id
             )
             
             # 将卡片加入流量池
@@ -606,7 +607,3 @@ class SyncService:
 
 
 sync_service = SyncService()
-
-
-
-

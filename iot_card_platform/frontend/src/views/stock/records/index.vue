@@ -324,8 +324,9 @@ const handleQueryIn = async () => {
     }
 
     const res = await stockApi.getStockInRecords(params)
-    inRecords.value = res.data.items || []
-    inTotal.value = res.data.total || 0
+    // 响应拦截器已经返回了 data.data，所以直接访问 items
+    inRecords.value = res.items || []
+    inTotal.value = res.total || 0
   } catch (error: any) {
     ElMessage.error(error.message || '查询失败')
   } finally {
@@ -354,7 +355,8 @@ const handleExportIn = async () => {
 
     const res = await stockApi.exportStockInRecords(params)
     
-    const ws = XLSX.utils.json_to_sheet(res.data)
+    // 响应拦截器已经返回了 data.data
+    const ws = XLSX.utils.json_to_sheet(res)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '入库记录')
     XLSX.writeFile(wb, `入库记录_${new Date().getTime()}.xlsx`)
@@ -376,8 +378,9 @@ const handleQueryOut = async () => {
     }
 
     const res = await stockApi.getStockOutRecords(params)
-    outRecords.value = res.data.items || []
-    outTotal.value = res.data.total || 0
+    // 响应拦截器已经返回了 data.data，所以直接访问 items
+    outRecords.value = res.items || []
+    outTotal.value = res.total || 0
   } catch (error: any) {
     ElMessage.error(error.message || '查询失败')
   } finally {
@@ -406,7 +409,8 @@ const handleExportOut = async () => {
 
     const res = await stockApi.exportStockOutRecords(params)
     
-    const ws = XLSX.utils.json_to_sheet(res.data)
+    // 响应拦截器已经返回了 data.data
+    const ws = XLSX.utils.json_to_sheet(res)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '出库记录')
     XLSX.writeFile(wb, `出库记录_${new Date().getTime()}.xlsx`)
@@ -421,7 +425,8 @@ const handleExportOut = async () => {
 const handleViewInDetail = async (row: any) => {
   try {
     const res = await stockApi.getStockInDetail(row.id)
-    currentInRecord.value = res.data
+    // 响应拦截器已经返回了 data.data
+    currentInRecord.value = res
     showInDetailDialog.value = true
   } catch (error: any) {
     ElMessage.error(error.message || '获取详情失败')
@@ -432,7 +437,8 @@ const handleViewInDetail = async (row: any) => {
 const handleViewOutDetail = async (row: any) => {
   try {
     const res = await stockApi.getStockOutDetail(row.id)
-    currentOutRecord.value = res.data
+    // 响应拦截器已经返回了 data.data
+    currentOutRecord.value = res
     showOutDetailDialog.value = true
   } catch (error: any) {
     ElMessage.error(error.message || '获取详情失败')
@@ -481,4 +487,3 @@ onMounted(() => {
   }
 }
 </style>
-

@@ -17,48 +17,56 @@
       <el-col :xs="24" :sm="12" :md="6">
         <stat-card
           label="卡片总数"
-          :value="formatNumber(overview?.card_stats.total || 0)"
+          :value="formatNumber(overview?.cards?.total || 0)"
           :icon="CreditCard"
           icon-color="#1890ff"
           icon-bg="#e6f7ff"
-          :extra="`激活: ${overview?.card_stats.activated || 0} | 库存: ${overview?.card_stats.stock || 0}`"
+          :extra="`激活: ${getStatusCount('activated')} | 库存: ${getStatusCount('stock')}`"
           extra-color="#52c41a"
+          clickable
+          @click="router.push('/cards/list')"
         />
       </el-col>
 
       <el-col :xs="24" :sm="12" :md="6">
         <stat-card
           label="流量池数量"
-          :value="formatNumber(overview?.pool_count || 0)"
+          :value="formatNumber(overview?.pools?.total_pools || 0)"
           :icon="Connection"
           icon-color="#52c41a"
           icon-bg="#f6ffed"
           extra="共享流量池"
           extra-color="#52c41a"
+          clickable
+          @click="router.push('/pools/list')"
         />
       </el-col>
 
       <el-col :xs="24" :sm="12" :md="6">
         <stat-card
           label="用户数量"
-          :value="formatNumber(overview?.user_count || 0)"
+          :value="formatNumber(overview?.users?.total_users || 0)"
           :icon="User"
           icon-color="#722ed1"
           icon-bg="#f9f0ff"
           extra="平台用户"
           extra-color="#722ed1"
+          clickable
+          @click="router.push('/users')"
         />
       </el-col>
 
       <el-col :xs="24" :sm="12" :md="6">
         <stat-card
           label="告警数量"
-          :value="formatNumber(overview?.alert_count || 0)"
+          :value="formatNumber(overview?.alerts?.unhandled || 0)"
           :icon="Warning"
           icon-color="#ff4d4f"
           icon-bg="#fff1f0"
-          :extra="overview?.alert_count ? '需要处理' : '一切正常'"
-          :extra-color="overview?.alert_count ? '#ff4d4f' : '#52c41a'"
+          :extra="overview?.alerts?.unhandled ? '需要处理' : '一切正常'"
+          :extra-color="overview?.alerts?.unhandled ? '#ff4d4f' : '#52c41a'"
+          clickable
+          @click="router.push('/alerts')"
         />
       </el-col>
     </el-row>
@@ -68,33 +76,39 @@
       <el-col :xs="24" :sm="8">
         <stat-card
           label="中国移动"
-          :value="formatNumber(overview?.card_stats.by_carrier.cmcc || 0)"
+          :value="formatNumber(getCarrierCount('cmcc'))"
           :icon="Phone"
           icon-color="#1890ff"
           icon-bg="#e6f7ff"
           extra="CMCC"
+          clickable
+          @click="router.push('/cards/list?carrier=cmcc')"
         />
       </el-col>
 
       <el-col :xs="24" :sm="8">
         <stat-card
           label="中国联通"
-          :value="formatNumber(overview?.card_stats.by_carrier.cucc || 0)"
+          :value="formatNumber(getCarrierCount('cucc'))"
           :icon="Phone"
           icon-color="#ff4d4f"
           icon-bg="#fff1f0"
           extra="CUCC"
+          clickable
+          @click="router.push('/cards/list?carrier=cucc')"
         />
       </el-col>
 
       <el-col :xs="24" :sm="8">
         <stat-card
           label="中国电信"
-          :value="formatNumber(overview?.card_stats.by_carrier.ctcc || 0)"
+          :value="formatNumber(getCarrierCount('ctcc'))"
           :icon="Phone"
           icon-color="#52c41a"
           icon-bg="#f6ffed"
           extra="CTCC"
+          clickable
+          @click="router.push('/cards/list?carrier=ctcc')"
         />
       </el-col>
     </el-row>
@@ -135,6 +149,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { 
   Refresh, 
@@ -155,31 +170,60 @@ import PoolUsageChart from './components/PoolUsageChart.vue'
 import AlertList from './components/AlertList.vue'
 
 const authStore = useAuthStore()
+const router = useRouter()
 
 // 用户信息
 const userInfo = computed(() => authStore.userInfo)
 
 // 概览数据
 const overview = ref<{
-  card_stats: {
+  cards: {
     total: number
-    stock: number
-    testing: number
-    silent: number
-    activated: number
-    expired: number
-    suspended: number
-    cancelled: number
-    by_carrier: {
-      cmcc: number
-      cucc: number
-      ctcc: number
-    }
+    by_status: Array<{
+      status: string
+      status_name: string
+      count: number
+    }>
+    by_carrier: Array<{
+      carrier: string
+      carrier_name: string
+      count: number
+    }>
   }
-  pool_count: number
-  user_count: number
-  alert_count: number
+  users: {
+    total_users: number
+    total_sub_users: number
+    active_users: number
+  }
+  packages: {
+    supplier_packages: number
+    sale_packages: number
+  }
+  pools: {
+    total_pools: number
+    total_data: number
+    used_data: number
+    usage_percent: number
+  }
+  alerts: {
+    warning: number
+    critical: number
+    exceed: number
+    unhandled: number
+  }
 } | null>(null)
+
+// 获取状态统计
+const getStatusCount = (status: string) => {
+  const item = overview.value?.cards?.by_status?.find(s => s.status === status)
+  return item?.count || 0
+}
+
+// 获取运营商统计
+const getCarrierCount = (carrier: string) => {
+  const item = overview.value?.cards?.by_carrier?.find(c => c.carrier === carrier)
+  return item?.count || 0
+}
 
 // 获取概览数据
 const fetchOverview = async () => {

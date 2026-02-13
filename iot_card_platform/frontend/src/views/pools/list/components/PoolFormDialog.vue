@@ -7,7 +7,7 @@
     @close="handleClose"
   >
     <el-alert
-      title="说明：流量池由系统自动创建，只能修改告警阈值、停卡阈值和备注"
+      title="说明：流量池由系统自动创建，只能修改告警阈值和备注"
       type="info"
       :closable="false"
       style="margin-bottom: 16px"
@@ -19,26 +19,37 @@
       :rules="rules"
       label-width="120px"
     >
-      <el-form-item label="告警阈值" prop="alert_threshold">
+      <el-form-item label="告警阈值1" prop="alert_threshold_1">
         <el-input-number
-          v-model="formData.alert_threshold"
-          :min="50"
+          v-model="formData.alert_threshold_1"
+          :min="0"
           :max="100"
-          :step="5"
+          :step="1"
         />
         <span style="margin-left: 8px">%</span>
-        <div class="form-tip">流量使用率达到此阈值时触发告警</div>
+        <div class="form-tip">流量使用率达到此阈值时触发第一次告警</div>
       </el-form-item>
 
-      <el-form-item label="停卡阈值" prop="stop_threshold">
+      <el-form-item label="告警阈值2" prop="alert_threshold_2">
         <el-input-number
-          v-model="formData.stop_threshold"
-          :min="80"
-          :max="120"
-          :step="5"
+          v-model="formData.alert_threshold_2"
+          :min="0"
+          :max="100"
+          :step="1"
         />
         <span style="margin-left: 8px">%</span>
-        <div class="form-tip">流量使用率达到此阈值时自动停卡</div>
+        <div class="form-tip">流量使用率达到此阈值时触发第二次告警</div>
+      </el-form-item>
+
+      <el-form-item label="告警阈值3" prop="alert_threshold_3">
+        <el-input-number
+          v-model="formData.alert_threshold_3"
+          :min="0"
+          :max="100"
+          :step="1"
+        />
+        <span style="margin-left: 8px">%</span>
+        <div class="form-tip">流量使用率达到此阈值时触发第三次告警</div>
       </el-form-item>
 
       <el-form-item label="备注">
@@ -66,7 +77,6 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { updatePool } from '@/api/modules/pool'
-import { DEFAULT_ALERT_THRESHOLD, DEFAULT_STOP_THRESHOLD } from '@/constants/pool'
 import type { Pool, PoolUpdateData } from '@/types/pool'
 
 interface Props {
@@ -92,20 +102,22 @@ const visible = computed({
 
 // 表单数据
 const formData = reactive<PoolUpdateData>({
-  alert_threshold: DEFAULT_ALERT_THRESHOLD,
-  stop_threshold: DEFAULT_STOP_THRESHOLD,
+  alert_threshold_1: 70,
+  alert_threshold_2: 85,
+  alert_threshold_3: 95,
   remark: ''
 })
 
 // 表单验证规则
 const rules: FormRules = {
-  alert_threshold: [
-    { required: true, message: '请输入告警阈值', trigger: 'blur' },
-    { type: 'number', min: 50, max: 100, message: '告警阈值范围为 50-100', trigger: 'blur' }
+  alert_threshold_1: [
+    { type: 'number', min: 0, max: 100, message: '告警阈值范围为 0-100', trigger: 'blur' }
   ],
-  stop_threshold: [
-    { required: true, message: '请输入停卡阈值', trigger: 'blur' },
-    { type: 'number', min: 80, max: 120, message: '停卡阈值范围为 80-120', trigger: 'blur' }
+  alert_threshold_2: [
+    { type: 'number', min: 0, max: 100, message: '告警阈值范围为 0-100', trigger: 'blur' }
+  ],
+  alert_threshold_3: [
+    { type: 'number', min: 0, max: 100, message: '告警阈值范围为 0-100', trigger: 'blur' }
   ]
 }
 
@@ -115,8 +127,9 @@ const rules: FormRules = {
 const initFormData = () => {
   if (props.pool) {
     Object.assign(formData, {
-      alert_threshold: props.pool.alert_threshold || DEFAULT_ALERT_THRESHOLD,
-      stop_threshold: props.pool.stop_threshold || DEFAULT_STOP_THRESHOLD,
+      alert_threshold_1: props.pool.alert_threshold_1 || 70,
+      alert_threshold_2: props.pool.alert_threshold_2 || 85,
+      alert_threshold_3: props.pool.alert_threshold_3 || 95,
       remark: props.pool.remark || ''
     })
   }
@@ -173,4 +186,3 @@ watch(
   margin-top: 4px;
 }
 </style>
-

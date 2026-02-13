@@ -21,8 +21,9 @@ export interface Pool {
   data_used: number              // 已用流量(MB)
   data_remaining: number         // 剩余流量(MB)
   usage_percent: number          // 使用率(%)
-  alert_threshold?: number       // 告警阈值(%)
-  stop_threshold?: number        // 停卡阈值(%)
+  alert_threshold_1?: number     // 第一次告警阈值(%)
+  alert_threshold_2?: number     // 第二次告警阈值(%)
+  alert_threshold_3?: number     // 第三次告警阈值(%)
   is_alert: boolean              // 是否触发告警
   status: PoolStatus
   remark?: string
@@ -55,10 +56,11 @@ export interface PoolListParams {
   keyword?: string
 }
 
-// 流量池更新请求（只能修改告警阈值、停卡阈值、备注）
+// 流量池更新请求（只能修改告警阈值、备注）
 export interface PoolUpdateData {
-  alert_threshold?: number
-  stop_threshold?: number
+  alert_threshold_1?: number
+  alert_threshold_2?: number
+  alert_threshold_3?: number
   remark?: string
 }
 
@@ -148,4 +150,3 @@ export interface PoolDetail extends Pool {
     expired_at?: string
   }>
 }
-

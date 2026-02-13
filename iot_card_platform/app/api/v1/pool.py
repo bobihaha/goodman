@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.services.pool_service import pool_service
 from app.utils.auth import get_current_user, require_super_admin
+from app.utils.exceptions import BusinessException
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.schemas.pool import PoolCreate, PoolUpdate, PoolAddCards, PoolRemoveCards
@@ -19,6 +20,7 @@ router = APIRouter(tags=["流量池管理"])
 
 @router.get("", summary="获取流量池列表", response_model=ResponseModel)
 async def get_pools(
+    name: Optional[str] = Query(None, description="流量池名称(模糊搜索)"),
     carrier: Optional[str] = Query(None, description="运营商: cmcc/cucc/ctcc"),
     status: Optional[str] = Query(None, description="状态: enable/disable"),
     page: int = Query(1, ge=1, description="页码"),
@@ -36,6 +38,7 @@ async def get_pools(
     items, total = await pool_service.get_pools(
         db=db,
         user_id=user_id,
+        name=name,
         carrier=carrier,
         status=status,
         page=page,
@@ -52,12 +55,31 @@ async def get_pool_stats(
     """
     获取流量池总体统计
     - 总流量池数、总卡片数
-    - 总流量、已用流量、剩余流量
-    - 告警流量池数
+    - 总流量、已用流量
+    - 告警流量池数、按运营商分类
     """
     user_id = None if current_user.user_level == 1 else current_user.id
     stats = await pool_service.get_pool_stats(db, user_id)
     return ResponseModel(data=stats)
+
+
+@router.get("/packages", summary="获取加油包列表", response_model=ResponseModel)
+async def get_pool_packages(
+    carrier: Optional[str] = Query(None, description="运营商"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取可用的加油包列表（暂未实现）"""
+    return ResponseModel(data=[])
+
+
+@router.post("/export", summary="导出流量池数据", response_model=ResponseModel)
+async def export_pools(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出流量池数据（暂未实现）"""
+    raise BusinessException(code=501, msg="导出功能暂未开放")
 
 
 @router.post("", summary="创建流量池", response_model=ResponseModel)
@@ -71,7 +93,6 @@ async def create_pool(
     - 需要指定规格 (运营商+流量+周期)
     - 只有相同规格的已激活卡才能加入此池
     """
-    # 普通用户创建的池归属于自己
     user_id = None if current_user.user_level == 1 else current_user.id
 
     pool = await pool_service.create_pool(
@@ -81,8 +102,9 @@ async def create_pool(
         flow_size=request.flow_size,
         period_type=request.period_type,
         user_id=user_id,
-        alert_threshold=request.alert_threshold,
-        stop_threshold=request.stop_threshold,
+        alert_threshold_1=request.alert_threshold_1,
+        alert_threshold_2=request.alert_threshold_2,
+        alert_threshold_3=request.alert_threshold_3,
         created_by=current_user.id,
         remark=request.remark
     )
@@ -115,6 +137,20 @@ async def update_pool(
     update_data = request.model_dump(exclude_unset=True)
     pool = await pool_service.update_pool(db, pool_id, **update_data)
     return ResponseModel(data=pool, msg="更新成功")
+
+
+@router.put("/{pool_id}/status", summary="切换流量池状态", response_model=ResponseModel)
+async def toggle_pool_status(
+    pool_id: int = Path(..., description="流量池ID"),
+    status: str = Body(..., embed=True, description="状态: enable/disable"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """启用/禁用流量池"""
+    if status not in ("enable", "disable"):
+        raise BusinessException(code=400, msg="状态值无效，必须为 enable 或 disable")
+    pool = await pool_service.update_pool(db, pool_id, status=status)
+    return ResponseModel(data=pool, msg="状态更新成功")
 
 
 @router.delete("/{pool_id}", summary="删除流量池", response_model=ResponseModel)
@@ -204,6 +240,40 @@ async def get_pool_usage(
     """
     usage = await pool_service.get_pool_usage(db, pool_id)
     return ResponseModel(data=usage)
+
+
+@router.get("/{pool_id}/usage/trend", summary="获取流量池用量趋势", response_model=ResponseModel)
+async def get_pool_usage_trend(
+    pool_id: int = Path(..., description="流量池ID"),
+    days: int = Query(30, ge=1, le=90, description="天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取流量池最近N天的用量趋势数据（暂返回空数组）"""
+    return ResponseModel(data=[])
+
+
+@router.post("/{pool_id}/recharge", summary="充值加油包", response_model=ResponseModel)
+async def recharge_pool(
+    pool_id: int = Path(..., description="流量池ID"),
+    package_id: int = Body(..., embed=True, description="加油包ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """充值加油包到流量池（暂未实现）"""
+    raise BusinessException(code=501, msg="充值功能暂未开放")
+
+
+@router.get("/{pool_id}/recharge-logs", summary="获取充值记录", response_model=ResponseModel)
+async def get_recharge_logs(
+    pool_id: int = Path(..., description="流量池ID"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取流量池充值记录（暂返回空列表）"""
+    return ResponseModel(data={"total": 0, "page": page, "page_size": page_size, "items": []})
 
 
 @router.get("/{pool_id}/logs", summary="获取流量池操作日志", response_model=ResponseModel)

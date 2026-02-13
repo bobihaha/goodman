@@ -15,10 +15,7 @@ router = APIRouter()
 
 @router.get("", summary="获取菜单列表", response_model=ResponseModel)
 async def get_menu_list(db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    """
-    获取所有菜单列表
-    - 所有登录用户都可以访问（用于构建菜单树）
-    """
+    """获取所有菜单列表"""
     menus = await sys_menu_crud.get_all_menus(db)
     return ResponseModel(data=[{
         "id": m.id, "parent_id": m.parent_id, "user_level": m.user_level,
@@ -29,25 +26,16 @@ async def get_menu_list(db: AsyncSession = Depends(get_db), current_user: Curren
 
 @router.get("/user/{user_id}", summary="获取用户菜单权限", response_model=ResponseModel)
 async def get_user_menus(user_id: int = Path(...), db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    """
-    获取用户的菜单ID列表
-    - 用户只能查询自己的菜单
-    - 超级管理员可以查询任何用户的菜单
-    """
-    # 权限检查：只能查询自己的菜单，除非是超级管理员
+    """获取用户的菜单ID列表"""
     if current_user.user_level != 1 and current_user.id != user_id:
         return ResponseModel(code=403, msg="权限不足：只能查询自己的菜单")
-    
+
     menu_ids = await sys_user_menu_crud.get_user_menu_ids(db, user_id)
     return ResponseModel(data=menu_ids)
 
 
 @router.put("/user/{user_id}", summary="设置用户菜单权限", response_model=ResponseModel)
 async def set_user_menus(user_id: int = Path(...), menu_ids: List[int] = Body(...), db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_super_admin)):
-    """
-    设置用户的菜单权限
-    - 仅超级管理员可以操作
-    """
+    """设置用户的菜单权限（仅超级管理员）"""
     await sys_user_menu_crud.set_user_menus(db, user_id, menu_ids)
     return ResponseModel(msg="设置成功")
-

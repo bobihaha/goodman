@@ -245,4 +245,3 @@ watch(
   justify-content: flex-end;
 }
 </style>
-

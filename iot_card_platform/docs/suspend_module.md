@@ -1,0 +1,390 @@
+# 停卡管理模块开发文档
+
+## 📋 模块概述
+
+停卡管理模块用于管理物联网卡的停卡策略、停卡记录和停卡告警，支持自动停卡和手动停复机操作。
+
+## 🎯 功能模块
+
+### 1. 停卡策略 (`/suspend/policy`)
+
+**功能描述**：
+- 配置自动停卡规则
+- 支持多种停卡类型
+- 启用/禁用策略
+
+**策略类型**：
+- **到期自动停卡**：卡片到期时自动停卡
+- **流量池超限停卡**：流量池使用超过阈值时停卡
+- **单卡超量停卡**：单卡流量使用超过阈值时停卡
+- **手动停卡**：管理员手动停卡
+
+**配置项**：
+- 提前天数（到期停卡）
+- 告警阈值（流量超限）
+- 是否自动停卡
+
+### 2. 停卡记录 (`/suspend/logs`)
+
+**功能描述**：
+- 查看所有停卡记录
+- 按类型、状态、时间筛选
+- 批量复机操作
+- 导出停卡记录
+
+**记录信息**：
+- ICCID、号码、运营商
+- 停卡类型、停卡原因
+- 停卡时间、复机时间
+- 操作人、当前状态
+
+**操作功能**：
+- 单个复机
+- 批量复机
+- 导出Excel
+
+### 3. 停卡告警 (`/suspend/alerts`)
+
+**功能描述**：
+- 查看停卡相关告警
+- 按类型、已读状态筛选
+- 标记已读/未读
+- 跳转到相关页面
+
+**告警类型**：
+- 即将到期告警
+- 流量池超限告警
+- 单卡超量告警
+
+**告警级别**：
+- 提示（info）
+- 警告（warning）
+- 严重（danger）
+
+## 📁 文件结构
+
+```
+frontend/src/
+├── api/modules/
+│   └── suspend.ts                          # 停卡管理API
+├── views/suspend/
+│   ├── policy/
+│   │   ├── index.vue                       # 停卡策略页面
+│   │   └── components/
+│   │       └── PolicyFormDialog.vue        # 策略表单对话框
+│   ├── logs/
+│   │   ├── index.vue                       # 停卡记录页面
+│   │   └── components/
+│   │       └── BatchResumeDialog.vue       # 批量复机对话框
+│   └── alerts/
+│       └── index.vue                       # 停卡告警页面
+└── router/
+    └── routes.ts                           # 路由配置（已添加）
+```
+
+## 🔌 API接口
+
+### 停卡策略
+
+```typescript
+// 获取策略列表
+GET /api/v1/suspend/policies
+
+// 创建策略
+POST /api/v1/suspend/policies
+
+// 更新策略
+PUT /api/v1/suspend/policies/:id
+
+// 删除策略
+DELETE /api/v1/suspend/policies/:id
+
+// 启用/禁用策略
+PUT /api/v1/suspend/policies/:id/toggle
+```
+
+### 停卡记录
+
+```typescript
+// 获取停卡记录列表
+GET /api/v1/suspend/logs
+
+// 批量停卡
+POST /api/v1/suspend/cards/suspend
+
+// 批量复机
+POST /api/v1/suspend/cards/resume
+
+// 超级管理员批量强制激活
+POST /api/v1/suspend/cards/force-activate
+
+// 导出停卡记录
+POST /api/v1/suspend/logs/export
+```
+
+### 停卡告警
+
+```typescript
+// 获取告警列表
+GET /api/v1/suspend/alerts
+
+// 标记告警为已读
+PUT /api/v1/suspend/alerts/:id/read
+
+// 批量标记告警为已读
+POST /api/v1/suspend/alerts/batch-read
+```
+
+## 🗄️ 数据库配置
+
+### 添加菜单
+
+执行SQL脚本添加停卡管理菜单：
+
+```bash
+mysql -u root -p iot_card_platform < sql/add_suspend_menus.sql
+```
+
+或手动执行以下SQL：
+
+```sql
+-- 1. 添加停卡管理父菜单
+INSERT INTO sys_menus (code, name, path, parent_id, sort, icon, status, created_at, updated_at)
+VALUES ('suspend', '停卡管理', '/suspend', NULL, 8, 'warning', 'enable', NOW(), NOW());
+
+-- 2. 添加子菜单（停卡策略、停卡记录、停卡告警）
+-- 详见 sql/add_suspend_menus.sql
+```
+
+### 菜单结构
+
+```
+停卡管理 (suspend)
+├── 停卡策略 (suspend_policy)
+├── 停卡记录 (suspend_logs)
+└── 停卡告警 (suspend_alerts)
+```
+
+## 🚀 使用说明
+
+### 1. 配置停卡策略
+
+1. 进入"停卡管理 > 停卡策略"页面
+2. 点击"新增策略"按钮
+3. 填写策略信息：
+   - 策略名称
+   - 策略类型
+   - 策略描述
+   - 配置参数（阈值、提前天数等）
+   - 是否自动停卡
+4. 启用策略
+
+### 2. 查看停卡记录
+
+1. 进入"停卡管理 > 停卡记录"页面
+2. 使用筛选条件查询：
+   - 停卡类型
+   - 状态（已停卡/已复机）
+   - 时间范围
+   - 关键词（ICCID/号码）
+3. 查看停卡详情
+4. 对已停卡的卡片执行复机操作
+
+### 3. 批量复机
+
+1. 在停卡记录页面勾选要复机的卡片
+2. 点击"批量复机"按钮
+3. 填写复机原因（可选）
+4. 确认复机
+
+### 4. 查看停卡告警
+
+1. 进入"停卡管理 > 停卡告警"页面
+2. 按类型筛选告警：
+   - 即将到期
+   - 流量池超限
+   - 单卡超量
+3. 标记已读/未读
+4. 点击"查看详情"跳转到相关页面处理
+
+## 🔧 开发注意事项
+
+### 1. 后端API开发
+
+停卡管理模块需要后端提供以下API支持：
+
+- [ ] 停卡策略CRUD接口
+- [ ] 停卡记录查询接口
+- [ ] 批量停卡/复机接口
+- [ ] 强制激活接口（超级管理员）
+- [ ] 停卡告警接口
+- [ ] 导出停卡记录接口
+
+### 2. 权限控制
+
+- 停卡策略：仅超级管理员可访问
+- 停卡记录：超级管理员和普通用户可访问
+- 批量复机：需要相应权限
+- 强制激活：仅超级管理员可用
+
+### 3. 自动停卡逻辑
+
+后端需要实现定时任务，根据策略配置自动执行停卡操作：
+
+```python
+# 示例：定时检查到期卡片
+@scheduler.scheduled_job('cron', hour=0, minute=0)
+def check_expired_cards():
+    # 查询启用的到期停卡策略
+    policies = get_enabled_policies(type='expire')
+    
+    for policy in policies:
+        # 查询即将到期的卡片
+        cards = get_expiring_cards(
+            days_before=policy.config.days_before
+        )
+        
+        if policy.config.auto_suspend:
+            # 自动停卡
+            batch_suspend_cards(cards, reason='到期自动停卡')
+```
+
+### 4. 告警生成逻辑
+
+后端需要在以下情况生成告警：
+
+- 卡片即将到期（提前N天）
+- 流量池使用超过阈值
+- 单卡流量使用超过阈值
+
+```python
+# 示例：生成告警
+def create_alert(alert_type, title, content, card_count, level):
+    alert = SuspendAlert(
+        alert_type=alert_type,
+        title=title,
+        content=content,
+        card_count=card_count,
+        level=level,
+        is_read=False
+    )
+    db.add(alert)
+    db.commit()
+```
+
+## 📊 数据流程
+
+### 停卡流程
+
+```
+1. 触发条件（到期/超限/手动）
+   ↓
+2. 检查停卡策略
+   ↓
+3. 执行停卡操作
+   ↓
+4. 记录停卡日志
+   ↓
+5. 生成告警（如需要）
+   ↓
+6. 通知相关人员
+```
+
+### 复机流程
+
+```
+1. 选择要复机的卡片
+   ↓
+2. 填写复机原因
+   ↓
+3. 执行复机操作
+   ↓
+4. 更新停卡记录
+   ↓
+5. 通知相关人员
+```
+
+## 🎨 UI设计
+
+### 停卡策略页面
+
+- 表格展示所有策略
+- 支持启用/禁用开关
+- 新增/编辑策略对话框
+- 策略配置根据类型动态显示
+
+### 停卡记录页面
+
+- 搜索栏：类型、状态、时间、关键词
+- 表格展示停卡记录
+- 支持单个/批量复机
+- 导出Excel功能
+
+### 停卡告警页面
+
+- 卡片式展示告警
+- 按级别显示不同颜色
+- 已读/未读状态区分
+- 点击跳转到相关页面
+
+## ✅ 测试清单
+
+### 功能测试
+
+- [ ] 创建停卡策略
+- [ ] 编辑停卡策略
+- [ ] 删除停卡策略
+- [ ] 启用/禁用策略
+- [ ] 查看停卡记录
+- [ ] 筛选停卡记录
+- [ ] 单个复机
+- [ ] 批量复机
+- [ ] 导出停卡记录
+- [ ] 查看停卡告警
+- [ ] 筛选告警
+- [ ] 标记已读
+- [ ] 全部标记已读
+- [ ] 告警跳转
+
+### 权限测试
+
+- [ ] 超级管理员可访问所有功能
+- [ ] 普通用户只能查看自己的停卡记录
+- [ ] 无权限用户无法访问
+
+### 边界测试
+
+- [ ] 空数据状态
+- [ ] 大数据量加载
+- [ ] 批量操作限制
+- [ ] 网络错误处理
+
+## 📝 更新日志
+
+### v1.0.0 (2026-02-13)
+
+- ✅ 创建停卡管理API模块
+- ✅ 创建停卡策略页面
+- ✅ 创建停卡记录页面
+- ✅ 创建停卡告警页面
+- ✅ 添加路由配置
+- ✅ 创建相关组件（策略表单、批量复机对话框）
+- ✅ 编写SQL脚本添加菜单
+
+## 🔗 相关文档
+
+- [FRONTEND_PRD.md](../FRONTEND_PRD.md) - 前端PRD文档
+- [API文档](../docs/api.md) - 后端API文档
+- [数据库设计](../docs/database.md) - 数据库设计文档
+
+## 👥 开发团队
+
+- 前端开发：已完成
+- 后端开发：待开发
+- 测试：待测试
+
+## 📞 联系方式
+
+如有问题，请联系开发团队。
+
+

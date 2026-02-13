@@ -1218,7 +1218,7 @@ POST /api/v1/stock/inventory/export       // 导出库存
 - 快速搜索（ICCID/IMSI/MSISDN/后6位）
 - **支持输入ICCID批量查询卡信息**
 - 高级筛选（状态/运营商/套餐/流量池）
-- 批量操作（划拨/备注/导出）
+- 批量操作（划拨/备注/导出/续费/停机/复机）
 - **批量续费功能**
 - **批量停复机功能**
 - 卡片详情查看
@@ -1433,6 +1433,8 @@ GET    /api/v1/pools/{id}/recharge-logs   // 充值记录
 - 到期自动停卡
 - 流量池超限停卡
 - 单卡超量停卡
+- 超级管理员可批量强制停卡
+- 超级管理员可批量强制激活卡
 
 #### 8.2 停卡记录
 
@@ -1444,7 +1446,7 @@ GET    /api/v1/pools/{id}/recharge-logs   // 充值记录
 - 停卡记录列表
 - 按类型/时间筛选
 - 查看停卡原因
-- 手动复机
+- 手动批量复机
 
 **API**：
 ```typescript
@@ -1464,11 +1466,12 @@ GET    /api/v1/suspend/logs
 **权限**: 超级管理员
 
 **功能**：
-- 系统配置管理
+- 系统配置管理（每个二级账户生成固定的APPID AppSecret 和API文档）
 - 登录日志查询
 - 操作日志查询
 - 告警规则设置
 - 通知模板管理
+- 账户密码修改
 
 **API**：
 ```typescript
@@ -3286,26 +3289,265 @@ const WarehousePermissions = [
 - 需要记录余额变动日志
 - 建议设置余额预警阈值（如：余额<100元时提醒）
 
-### 2. 自动组流量池
-- 需要后端在卡片激活时触发自动组池逻辑
-- 需要处理并发激活的情况（避免创建重复流量池）
-- 建议使用分布式锁确保流量池创建的原子性
+---
 
-### 3. Excel导入
-- 需要后端提供模板下载接口
-- 需要支持大文件上传（建议限制在10MB以内）
-- 需要异步处理导入任务（避免超时）
-- 建议使用消息队列处理大批量导入
+## ✅ 已完成功能记录（2026-02-13更新）
 
-### 4. 批量操作
-- 所有批量操作都需要限制数量（建议最多100条）
-- 需要显示操作进度
-- 需要支持部分成功（记录失败的条目）
-- 需要详细的操作日志
+### 一、核心模块开发完成
 
-### 5. 性能优化
-- 批量查询使用 `IN` 查询，注意SQL性能
-- 大数据量导出使用流式导出
-- 仪表盘数据考虑使用缓存（5分钟刷新一次）
-- 流量池用量百分比使用Redis缓存实时数据
+#### 1. 登录与认证模块 ✅
+- 用户名/密码登录页面
+- JWT Token 管理（存储、刷新、过期处理）
+- 路由守卫（登录验证、权限校验）
+- 超级登录功能（SuperLoginBanner组件）
+- **文件**：`views/login/index.vue`、`stores/modules/auth.ts`、`router/guards.ts`、`api/modules/auth.ts`
+
+#### 2. 仪表盘模块 ✅
+- 统计卡片（卡片总数、流量池数、用户数、告警数）+ 点击跳转
+- 运营商分布统计（移动/联通/电信）
+- 账户余额显示（AccountBalance组件）
+- 本月到期卡明细（ExpiringCardList组件）+ "查看全部"跳转
+- 超套餐用量卡明细（OverUsageCardList组件）+ "查看全部"跳转
+- 流量池用量百分比图表（PoolUsageChart组件）
+- 告警列表（AlertList组件）
+- **文件**：`views/dashboard/index.vue` 及 `components/` 下6个子组件
+
+#### 3. 用户管理模块 ✅
+- 用户列表（搜索、状态筛选）
+- 创建/编辑用户（UserFormDialog）
+- 重置密码（ResetPasswordDialog）
+- 用户权限配置（UserPermissionDialog）
+- 超级登录到下级账号
+- **文件**：`views/users/index.vue` 及 `components/` 下3个子组件
+
+#### 4. 权限管理模块 ✅
+- 权限列表（按模块/关键词搜索）
+- 创建/编辑/删除权限（PermissionFormDialog）
+- 权限指令 v-permission
+- **文件**：`views/permissions/index.vue`、`directives/permission.ts`、`api/modules/permission.ts`
+
+#### 5. 套餐管理模块 ✅
+- 底层套餐管理（搜索、运营商/周期筛选、创建/编辑）
+- 销售套餐管理（关联底层套餐、定价）
+- **文件**：`views/packages/supplier/index.vue`、`views/packages/sale/index.vue`、`api/modules/package.ts`
+
+#### 6. 供应商管理模块 ✅
+- 供应商列表（搜索、类型/状态筛选）
+- 创建/编辑供应商（SupplierFormDialog）
+- **文件**：`views/suppliers/index.vue`、`api/modules/supplier.ts`
+
+#### 7. 出入库管理模块 ✅
+- **卡片入库**：Excel模板上传、选择供应商/套餐、设置测试期/沉默期
+- **卡片出库**：多步骤流程（选卡→配置→确认）、支持 period_count 套餐周期选择、card_type 卡类型选择（月包single/pool）、出库日期/测试期/沉默期配置、Excel批量出库导入
+- **库存管理**：库存统计卡片、运营商分布、批量出库/回收入口
+- **卡片回收**：回收规则提示、搜索/筛选、回收操作
+- **出入库记录**：入库/出库记录Tab切换、筛选查询
+- **批次管理**：批次列表页面
+- **API完整**：入库、出库、模板下载、批量导入、记录查询、导出、回收、库存查询等全部API已对接
+- **文件**：`views/stock/in/`、`views/stock/out/`、`views/stock/inventory/`、`views/stock/recycle/`、`views/stock/records/`、`views/stock/batches/`、`api/modules/stock.ts`
+
+#### 8. 卡片管理模块 ✅
+- 卡片列表（统计卡片、关键词搜索、状态/运营商/周期/流量池筛选）
+- 卡片详情页
+- **批量查询**（BatchQueryDialog）：支持输入最多10000个ICCID，显示查询结果和未找到卡号
+- **批量划拨**（BatchTransferDialog）
+- **批量备注**（BatchRemarkDialog）
+- **批量续费**（BatchRenewDialog）：选择续费周期1/3/6/12个月
+- **批量停机**（BatchSuspendDialog）：输入ICCID + 停机原因
+- **批量复机**（BatchResumeDialog）：输入ICCID恢复
+- 单卡划拨（TransferDialog）、单卡备注（RemarkDialog）
+- 数据导出
+- **文件**：`views/cards/list/index.vue` 及 `components/` 下8个子组件、`views/cards/detail/index.vue`、`api/modules/card.ts`
+
+#### 9. 流量池管理模块 ✅
+- 流量池列表（卡片式展示、搜索/运营商/状态筛选）
+- 统计栏（总池数、启用/禁用数、告警数、总卡片数、总流量/已用流量）
+- 流量池详情页
+- 创建/编辑流量池（PoolFormDialog）
+- 添加卡片到流量池（AddCardsDialog + CardSelectDialog）
+- **充值加油包**（RechargeDialog）：选择加油包规格、显示价格/有效期、充值前后用量对比
+- 卡片状态统计（card_stats：已激活/已停卡/库存/测试/已销卡）
+- **文件**：`views/pools/list/index.vue` 及 `components/` 下4个子组件、`views/pools/detail/index.vue`、`api/modules/pool.ts`
+
+#### 10. 停复机管理模块 ✅
+- **停卡策略**：策略列表（到期/池超限/单卡超量）、创建/编辑策略、启用/禁用
+- **停卡记录**：操作日志列表、按类型/时间筛选、批量停机/复机
+- **告警管理**：告警列表、按目标类型/告警级别/处理状态筛选
+- **API完整**：策略CRUD、批量停机/复机/强制激活、日志查询、告警查询/处理
+- **文件**：`views/suspend/policy/`、`views/suspend/logs/`、`views/suspend/alerts/`、`api/modules/suspend.ts`
+
+#### 11. 系统设置模块 ✅
+- Tab式界面：系统配置、告警规则、登录日志、操作日志、通知模板
+- 系统配置CRUD（ConfigPanel + ConfigFormDialog）
+- 告警规则管理（AlertRulesPanel）
+- 登录日志查询（LoginLogPanel）
+- 操作日志查询（OperationLogPanel）
+- 通知模板管理（NotifyTemplatePanel + NotifyTemplateFormDialog）
+- **文件**：`views/system/index.vue` 及 `components/` 下6个子组件、`api/modules/system.ts`
+
+### 二、基础设施完成
+
+#### 12. 路由系统 ✅
+- 22个路由页面全部配置完成
+- 路由守卫（登录验证、权限校验、动态菜单）
+- 路由懒加载
+- **文件**：`router/routes.ts`、`router/guards.ts`、`router/index.ts`
+
+#### 13. API层 ✅
+- 12个API模块全部完成：auth、user、card、pool、package、stock、supplier、suspend、dashboard、menu、permission、system
+- Axios封装（请求/响应拦截器、Token管理、错误处理）
+- **文件**：`api/modules/` 下12个模块、`api/index.ts`
+
+#### 14. 状态管理 ✅
+- Auth Store（登录状态、Token管理、用户信息、权限缓存、超级登录）
+- **文件**：`stores/modules/auth.ts`
+
+#### 15. 布局与通用组件 ✅
+- 主布局（MainLayout）
+- 超级登录横幅（SuperLoginBanner）
+- 权限指令（v-permission）
+- 全局样式（variables.scss、reset.scss、global.scss）
+- **文件**：`components/layout/MainLayout.vue`、`components/common/SuperLoginBanner.vue`、`directives/`
+
+---
+
+## 🚧 待完善/加强功能（按优先级排序）
+
+> 以下功能虽然页面已创建，但部分细节可能需要验证和加强
+
+### P0 - 需要验证和完善
+
+#### 1. 出库功能细节验证 ⏳
+- [ ] 验证 period_count 套餐周期选择是否与后端正确对接（月包3/6/12/24/36/50/60，年包1/2/3/5/6）
+- [ ] 验证 card_type 卡类型选择逻辑（仅月包显示，年包默认single）
+- [ ] 验证 Excel批量出库导入功能是否正常工作（模板下载、上传校验、错误报告）
+- [ ] 验证出库日期/测试期/沉默期日期选择与后端格式一致
+
+#### 2. 账户余额功能验证 ⏳
+- [ ] 验证仪表盘 AccountBalance 组件是否正确调用后端API
+- [ ] 验证余额预警阈值显示
+- [ ] 验证充值入口跳转
+
+#### 3. 套餐管理 package_id 字段 ⏳
+- [ ] 验证底层套餐是否包含 `package_id` 字段
+- [ ] 验证 `enable_auto_pool` 自动组池开关是否在表单中
+
+---
+
+### P1 - 功能加强
+
+#### 4. 自动组流量池 ⏳
+- [ ] 验证后端卡片激活时是否触发自动组池
+- [ ] 验证流量池名称自动生成规则
+- [ ] 处理并发激活情况
+
+#### 5. 库存管理增强 ⏳
+- [ ] 库存列表是否完整显示所有字段（运营商、ICCID、IMSI、电话号码、底套餐、入库日期、测试期、沉默期、供应商、备注）
+- [ ] 是否支持按日期排序（正序/降序）
+- [ ] 批量查询ICCID功能是否正常
+
+#### 6. 出入库记录导出 ⏳
+- [ ] 验证入库记录导出功能（Excel格式）
+- [ ] 验证出库记录导出功能（Excel格式）
+
+---
+
+### P2 - 体验优化
+
+#### 7. 表格虚拟滚动 ⏳
+- [ ] 大数据量（>100条）表格是否启用虚拟滚动
+- [ ] 卡片列表、库存列表等大表格性能优化
+
+#### 8. 离线提示与网络监控 ⏳
+- [ ] 网络断开时是否有提示
+- [ ] 网络恢复时是否自动重连
+
+#### 9. 表单离开未保存提示 ⏳
+- [ ] 编辑表单时离开页面是否有未保存提示
+
+#### 10. 快捷键支持 ⏳
+- [ ] Ctrl+K 全局搜索
+- [ ] Ctrl+R 刷新
+- [ ] Esc 关闭弹窗
+
+---
+
+## 📊 开发进度统计
+
+**总体进度**：15 / 15 个核心模块已完成前端开发（100%）
+
+**已完成的核心模块**：
+- ✅ 登录与认证
+- ✅ 仪表盘（含账户余额、到期卡、超量卡、流量池用量图表）
+- ✅ 用户管理（含超级登录、权限配置）
+- ✅ 权限管理
+- ✅ 套餐管理（底层套餐 + 销售套餐）
+- ✅ 供应商管理
+- ✅ 出入库管理（入库、出库、库存、回收、记录、批次）
+- ✅ 卡片管理（含批量查询/划拨/备注/续费/停机/复机）
+- ✅ 流量池管理（含充值加油包）
+- ✅ 停复机管理（策略、记录、告警）
+- ✅ 系统设置（配置、告警规则、日志、通知模板）
+- ✅ 路由系统（22个页面）
+- ✅ API层（12个模块）
+- ✅ 状态管理
+- ✅ 布局与通用组件
+
+**待完善**：
+- ⏳ 功能细节验证与后端联调（6项）
+- ⏳ 体验优化（4项）
+
+**当前阶段**：前端核心开发已完成，进入联调测试与细节完善阶段
+
+---
+
+## 🔄 下一步工作计划（2026-02-13更新）
+
+**当前阶段**：前端核心模块开发已全部完成，进入联调测试与细节完善阶段。
+
+### 优先级 P0：功能验证与联调
+
+1. **各模块与后端API联调测试**
+   - 逐模块验证数据是否正确显示
+   - 验证所有表单提交是否成功
+   - 验证错误处理是否正常
+
+2. **出库功能细节确认**
+   - period_count / card_type 与后端字段对接
+   - Excel批量出库模板下载与导入
+
+3. **仪表盘数据验证**
+   - 账户余额、到期卡、超量卡、流量池用量图表数据是否真实
+
+### 优先级 P1：体验优化
+
+4. **性能优化**
+   - 大数据量表格虚拟滚动
+   - 请求取消（路由切换时）
+
+5. **交互完善**
+   - 表单离开未保存提示
+   - 网络断开提示
+   - 快捷键支持
+
+---
+
+## 📝 开发注意事项
+
+### 1. 路由路径规范
+- 所有路由跳转前先检查路由配置文件
+- 使用完整路径（如 `/cards/list` 而非 `/cards`）
+- 统一使用 `router.push()` 进行导航
+
+### 2. API数据访问规范
+- 响应拦截器已解包 `data.data`，组件中直接用 `res.items` 而非 `res.data.items`
+- 所有API调用必须有 try-catch 和 loading 状态
+
+### 3. 组件导入规范
+- Composition API 必须导入：`useRouter`, `useRoute`, `ref`, `reactive`, `computed`
+
+### 4. 测试验证规范
+- 功能完成后必须在浏览器中测试
+- 检查控制台是否有错误
+- 检查网络请求是否正常
 

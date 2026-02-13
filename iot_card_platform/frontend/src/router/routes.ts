@@ -149,6 +149,34 @@ export const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
+      // 停卡管理
+      {
+        path: 'suspend/policy',
+        name: 'SuspendPolicy',
+        component: () => import('@/views/suspend/policy/index.vue'),
+        meta: {
+          title: '停卡策略',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'suspend/logs',
+        name: 'SuspendLogs',
+        component: () => import('@/views/suspend/logs/index.vue'),
+        meta: {
+          title: '停卡记录',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'suspend/alerts',
+        name: 'SuspendAlerts',
+        component: () => import('@/views/suspend/alerts/index.vue'),
+        meta: {
+          title: '停卡告警',
+          requiresAuth: true
+        }
+      },
       // 权限管理
       {
         path: 'permissions',
@@ -156,6 +184,16 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/permissions/index.vue'),
         meta: {
           title: '权限管理',
+          requiresAuth: true
+        }
+      },
+      // 系统设置
+      {
+        path: 'system/config',
+        name: 'SystemConfig',
+        component: () => import('@/views/system/index.vue'),
+        meta: {
+          title: '系统设置',
           requiresAuth: true
         }
       }

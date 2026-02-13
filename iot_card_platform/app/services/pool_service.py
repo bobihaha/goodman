@@ -21,8 +21,10 @@ class PoolService:
         flow_size: int,
         period_type: str,
         user_id: Optional[int] = None,
-        alert_threshold: Optional[int] = None,
-        stop_threshold: Optional[int] = None,
+        sale_package_id: Optional[int] = None,
+        alert_threshold_1: Optional[int] = None,
+        alert_threshold_2: Optional[int] = None,
+        alert_threshold_3: Optional[int] = None,
         created_by: Optional[int] = None,
         remark: Optional[str] = None
     ) -> dict:
@@ -34,8 +36,10 @@ class PoolService:
             flow_size=flow_size,
             period_type=period_type,
             user_id=user_id,
-            alert_threshold=alert_threshold,
-            stop_threshold=stop_threshold,
+            sale_package_id=sale_package_id,
+            alert_threshold_1=alert_threshold_1,
+            alert_threshold_2=alert_threshold_2,
+            alert_threshold_3=alert_threshold_3,
             created_by=created_by,
             remark=remark
         )
@@ -46,12 +50,15 @@ class PoolService:
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
             raise BusinessException(code=404, msg="流量池不存在")
-        return pool.to_dict()
+        pool_dict = pool.to_dict()
+        await self._enrich_pool_dict(db, pool, pool_dict)
+        return pool_dict
 
     async def get_pools(
         self,
         db: AsyncSession,
         user_id: Optional[int] = None,
+        name: Optional[str] = None,
         carrier: Optional[str] = None,
         status: Optional[str] = None,
         page: int = 1,
@@ -61,12 +68,75 @@ class PoolService:
         items, total = await pool_crud.get_list(
             db=db,
             user_id=user_id,
+            name=name,
             carrier=carrier,
             status=status,
             page=page,
             page_size=page_size
         )
-        return [item.to_dict() for item in items], total
+        
+        # 为每个流量池添加卡片统计信息
+        result = []
+        for pool in items:
+            # 查询该流量池的卡片状态统计
+            from sqlalchemy import func
+            stmt = select(
+                IotCardModel.status,
+                func.count(IotCardModel.id).label('count')
+            ).where(
+                IotCardModel.pool_id == pool.id,
+                IotCardModel.is_deleted == 0
+            ).group_by(IotCardModel.status)
+            
+            card_stats_result = await db.execute(stmt)
+            card_stats_rows = card_stats_result.fetchall()
+            
+            # 构建卡片统计字典
+            card_stats = {
+                "activated": 0,
+                "suspended": 0,
+                "stock": 0,
+                "testing": 0,
+                "cancelled": 0,
+                "silent": 0,
+                "expired": 0
+            }
+            
+            for row in card_stats_rows:
+                status_value = row[0].value if hasattr(row[0], 'value') else row[0]
+                count = row[1]
+                if status_value in card_stats:
+                    card_stats[status_value] = count
+            
+            # 转换为字典并添加卡片统计
+            pool_dict = pool.to_dict(include_card_stats=True, card_stats=card_stats)
+            # 添加关联信息
+            await self._enrich_pool_dict(db, pool, pool_dict)
+            result.append(pool_dict)
+
+        return result, total
+
+    async def _enrich_pool_dict(self, db: AsyncSession, pool: TrafficPoolModel, pool_dict: dict) -> None:
+        """为流量池字典添加 user_name 和 sale_package_name"""
+        from sqlalchemy import text
+
+        # 获取 user_name
+        if pool.user_id:
+            user_q = text("SELECT name FROM sys_users WHERE id = :uid AND is_deleted = 0")
+            user_r = await db.execute(user_q, {"uid": pool.user_id})
+            row = user_r.fetchone()
+            pool_dict["user_name"] = row.name if row else None
+        else:
+            pool_dict["user_name"] = None
+
+        # 获取 sale_package_name
+        if pool.sale_package_id:
+            pkg_q = text("SELECT name FROM sale_packages WHERE id = :pid AND is_deleted = 0")
+            pkg_r = await db.execute(pkg_q, {"pid": pool.sale_package_id})
+            row = pkg_r.fetchone()
+            pool_dict["sale_package_name"] = row.name if row else None
+        else:
+            pool_dict["sale_package_name"] = None
 
     async def update_pool(
         self,
@@ -208,8 +278,9 @@ class PoolService:
             "data_used": pool.data_used,
             "data_remain": pool.get_data_remain(),
             "usage_percent": pool.get_usage_percent(),
-            "alert_threshold": pool.alert_threshold,
-            "stop_threshold": pool.stop_threshold,
+            "alert_threshold_1": pool.alert_threshold_1,
+            "alert_threshold_2": pool.alert_threshold_2,
+            "alert_threshold_3": pool.alert_threshold_3,
             "is_alert": pool.is_alert(),
             "is_exceed": pool.is_exceed(),
             "cards": card_usage

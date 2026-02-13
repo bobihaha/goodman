@@ -11,15 +11,9 @@ from app.utils.auth import get_current_user, require_super_admin
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.schemas.stock import (
-    BatchCreate, BatchInfo,
-    StockInCreate, StockInInfo, StockInResult,
-    StockOutCreate, StockOutInfo, StockOutResult,
-    StockSummary,
-    StockInRecordInfo, StockInRecordDetail,
-    StockOutRecordInfo, StockOutRecordDetail,
-    StockRecycleCreate, StockRecycleResult, StockRecycleRecordInfo,
-    BatchQueryRequest, BatchQueryResult,
-    ExcelStockOutCreate, ExcelStockOutResult
+    BatchCreate, StockInCreate, StockOutCreate,
+    StockRecycleCreate, BatchQueryRequest,
+    ExcelStockOutCreate
 )
 
 router = APIRouter(tags=["出入库管理"])
@@ -33,12 +27,7 @@ async def create_batch(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_super_admin)
 ):
-    """
-    创建采购批次 (仅超级管理员)
-
-    - 关联供应商和底层套餐
-    - 设置测试期和沉默期到期日
-    """
+    """创建采购批次 (仅超级管理员)"""
     batch = await stock_service.create_batch(
         db=db,
         supplier_id=request.supplier_id,
@@ -87,13 +76,7 @@ async def stock_in(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_super_admin)
 ):
-    """
-    批量入库卡片 (仅超级管理员)
-
-    - 关联采购批次
-    - 批量导入卡片 (ICCID, IMSI, MSISDN)
-    - 自动继承批次的生命周期配置
-    """
+    """批量入库卡片 (仅超级管理员)"""
     cards = [{"iccid": c.iccid, "imsi": c.imsi, "msisdn": c.msisdn} for c in request.cards]
     result = await stock_service.stock_in(
         db=db,
@@ -128,15 +111,7 @@ async def stock_out(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_super_admin)
 ):
-    """
-    批量出库卡片 (仅超级管理员)
-
-    - 选择库存卡片
-    - 分配给目标用户
-    - 关联销售套餐
-    - 设置套餐周期和卡类型
-    - 设置出库日期、测试期、沉默期
-    """
+    """批量出库卡片 (仅超级管理员)"""
     result = await stock_service.stock_out(
         db=db,
         card_ids=request.card_ids,
@@ -194,13 +169,13 @@ async def get_inventory(
 ):
     """获取库存卡片列表 (未出库的卡)"""
     items, total = await stock_service.get_inventory(
-        db=db, 
-        supplier_id=supplier_id, 
+        db=db,
+        supplier_id=supplier_id,
         carrier=carrier,
         package_id=package_id,
         sort_by=sort_by,
         sort_order=sort_order,
-        page=page, 
+        page=page,
         page_size=page_size
     )
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
@@ -320,13 +295,7 @@ async def recycle_cards(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_super_admin)
 ):
-    """
-    卡片回收 (仅超级管理员)
-    
-    - 将已出库的卡片回收到库存
-    - 回收后状态恢复为"库存"
-    - 记录回收原因
-    """
+    """卡片回收 (仅超级管理员)"""
     result = await stock_service.recycle_cards(
         db=db,
         card_ids=request.card_ids,
@@ -365,13 +334,7 @@ async def batch_query_cards(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_super_admin)
 ):
-    """
-    批量查询卡片
-    
-    - 根据多个ICCID查询卡片信息
-    - 返回找到的卡片和未找到的ICCID列表
-    - 最多支持10000个ICCID
-    """
+    """批量查询卡片（最多10000个ICCID）"""
     result = await stock_service.batch_query_cards(db, request.iccids)
     return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
 
@@ -398,13 +361,11 @@ async def export_inventory(
     return ResponseModel(data=data, msg="导出成功")
 
 
+# ============ 模板下载 ============
+
 @router.get("/import-template", summary="下载Excel导入模板")
 async def download_import_template():
-    """
-    下载Excel导入模板
-    
-    返回模板数据，前端使用xlsx库生成Excel文件
-    """
+    """下载Excel导入模板"""
     template_data = [
         ["ICCID", "IMSI", "电话号码"],
         ["89860123456789012345", "460012345678901", "13800138000"],
@@ -415,11 +376,7 @@ async def download_import_template():
 
 @router.get("/out/template", summary="下载Excel出库模板")
 async def download_stock_out_template():
-    """
-    下载Excel出库模板
-    
-    返回模板数据，前端使用xlsx库生成Excel文件
-    """
+    """下载Excel出库模板"""
     template_data = [
         ["ICCID", "用户ID", "销售套餐ID", "套餐周期", "卡类型", "出库日期", "测试期截止日期", "沉默期截止日期", "备注"],
         ["89860123456789012345", "10", "5", "12", "single", "2026-02-11", "2026-03-11", "2026-04-11", "测试卡"],
@@ -434,16 +391,10 @@ async def batch_stock_out_import(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_super_admin)
 ):
-    """
-    Excel批量出库 (仅超级管理员)
-    
-    - 上传Excel文件数据
-    - 批量处理出库
-    - 返回成功和失败详情
-    """
+    """Excel批量出库 (仅超级管理员)"""
     result = await stock_service.batch_stock_out_import(
         db=db,
         items=request.items,
         created_by=current_user.id
     )
-    return ResponseModel(data=result, msg=f"批量出库完成：成功 {result['success']} 张，失败 {result['failed']} 张")
+    return ResponseModel(data=result, msg="批量出库完成")

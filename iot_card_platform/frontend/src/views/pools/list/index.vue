@@ -28,15 +28,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="销售套餐">
-          <el-input
-            v-model="searchForm.sale_package_id"
-            placeholder="请输入销售套餐ID"
-            clearable
-            style="width: 150px"
-            @clear="handleSearch"
-          />
-        </el-form-item>
+
         <el-form-item label="状态">
           <el-select
             v-model="searchForm.status"
@@ -61,6 +53,34 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <!-- 统计概览 -->
+    <div v-if="poolStats" class="stats-bar">
+      <div class="stat-item">
+        <span class="stat-label">流量池总数</span>
+        <span class="stat-value">{{ poolStats.total }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">已启用</span>
+        <span class="stat-value enabled">{{ poolStats.enabled }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">已禁用</span>
+        <span class="stat-value disabled">{{ poolStats.disabled }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">告警中</span>
+        <span class="stat-value alert">{{ poolStats.alert_count }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">总卡片数</span>
+        <span class="stat-value">{{ poolStats.total_cards }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">总流量/已用</span>
+        <span class="stat-value">{{ formatFlow(poolStats.total_flow) }} / {{ formatFlow(poolStats.used_flow) }}</span>
+      </div>
+    </div>
 
     <!-- 流量池卡片列表 -->
     <div class="pools-grid">
@@ -97,32 +117,32 @@
           </div>
           <el-progress
             :percentage="pool.usage_percent"
-            :color="getProgressColor(pool.usage_percent, pool.alert_threshold)"
+            :color="getProgressColor(pool.usage_percent, pool.alert_threshold_1, pool.alert_threshold_2, pool.alert_threshold_3)"
             :stroke-width="8"
             :show-text="false"
           />
           <div class="usage-percent-text">{{ pool.usage_percent }}%</div>
         </div>
 
-        <!-- 卡片激活情况 -->
+        <!-- 卡片情况 -->
         <div class="pool-cards">
-          <div class="cards-title">卡片激活情况：</div>
+          <div class="cards-title">卡片情况（共{{ pool.card_count || 0 }}张）：</div>
           <div class="cards-stats">
             <div class="stat-item">
               <span class="label">已激活</span>
               <span class="value activated">{{ pool.card_stats?.activated || 0 }}</span>
             </div>
             <div class="stat-item">
-              <span class="label">已停卡</span>
-              <span class="value suspended">{{ pool.card_stats?.suspended || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">库存</span>
-              <span class="value stock">{{ pool.card_stats?.stock || 0 }}</span>
+              <span class="label">沉默期</span>
+              <span class="value silent">{{ pool.card_stats?.silent || 0 }}</span>
             </div>
             <div class="stat-item">
               <span class="label">测试期</span>
               <span class="value testing">{{ pool.card_stats?.testing || 0 }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">已停卡</span>
+              <span class="value suspended">{{ pool.card_stats?.suspended || 0 }}</span>
             </div>
             <div class="stat-item">
               <span class="label">已销卡</span>
@@ -145,7 +165,6 @@
         <!-- 操作按钮 -->
         <div class="pool-actions" @click.stop>
           <el-button size="small" @click="handleEdit(pool)">告警设置</el-button>
-          <el-button size="small" type="primary" @click="handleAddCards(pool)">添加卡片</el-button>
           <el-button size="small" type="warning" @click="handleRecharge(pool)">充值</el-button>
         </div>
       </el-card>
@@ -183,13 +202,6 @@
       @success="handleSearch"
     />
 
-    <!-- 添加卡片对话框 -->
-    <AddCardsDialog
-      v-model="addCardsDialogVisible"
-      :pool="currentPool"
-      @success="handleSearch"
-    />
-
     <!-- 充值加油包对话框 -->
     <RechargeDialog
       v-model="rechargeDialogVisible"
@@ -204,13 +216,12 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, ArrowRight } from '@element-plus/icons-vue'
-import { getPoolList, togglePoolStatus } from '@/api/modules/pool'
+import { getPoolList, getPoolStats, togglePoolStatus } from '@/api/modules/pool'
 import { formatFlow } from '@/utils/formatter'
 import { CARRIER_MAP, CARRIER_OPTIONS } from '@/constants/card'
 import { POOL_STATUS_MAP, POOL_STATUS_OPTIONS } from '@/constants/pool'
-import type { Pool, PoolListParams } from '@/types/pool'
+import type { Pool, PoolListParams, PoolStats } from '@/types/pool'
 import PoolFormDialog from './components/PoolFormDialog.vue'
-import AddCardsDialog from './components/AddCardsDialog.vue'
 import RechargeDialog from './components/RechargeDialog.vue'
 
 const router = useRouter()
@@ -219,7 +230,6 @@ const router = useRouter()
 const searchForm = reactive<PoolListParams>({
   name: '',
   carrier: undefined,
-  sale_package_id: undefined,
   status: undefined
 })
 
@@ -236,9 +246,23 @@ const loading = ref(false)
 
 // 对话框
 const formDialogVisible = ref(false)
-const addCardsDialogVisible = ref(false)
 const rechargeDialogVisible = ref(false)
 const currentPool = ref<Pool | null>(null)
+
+// 统计数据
+const poolStats = ref<PoolStats | null>(null)
+
+/**
+ * 获取流量池统计
+ */
+const fetchPoolStats = async () => {
+  try {
+    const response = await getPoolStats()
+    poolStats.value = response
+  } catch (error) {
+    console.error('获取流量池统计失败:', error)
+  }
+}
 
 /**
  * 获取流量池列表
@@ -252,7 +276,7 @@ const fetchPoolList = async () => {
       page_size: pagination.page_size
     }
     const response = await getPoolList(params)
-    poolList.value = response.list || []
+    poolList.value = response.items || []
     pagination.total = response.total || 0
   } catch (error) {
     console.error('获取流量池列表失败:', error)
@@ -286,7 +310,6 @@ const handleReset = () => {
   Object.assign(searchForm, {
     name: '',
     carrier: undefined,
-    sale_package_id: undefined,
     status: undefined
   })
   handleSearch()
@@ -305,14 +328,6 @@ const handleEdit = (pool: Pool) => {
  */
 const handleViewDetail = (pool: Pool) => {
   router.push(`/pools/detail/${pool.id}`)
-}
-
-/**
- * 添加卡片
- */
-const handleAddCards = (pool: Pool) => {
-  currentPool.value = pool
-  addCardsDialogVisible.value = true
 }
 
 /**
@@ -356,18 +371,22 @@ const handleToggleStatus = async (pool: Pool) => {
 /**
  * 获取进度条颜色
  */
-const getProgressColor = (percent: number, threshold?: number) => {
-  if (threshold && percent >= threshold) {
-    return '#f56c6c'
+const getProgressColor = (percent: number, threshold1?: number, threshold2?: number, threshold3?: number) => {
+  if (threshold3 && percent >= threshold3) {
+    return '#f56c6c' // 红色 - 第三次告警
   }
-  if (percent >= 80) {
-    return '#e6a23c'
+  if (threshold2 && percent >= threshold2) {
+    return '#e6a23c' // 橙色 - 第二次告警
   }
-  return '#67c23a'
+  if (threshold1 && percent >= threshold1) {
+    return '#FFA500' // 黄色 - 第一次告警
+  }
+  return '#67c23a' // 绿色 - 正常
 }
 
 onMounted(() => {
   fetchPoolList()
+  fetchPoolStats()
 })
 </script>
 
@@ -377,6 +396,46 @@ onMounted(() => {
 
   .search-card {
     margin-bottom: 20px;
+  }
+
+  .stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 16px 24px;
+    background: #fff;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+
+      .stat-label {
+        font-size: 12px;
+        color: #909399;
+      }
+
+      .stat-value {
+        font-size: 20px;
+        font-weight: 600;
+        color: #303133;
+
+        &.enabled {
+          color: #67c23a;
+        }
+
+        &.disabled {
+          color: #909399;
+        }
+
+        &.alert {
+          color: #f56c6c;
+        }
+      }
+    }
   }
 
   .pools-grid {
@@ -540,4 +599,3 @@ onMounted(() => {
   }
 }
 </style>
-

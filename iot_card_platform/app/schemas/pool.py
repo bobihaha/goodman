@@ -11,16 +11,18 @@ class PoolCreate(BaseModel):
     carrier: str = Field(..., description="运营商: cmcc/cucc/ctcc")
     flow_size: int = Field(..., gt=0, description="套餐流量(MB)")
     period_type: str = Field(..., description="周期类型: monthly/yearly")
-    alert_threshold: Optional[int] = Field(None, ge=0, le=100, description="告警阈值百分比")
-    stop_threshold: Optional[int] = Field(None, ge=0, le=100, description="停卡阈值百分比")
+    alert_threshold_1: Optional[int] = Field(None, ge=0, le=100, description="告警阈值1百分比")
+    alert_threshold_2: Optional[int] = Field(None, ge=0, le=100, description="告警阈值2百分比")
+    alert_threshold_3: Optional[int] = Field(None, ge=0, le=100, description="告警阈值3百分比")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
 
 
 class PoolUpdate(BaseModel):
     """更新流量池请求"""
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="流量池名称")
-    alert_threshold: Optional[int] = Field(None, ge=0, le=100, description="告警阈值百分比")
-    stop_threshold: Optional[int] = Field(None, ge=0, le=100, description="停卡阈值百分比")
+    alert_threshold_1: Optional[int] = Field(None, ge=0, le=100, description="告警阈值1百分比")
+    alert_threshold_2: Optional[int] = Field(None, ge=0, le=100, description="告警阈值2百分比")
+    alert_threshold_3: Optional[int] = Field(None, ge=0, le=100, description="告警阈值3百分比")
     status: Optional[str] = Field(None, description="状态: enable/disable")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
 
@@ -54,8 +56,9 @@ class PoolInfo(BaseModel):
     data_used: int
     data_remain: int
     usage_percent: float
-    alert_threshold: Optional[int]
-    stop_threshold: Optional[int]
+    alert_threshold_1: Optional[int]
+    alert_threshold_2: Optional[int]
+    alert_threshold_3: Optional[int]
     is_alert: bool
     is_exceed: bool
     status: str

@@ -586,3 +586,6 @@ function hasPermission(value: string | string[], permissions: string[]): boolean
 - [JWT 最佳实践](https://jwt.io/introduction)
 
 
+
+
+

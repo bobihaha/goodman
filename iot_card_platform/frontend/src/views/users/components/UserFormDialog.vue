@@ -77,6 +77,25 @@
         />
       </el-form-item>
 
+      <el-divider content-position="left">流量池设置</el-divider>
+
+      <el-form-item label="停卡阈值">
+        <div class="pool-threshold-input">
+          <el-input-number
+            v-model="formData.quota.pool_stop_threshold"
+            :min="50"
+            :max="200"
+            :step="5"
+            controls-position="right"
+            placeholder="不限制"
+          />
+          <span class="unit">%</span>
+        </div>
+        <div class="form-tip">流量池用量达到此阈值时，池内所有卡片将被停卡。留空表示不限制。</div>
+      </el-form-item>
+
+      <el-divider content-position="left">通知设置</el-divider>
+
       <el-form-item label="短信通知">
         <el-switch v-model="formData.alert_notify.sms" />
       </el-form-item>
@@ -156,7 +175,8 @@ const formData = reactive<UserCreateRequest>({
   },
   quota: {
     max_cards: 100,
-    max_sub_users: 5
+    max_sub_users: 5,
+    pool_stop_threshold: undefined as number | undefined
   },
   remark: '',
   status: 'enable'
@@ -199,7 +219,7 @@ const initFormData = () => {
     formData.phone = props.user.phone || ''
     formData.email = props.user.email || ''
     formData.alert_notify = props.user.alert_notify || { sms: false, email: false }
-    formData.quota = props.user.quota || { max_cards: 100, max_sub_users: 5 }
+    formData.quota = props.user.quota || { max_cards: 100, max_sub_users: 5, pool_stop_threshold: undefined }
     formData.remark = props.user.remark || ''
     formData.status = props.user.status
   } else {
@@ -210,7 +230,7 @@ const initFormData = () => {
     formData.phone = ''
     formData.email = ''
     formData.alert_notify = { sms: false, email: false }
-    formData.quota = { max_cards: 100, max_sub_users: 5 }
+    formData.quota = { max_cards: 100, max_sub_users: 5, pool_stop_threshold: undefined }
     formData.remark = ''
     formData.status = 'enable'
   }
@@ -279,7 +299,29 @@ watch(
 :deep(.el-input-number) {
   width: 100%;
 }
+
+.pool-threshold-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+
+  .unit {
+    color: #606266;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-top: 4px;
+}
 </style>
+
+
 
 
 

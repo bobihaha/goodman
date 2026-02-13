@@ -127,4 +127,3 @@ export interface CardExportParams {
   status?: CardStatus
   user_id?: number
 }
-

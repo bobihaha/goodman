@@ -21,4 +21,3 @@ export const menuApi = {
     return put<void>(`/menus/user/${userId}`, menuIds)
   }
 }
-
