@@ -18,6 +18,8 @@ export interface Supplier {
   contact_phone?: string
   contact_email?: string
   api_url?: string
+  has_api_key?: boolean
+  has_api_secret?: boolean
   api_config?: Record<string, any>
   remark?: string
   status: SupplierStatus

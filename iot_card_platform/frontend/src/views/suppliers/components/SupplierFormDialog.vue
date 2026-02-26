@@ -94,7 +94,7 @@
           <el-form-item label="API Key" prop="api_key">
             <el-input
               v-model="formData.api_key"
-              placeholder="请输入API Key"
+              :placeholder="isEdit && hasApiKey ? '已设置，留空则不修改' : '请输入API Key'"
               maxlength="255"
               show-password
             />
@@ -104,7 +104,7 @@
           <el-form-item label="API Secret" prop="api_secret">
             <el-input
               v-model="formData.api_secret"
-              placeholder="请输入API Secret"
+              :placeholder="isEdit && hasApiSecret ? '已设置，留空则不修改' : '请输入API Secret'"
               maxlength="255"
               show-password
             />
@@ -150,6 +150,37 @@
       </el-button>
     </template>
   </el-dialog>
+
+  <!-- 密码确认弹窗 -->
+  <el-dialog
+    v-model="passwordDialogVisible"
+    title="身份验证"
+    width="380px"
+    :close-on-click-modal="false"
+    append-to-body
+    @close="handlePasswordDialogClose"
+  >
+    <div style="margin-bottom: 12px; color: #606266; font-size: 14px;">
+      请输入您的登录密码以确认此操作
+    </div>
+    <el-form ref="passwordFormRef" :model="passwordForm" :rules="passwordRules">
+      <el-form-item prop="password">
+        <el-input
+          v-model="passwordForm.password"
+          type="password"
+          placeholder="请输入登录密码"
+          show-password
+          @keyup.enter="confirmWithPassword"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="handlePasswordDialogClose">取消</el-button>
+      <el-button type="primary" :loading="verifying" @click="confirmWithPassword">
+        确认
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -157,6 +188,8 @@ import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import supplierApi from '@/api/modules/supplier'
+import { authApi } from '@/api'
+import { useAuthStore } from '@/stores/modules/auth'
 import type { Supplier, CreateSupplierRequest } from '@/types/supplier'
 import { SUPPLIER_TYPE_OPTIONS } from '@/constants/supplier'
 
@@ -203,8 +236,24 @@ const formData = reactive<CreateSupplierRequest>({
 // API配置文本（用于编辑JSON）
 const apiConfigText = ref('')
 
+// 是否已设置过密钥（用于编辑时显示占位符）
+const hasApiKey = ref(false)
+const hasApiSecret = ref(false)
+
 // 提交状态
 const submitting = ref(false)
+
+// 密码确认弹窗
+const passwordDialogVisible = ref(false)
+const passwordFormRef = ref<FormInstance>()
+const passwordForm = reactive({ password: '' })
+const verifying = ref(false)
+const passwordRules: FormRules = {
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+}
+
+// 暂存待提交的数据
+let pendingSubmitData: any = null
 
 // 重置表单
 const resetForm = () => {
@@ -222,6 +271,8 @@ const resetForm = () => {
     remark: ''
   })
   apiConfigText.value = ''
+  hasApiKey.value = false
+  hasApiSecret.value = false
   formRef.value?.clearValidate()
 }
 
@@ -231,6 +282,8 @@ watch(
   (data) => {
     if (data) {
       // 编辑模式，填充数据
+      hasApiKey.value = !!data.has_api_key
+      hasApiSecret.value = !!data.has_api_secret
       Object.assign(formData, {
         name: data.name,
         code: data.code,
@@ -239,8 +292,8 @@ watch(
         contact_phone: data.contact_phone || '',
         contact_email: data.contact_email || '',
         api_url: data.api_url || '',
-        api_key: '',  // 不回显密钥
-        api_secret: '',  // 不回显密钥
+        api_key: '',
+        api_secret: '',
         api_config: data.api_config,
         remark: data.remark || ''
       })
@@ -297,10 +350,10 @@ const handleClose = () => {
 // 提交表单
 const handleSubmit = async () => {
   if (!formRef.value) return
-  
+
   try {
     await formRef.value.validate()
-    
+
     // 解析API配置JSON
     if (apiConfigText.value.trim()) {
       try {
@@ -312,34 +365,80 @@ const handleSubmit = async () => {
     } else {
       formData.api_config = undefined
     }
-    
-    submitting.value = true
-    
+
     if (isEdit.value && props.supplierData) {
-      // 编辑
+      // 编辑模式：先弹出密码确认
       const updateData: any = { ...formData }
-      // 如果密钥为空，不更新
       if (!updateData.api_key) delete updateData.api_key
       if (!updateData.api_secret) delete updateData.api_secret
-      
-      await supplierApi.updateSupplier(props.supplierData.id, updateData)
-      ElMessage.success('更新成功')
+      pendingSubmitData = updateData
+      passwordForm.password = ''
+      passwordDialogVisible.value = true
     } else {
-      // 新增
+      // 新增模式：直接提交
+      submitting.value = true
       await supplierApi.createSupplier(formData)
       ElMessage.success('创建成功')
+      emit('success')
+      handleClose()
     }
-    
-    emit('success')
-    handleClose()
   } catch (error) {
     console.error('提交失败:', error)
     if (error !== false) {
-      ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
+      ElMessage.error('创建失败')
     }
   } finally {
     submitting.value = false
   }
+}
+
+// 密码验证通过后执行保存
+const confirmWithPassword = async () => {
+  if (!passwordFormRef.value) return
+  try {
+    await passwordFormRef.value.validate()
+  } catch {
+    return
+  }
+
+  const authStore = useAuthStore()
+  const account = authStore.userInfo?.account
+  if (!account) {
+    ElMessage.error('无法获取当前用户信息')
+    return
+  }
+
+  verifying.value = true
+  try {
+    await authApi.login({ account, password: passwordForm.password })
+  } catch {
+    ElMessage.error('密码错误，操作已取消')
+    return
+  } finally {
+    verifying.value = false
+  }
+
+  // 密码验证通过，执行保存
+  passwordDialogVisible.value = false
+  submitting.value = true
+  try {
+    await supplierApi.updateSupplier(props.supplierData!.id, pendingSubmitData)
+    ElMessage.success('更新成功')
+    emit('success')
+    handleClose()
+  } catch (error) {
+    console.error('更新失败:', error)
+    ElMessage.error('更新失败')
+  } finally {
+    submitting.value = false
+    pendingSubmitData = null
+  }
+}
+
+const handlePasswordDialogClose = () => {
+  passwordDialogVisible.value = false
+  passwordForm.password = ''
+  pendingSubmitData = null
 }
 </script>
 

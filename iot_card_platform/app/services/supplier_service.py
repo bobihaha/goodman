@@ -9,6 +9,7 @@ from app.schemas.supplier import (
     SupplierInfo, SupplierListResponse
 )
 from app.utils.exceptions import BusinessException
+from app.clients.supplier_api import get_supplier_client
 
 
 class SupplierService:
@@ -61,7 +62,13 @@ class SupplierService:
         if not supplier:
             raise BusinessException(code=404, msg="供应商不存在")
 
-        # TODO: 检查是否有关联的套餐或卡片
+        package_count = await supplier_crud.count_packages(db, supplier_id)
+        if package_count > 0:
+            raise BusinessException(code=400, msg=f"供应商下存在 {package_count} 个套餐，请先删除套餐后再删除供应商")
+
+        card_count = await supplier_crud.count_cards(db, supplier_id)
+        if card_count > 0:
+            raise BusinessException(code=400, msg=f"供应商下存在 {card_count} 张卡片，请先处理卡片后再删除供应商")
 
         return await supplier_crud.delete(db, supplier_id)
 
@@ -74,14 +81,29 @@ class SupplierService:
         if not supplier.api_url:
             raise BusinessException(code=400, msg="供应商未配置 API 地址")
 
-        # TODO: 实现实际的 API 连通性测试
-        # 这里需要根据不同供应商类型调用对应的测试接口
-        return {
-            "success": True,
-            "message": "API 连接测试成功",
-            "supplier_id": supplier_id,
-            "api_url": supplier.api_url
-        }
+        if not supplier.api_key or not supplier.api_secret:
+            raise BusinessException(code=400, msg="供应商未配置 API Key 或 API Secret")
+
+        client = get_supplier_client(
+            supplier_id,
+            supplier.api_url,
+            supplier.api_key,
+            supplier.api_secret,
+        )
+
+        try:
+            # 用一个不存在的 ICCID 探测：网络通且签名正确时 upiot 返回业务错误码（非 200）
+            # 但不会抛出 HTTP 层异常，说明连通性和认证均正常
+            await client.get_card_usage("000000000000000")
+            # 如果没抛异常说明连通且认证通过
+            return {"success": True, "message": "API 连接测试成功", "supplier_id": supplier_id, "api_url": supplier.api_url}
+        except Exception as e:
+            err = str(e)
+            # upiot 业务错误（签名对但卡不存在）也视为连通成功
+            if "upiot GET error" in err:
+                return {"success": True, "message": "API 连接测试成功（认证通过）", "supplier_id": supplier_id, "api_url": supplier.api_url}
+            # 网络/认证失败
+            return {"success": False, "message": f"API 连接失败: {err}", "supplier_id": supplier_id, "api_url": supplier.api_url}
 
 
 supplier_service = SupplierService()

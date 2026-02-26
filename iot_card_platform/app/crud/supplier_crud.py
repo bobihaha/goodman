@@ -5,6 +5,8 @@ from typing import Optional, List, Tuple
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.supplier import SupplierModel, SupplierType, SupplierStatus
+from app.db.models.package import SupplierPackageModel
+from app.db.models.iot_card import IotCardModel
 from app.schemas.supplier import SupplierCreate, SupplierUpdate, SupplierQuery
 
 
@@ -101,6 +103,24 @@ class SupplierCRUD:
         await db.commit()
         await db.refresh(supplier)
         return supplier
+
+    async def count_packages(self, db: AsyncSession, supplier_id: int) -> int:
+        """统计供应商关联的套餐数量"""
+        stmt = select(func.count(SupplierPackageModel.id)).where(
+            SupplierPackageModel.supplier_id == supplier_id,
+            SupplierPackageModel.is_deleted == 0
+        )
+        result = await db.execute(stmt)
+        return result.scalar() or 0
+
+    async def count_cards(self, db: AsyncSession, supplier_id: int) -> int:
+        """统计供应商关联的卡片数量"""
+        stmt = select(func.count(IotCardModel.id)).where(
+            IotCardModel.supplier_id == supplier_id,
+            IotCardModel.is_deleted == 0
+        )
+        result = await db.execute(stmt)
+        return result.scalar() or 0
 
     async def delete(self, db: AsyncSession, supplier_id: int) -> bool:
         """删除供应商(软删除)"""

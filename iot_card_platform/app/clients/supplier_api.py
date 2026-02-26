@@ -201,18 +201,19 @@ class MockSupplierAPIClient(SupplierAPIClient):
 def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret: str) -> SupplierAPIClient:
     """
     根据供应商ID获取对应的API客户端
-    
-    TODO: 根据不同供应商返回不同的客户端实现
-    目前统一返回模拟客户端
+
+    supplier_id 对应 suppliers 表的 id
+    通过 api_url 判断供应商类型:
+      - 包含 upiot.net 或 api_config 中标记为 upiot -> UpiotSupplierClient
+      - 其他 -> MockSupplierAPIClient (后续可扩展)
     """
-    # 这里可以根据 supplier_id 返回不同的客户端实现
-    # if supplier_id == 1:
-    #     return ChinaMobileAPIClient(api_url, api_key, api_secret)
-    # elif supplier_id == 2:
-    #     return ChinaUnicomAPIClient(api_url, api_key, api_secret)
-    # else:
-    #     return MockSupplierAPIClient(api_url, api_key, api_secret)
-    
+    from app.clients.upiot_client import UpiotSupplierClient
+
+    # 根据 api_url 判断供应商平台类型
+    if api_url and "upiot" in api_url.lower():
+        return UpiotSupplierClient(api_url, api_key, api_secret)
+
+    # 默认返回模拟客户端
     return MockSupplierAPIClient(api_url, api_key, api_secret)
 
 

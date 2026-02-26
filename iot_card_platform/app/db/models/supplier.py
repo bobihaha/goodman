@@ -50,6 +50,8 @@ class SupplierModel(BaseModel):
             "contact_phone": self.contact_phone,
             "contact_email": self.contact_email,
             "api_url": self.api_url,
+            "has_api_key": bool(self.api_key),
+            "has_api_secret": bool(self.api_secret),
             "api_config": self.api_config,
             "remark": self.remark,
             "status": self.status.value if self.status else None,
