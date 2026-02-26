@@ -13,8 +13,12 @@ class SysMenuCRUD(CRUDBase[SysMenuModel]):
         super().__init__(SysMenuModel)
 
     async def get_menus_by_user_level(self, db: AsyncSession, user_level: int) -> List[SysMenuModel]:
+        # 三级账户(level=3)继承二级账户(level=2)的菜单
+        levels = [0, user_level]
+        if user_level == 3:
+            levels.append(2)
         stmt = select(SysMenuModel).where(
-            SysMenuModel.user_level.in_([0, user_level]),
+            SysMenuModel.user_level.in_(levels),
             SysMenuModel.status == MenuStatus.enable,
             SysMenuModel.is_deleted == 0
         ).order_by(SysMenuModel.sort_order.asc())
@@ -29,7 +33,11 @@ class SysMenuCRUD(CRUDBase[SysMenuModel]):
         if custom_menu_ids:
             stmt = select(SysMenuModel).where(SysMenuModel.id.in_(custom_menu_ids), SysMenuModel.status == MenuStatus.enable, SysMenuModel.is_deleted == 0).order_by(SysMenuModel.sort_order.asc())
         else:
-            stmt = select(SysMenuModel).where(SysMenuModel.user_level.in_([0, user_level]), SysMenuModel.status == MenuStatus.enable, SysMenuModel.is_deleted == 0).order_by(SysMenuModel.sort_order.asc())
+            # 三级账户(level=3)继承二级账户(level=2)的菜单
+            levels = [0, user_level]
+            if user_level == 3:
+                levels.append(2)
+            stmt = select(SysMenuModel).where(SysMenuModel.user_level.in_(levels), SysMenuModel.status == MenuStatus.enable, SysMenuModel.is_deleted == 0).order_by(SysMenuModel.sort_order.asc())
         
         result = await db.execute(stmt)
         return list(result.scalars().all())

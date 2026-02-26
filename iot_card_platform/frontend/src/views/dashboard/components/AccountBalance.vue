@@ -84,7 +84,7 @@ onMounted(() => {
 .balance-content {
   .balance-main {
     text-align: center;
-    padding: 20px 0;
+    padding: 12px 0;
 
     .balance-label {
       font-size: 14px;

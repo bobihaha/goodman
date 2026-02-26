@@ -353,6 +353,24 @@ class StockService:
         )
         return result
 
+    async def recycle_by_iccids(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        recycle_reason: str,
+        operator_id: int,
+        remark: Optional[str] = None
+    ) -> dict:
+        """通过ICCID批量回收卡片"""
+        result = await stock_recycle_crud.recycle_by_iccids(
+            db=db,
+            iccids=iccids,
+            recycle_reason=recycle_reason,
+            operator_id=operator_id,
+            remark=remark
+        )
+        return result
+
     async def get_recycle_records(
         self,
         db: AsyncSession,

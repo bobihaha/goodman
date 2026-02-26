@@ -108,7 +108,7 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-height: 500px;
+    max-height: 350px;
     overflow-y: auto;
 
     .pool-item {

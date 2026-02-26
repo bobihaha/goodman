@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.crud.sys_menu_crud import sys_menu_crud, sys_user_menu_crud
+from app.db.models.sys_user import SysUserModel
 from app.db.database import get_db
 from app.utils.auth import get_current_user, require_super_admin
 
@@ -30,7 +31,26 @@ async def get_user_menus(user_id: int = Path(...), db: AsyncSession = Depends(ge
     if current_user.user_level != 1 and current_user.id != user_id:
         return ResponseModel(code=403, msg="权限不足：只能查询自己的菜单")
 
+    # 先查自定义分配的菜单
     menu_ids = await sys_user_menu_crud.get_user_menu_ids(db, user_id)
+
+    # 如果没有自定义菜单，查上级用户的菜单（三级账户继承二级账户）
+    if not menu_ids:
+        from sqlalchemy import select
+        user_result = await db.execute(select(SysUserModel).where(SysUserModel.id == user_id))
+        target_user = user_result.scalar_one_or_none()
+        if target_user and target_user.user_level == 3 and target_user.parent_id:
+            # 三级账户：继承上级二级用户的菜单
+            menu_ids = await sys_user_menu_crud.get_user_menu_ids(db, target_user.parent_id)
+            # 如果上级也没有自定义菜单，按上级的 user_level 查默认菜单
+            if not menu_ids:
+                menus = await sys_menu_crud.get_menus_by_user_level(db, 2)
+                menu_ids = [m.id for m in menus]
+        elif target_user:
+            # 其他级别：按 user_level 查默认菜单
+            menus = await sys_menu_crud.get_menus_by_user_level(db, target_user.user_level)
+            menu_ids = [m.id for m in menus]
+
     return ResponseModel(data=menu_ids)
 
 

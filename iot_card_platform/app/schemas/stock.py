@@ -223,6 +223,13 @@ class StockRecycleCreate(BaseModel):
     remark: Optional[str] = Field(None, max_length=500, description="备注")
 
 
+class StockRecycleByIccidsCreate(BaseModel):
+    """通过ICCID批量回收请求"""
+    iccids: List[str] = Field(..., min_length=1, description="ICCID列表")
+    recycle_reason: str = Field(..., min_length=1, max_length=500, description="回收原因")
+    remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+
 class StockRecycleResult(BaseModel):
     """回收结果"""
     success: int

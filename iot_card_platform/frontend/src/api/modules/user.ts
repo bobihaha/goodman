@@ -53,7 +53,7 @@ export const userApi = {
    * 修改用户密码
    */
   updatePassword(id: number, password: string): Promise<void> {
-    return request.put<void>(`/users/${id}/password`, { password })
+    return request.put<void>(`/users/${id}/password`, { new_password: password })
   }
 }
 

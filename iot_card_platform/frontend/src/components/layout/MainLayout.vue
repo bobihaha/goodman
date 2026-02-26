@@ -260,10 +260,10 @@ const toggleFullscreen = () => {
 const handleCommand = async (command: string) => {
   switch (command) {
     case 'profile':
-      router.push('/profile')
+      router.push('/system/config?tab=profile')
       break
     case 'settings':
-      router.push('/system')
+      router.push('/system/config')
       break
     case 'logout':
       try {

@@ -26,9 +26,9 @@ router = APIRouter()
 @router.get("/configs", summary="获取系统配置列表")
 async def get_configs(
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
-    """获取所有系统配置 (仅管理员)"""
+    """获取所有系统配置"""
     configs = await SystemConfigService.get_all_configs(db)
     return ResponseModel(data=configs)
 
@@ -46,7 +46,7 @@ async def get_public_configs(
 async def get_config(
     config_key: str,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
     """获取单个配置"""
     config = await SystemConfigService.get_config(db, config_key)
@@ -127,9 +127,9 @@ async def get_login_logs(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
-    """获取登录日志 (仅管理员)"""
+    """获取登录日志"""
     logs, total = await LoginLogService.get_logs(
         db=db,
         user_id=user_id,
@@ -163,9 +163,9 @@ async def get_operation_logs(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
-    """获取操作日志 (仅管理员)"""
+    """获取操作日志"""
     logs, total = await OperationLogService.get_logs(
         db=db,
         user_id=user_id,
@@ -192,9 +192,9 @@ async def get_operation_logs(
 @router.get("/alerts/rules", summary="获取告警规则")
 async def get_alert_rules(
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
-    """获取告警规则配置 (仅管理员)"""
+    """获取告警规则配置"""
     rules = await AlertRulesService.get_rules(db)
     return ResponseModel(data=rules)
 
@@ -220,9 +220,9 @@ async def get_notify_templates(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
-    """获取通知模板列表 (仅管理员)"""
+    """获取通知模板列表"""
     templates, total = await NotifyTemplateService.get_templates(
         db=db,
         type=type,
@@ -243,9 +243,9 @@ async def get_notify_templates(
 async def get_notify_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(get_current_user)
 ):
-    """获取单个通知模板 (仅管理员)"""
+    """获取单个通知模板"""
     template = await NotifyTemplateService.get_template(db, template_id)
     if not template:
         return ResponseModel(code=404, msg="模板不存在")

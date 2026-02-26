@@ -1043,6 +1043,74 @@ class StockRecycleCRUD:
             "record_id": record.id
         }
 
+    async def recycle_by_iccids(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        recycle_reason: str,
+        operator_id: int,
+        remark: Optional[str] = None
+    ) -> dict:
+        """通过ICCID批量回收卡片"""
+        from app.db.models.stock import StockRecycleRecordModel, StockRecycleRecordCardModel
+
+        success_count = 0
+        failed_count = 0
+        not_found = []
+        recycled_cards = []
+
+        for iccid in iccids:
+            iccid = iccid.strip()
+            if not iccid:
+                continue
+            card_query = select(IotCardModel).where(
+                IotCardModel.iccid == iccid,
+                IotCardModel.user_id.isnot(None),
+                IotCardModel.is_deleted == 0
+            )
+            card_result = await db.execute(card_query)
+            card = card_result.scalar_one_or_none()
+
+            if card:
+                card.user_id = None
+                card.sale_package_id = None
+                card.status = CardStatus.stock
+                card.stock_out_at = None
+                success_count += 1
+                recycled_cards.append({"card_id": card.id, "iccid": card.iccid})
+            else:
+                failed_count += 1
+                not_found.append(iccid)
+
+        # 创建回收记录
+        record = StockRecycleRecordModel(
+            card_count=len(iccids),
+            success_count=success_count,
+            failed_count=failed_count,
+            recycle_reason=recycle_reason,
+            remark=remark,
+            operator_id=operator_id
+        )
+        db.add(record)
+        await db.flush()
+
+        for card_info in recycled_cards:
+            relation = StockRecycleRecordCardModel(
+                record_id=record.id,
+                card_id=card_info["card_id"],
+                iccid=card_info["iccid"]
+            )
+            db.add(relation)
+
+        await db.commit()
+
+        return {
+            "success": success_count,
+            "failed": failed_count,
+            "record_id": record.id,
+            "not_found": not_found
+        }
+
     async def get_records_list(
         self,
         db: AsyncSession,

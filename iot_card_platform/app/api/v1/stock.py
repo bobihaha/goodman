@@ -12,7 +12,7 @@ from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.schemas.stock import (
     BatchCreate, StockInCreate, StockOutCreate,
-    StockRecycleCreate, BatchQueryRequest,
+    StockRecycleCreate, StockRecycleByIccidsCreate, BatchQueryRequest,
     ExcelStockOutCreate
 )
 
@@ -299,6 +299,23 @@ async def recycle_cards(
     result = await stock_service.recycle_cards(
         db=db,
         card_ids=request.card_ids,
+        recycle_reason=request.recycle_reason,
+        operator_id=current_user.id,
+        remark=request.remark
+    )
+    return ResponseModel(data=result, msg=f"成功回收 {result['success']} 张卡片")
+
+
+@router.post("/recycle/by-iccids", summary="通过ICCID批量回收", response_model=ResponseModel)
+async def recycle_cards_by_iccids(
+    request: StockRecycleByIccidsCreate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    """通过ICCID批量回收卡片 (仅超级管理员)"""
+    result = await stock_service.recycle_by_iccids(
+        db=db,
+        iccids=request.iccids,
         recycle_reason=request.recycle_reason,
         operator_id=current_user.id,
         remark=request.remark

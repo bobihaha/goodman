@@ -12,36 +12,37 @@
         <el-tab-pane label="卡片回收" name="recycle">
           <div class="recycle-section">
             <el-alert
-              title="回收说明"
+              title="回收说明：只有已分配用户的卡片才能回收，回收后卡片状态恢复为库存，可重新出库。"
               type="info"
               :closable="false"
-              style="margin-bottom: 20px"
-            >
-              <div>1. 只有已出库的卡片才能回收</div>
-              <div>2. 回收后卡片状态恢复为"库存"</div>
-              <div>3. 回收操作需要填写回收原因</div>
-              <div>4. 回收后的卡片可以重新出库</div>
-            </el-alert>
+              style="margin-bottom: 16px"
+            />
 
-            <!-- 搜索已出库卡片 -->
-            <el-form :inline="true" :model="searchParams" class="search-form">
-              <el-form-item label="ICCID">
+            <!-- 搜索 -->
+            <el-form :inline="true" class="search-form">
+              <el-form-item label="ICCID/号码">
                 <el-input
-                  v-model="searchParams.iccid"
-                  placeholder="请输入ICCID"
+                  v-model="searchParams.keyword"
+                  placeholder="输入ICCID或号码"
                   clearable
-                  style="width: 200px"
+                  style="width: 220px"
                   @keyup.enter="handleSearch"
                 />
               </el-form-item>
-              <el-form-item label="用户">
-                <el-select v-model="searchParams.user_id" placeholder="请选择用户" clearable style="width: 200px">
-                  <el-option
-                    v-for="user in users"
-                    :key="user.id"
-                    :label="user.name"
-                    :value="user.id"
-                  />
+              <el-form-item label="状态">
+                <el-select v-model="searchParams.status" placeholder="全部状态" clearable style="width: 140px">
+                  <el-option label="已激活" value="activated" />
+                  <el-option label="测试期" value="testing" />
+                  <el-option label="沉默期" value="silent" />
+                  <el-option label="已停机" value="suspended" />
+                  <el-option label="已过期" value="expired" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="运营商">
+                <el-select v-model="searchParams.carrier" placeholder="全部" clearable style="width: 120px">
+                  <el-option label="中国移动" value="cmcc" />
+                  <el-option label="中国联通" value="cucc" />
+                  <el-option label="中国电信" value="ctcc" />
                 </el-select>
               </el-form-item>
               <el-form-item>
@@ -53,13 +54,13 @@
             <!-- 已选卡片提示 -->
             <el-alert
               v-if="selectedCards.length > 0"
-              :title="`已选择 ${selectedCards.length} 张卡片`"
+              :title="'已选择 ' + selectedCards.length + ' 张卡片'"
               type="success"
               :closable="false"
-              style="margin-bottom: 20px"
+              style="margin-bottom: 12px"
             />
 
-            <!-- 已出库卡片列表 -->
+            <!-- 卡片列表 -->
             <el-table
               :data="outCards"
               v-loading="loading"
@@ -67,15 +68,22 @@
               stripe
               @selection-change="handleSelectionChange"
             >
-              <el-table-column type="selection" width="55" />
-              <el-table-column prop="iccid" label="ICCID" width="200" />
-              <el-table-column prop="imsi" label="IMSI" width="150" />
-              <el-table-column prop="msisdn" label="MSISDN" width="130" />
-              <el-table-column prop="user_name" label="所属用户" width="120" />
-              <el-table-column prop="supplier_name" label="供应商" width="120" />
-              <el-table-column label="规格" width="200">
+              <el-table-column type="selection" width="50" />
+              <el-table-column prop="iccid" label="ICCID" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="msisdn" label="号码" width="130" />
+              <el-table-column prop="carrier" label="运营商" width="90">
                 <template #default="{ row }">
-                  {{ row.carrier_name }} / {{ formatFlow(row.flow_size) }} / {{ row.period_name }}
+                  {{ formatCarrier(row.carrier) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusName(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="流量" width="100">
+                <template #default="{ row }">
+                  {{ formatFlow(row.flow_size) }}
                 </template>
               </el-table-column>
               <el-table-column prop="stock_out_at" label="出库时间" width="160" />
@@ -102,6 +110,57 @@
               >
                 回收选中卡片（{{ selectedCards.length }}）
               </el-button>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- Excel批量回收 -->
+        <el-tab-pane label="Excel批量回收" name="excel">
+          <div class="excel-section">
+            <el-alert
+              title="上传包含ICCID的Excel文件，系统将自动识别并批量回收。Excel第一列应为ICCID。"
+              type="info"
+              :closable="false"
+              style="margin-bottom: 16px"
+            />
+
+            <el-upload
+              ref="uploadRef"
+              :auto-upload="false"
+              :limit="1"
+              accept=".xlsx,.xls"
+              :on-change="handleFileChange"
+              :on-remove="handleFileRemove"
+              drag
+            >
+              <el-icon :size="40" style="color: #8c8c8c"><UploadFilled /></el-icon>
+              <div style="margin-top: 8px">将Excel文件拖到此处，或<em>点击上传</em></div>
+              <template #tip>
+                <div style="color: #8c8c8c; font-size: 12px">仅支持 .xlsx / .xls 格式</div>
+              </template>
+            </el-upload>
+
+            <!-- 解析结果预览 -->
+            <div v-if="excelIccids.length > 0" style="margin-top: 16px">
+              <el-alert
+                :title="'已解析 ' + excelIccids.length + ' 个ICCID'"
+                type="success"
+                :closable="false"
+                style="margin-bottom: 12px"
+              />
+              <el-table :data="excelIccids.slice(0, 20)" border stripe max-height="300">
+                <el-table-column type="index" label="#" width="60" />
+                <el-table-column prop="iccid" label="ICCID" />
+              </el-table>
+              <p v-if="excelIccids.length > 20" style="color: #8c8c8c; font-size: 12px; margin-top: 8px">
+                仅显示前20条，共 {{ excelIccids.length }} 条
+              </p>
+
+              <div class="action-bar">
+                <el-button type="danger" @click="showExcelRecycleDialog = true">
+                  批量回收（{{ excelIccids.length }}）
+                </el-button>
+              </div>
             </div>
           </div>
         </el-tab-pane>
@@ -173,7 +232,7 @@
       width="600px"
     >
       <el-alert
-        :title="`即将回收 ${selectedCards.length} 张卡片，回收后卡片状态将恢复为"库存"`"
+        :title="'即将回收 ' + selectedCards.length + ' 张卡片，回收后卡片状态将恢复为【库存】'"
         type="warning"
         :closable="false"
         style="margin-bottom: 20px"
@@ -205,22 +264,65 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- Excel批量回收确认对话框 -->
+    <el-dialog
+      v-model="showExcelRecycleDialog"
+      title="Excel批量回收确认"
+      width="600px"
+    >
+      <el-alert
+        :title="'即将通过ICCID批量回收 ' + excelIccids.length + ' 张卡片'"
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 20px"
+      />
+
+      <el-form :model="excelRecycleForm" :rules="recycleRules" ref="excelRecycleFormRef" label-width="100px">
+        <el-form-item label="回收原因" prop="recycle_reason">
+          <el-input
+            v-model="excelRecycleForm.recycle_reason"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入回收原因（必填）"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="excelRecycleForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入备注（可选）"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="showExcelRecycleDialog = false">取消</el-button>
+        <el-button type="danger" @click="handleExcelRecycle" :loading="recycling">
+          确认回收
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { UploadFilled } from '@element-plus/icons-vue'
+import * as XLSX from 'xlsx'
 import { stockApi } from '@/api/modules/stock'
-import { userApi } from '@/api/modules/user'
+import { cardApi } from '@/api/modules/card'
 
 // 当前标签页
 const activeTab = ref('recycle')
 
-// 搜索参数
+// 搜索参数 - 使用 /cards API 的参数格式
 const searchParams = reactive({
-  iccid: '',
-  user_id: undefined,
+  keyword: '',
+  status: '',
+  carrier: '',
   page: 1,
   page_size: 20
 })
@@ -232,9 +334,6 @@ const loading = ref(false)
 
 // 选中的卡片
 const selectedCards = ref<any[]>([])
-
-// 用户列表
-const users = ref([])
 
 // 回收对话框
 const showRecycleDialog = ref(false)
@@ -248,6 +347,16 @@ const recycleRules = {
 const recycleFormRef = ref()
 const recycling = ref(false)
 
+// Excel批量回收
+const uploadRef = ref()
+const excelIccids = ref<{ iccid: string }[]>([])
+const showExcelRecycleDialog = ref(false)
+const excelRecycleForm = reactive({
+  recycle_reason: '',
+  remark: ''
+})
+const excelRecycleFormRef = ref()
+
 // 回收记录
 const recordParams = reactive({
   page: 1,
@@ -258,25 +367,20 @@ const recycleRecords = ref([])
 const recordTotal = ref(0)
 const recordsLoading = ref(false)
 
-// 获取用户列表
-const fetchUsers = async () => {
-  try {
-    const res = await userApi.getList({ page: 1, page_size: 100 })
-    users.value = res.list || res.data?.items || res.data?.list || [] || []
-  } catch (error) {
-    console.error('获取用户列表失败', error)
-  }
-}
-
-// 搜索已出库卡片
+// 搜索卡片 - 使用 /cards API
 const handleSearch = async () => {
   loading.value = true
   try {
-    const res = await stockApi.getInventory({
-      ...searchParams,
-      status: 'out' // 只查询已出库的卡片
-    })
-    outCards.value = res.items || []  // 库存API返回 items
+    const params: any = {
+      page: searchParams.page,
+      page_size: searchParams.page_size
+    }
+    if (searchParams.keyword) params.keyword = searchParams.keyword
+    if (searchParams.status) params.status = searchParams.status
+    if (searchParams.carrier) params.carrier = searchParams.carrier
+
+    const res = await cardApi.getList(params)
+    outCards.value = res.items || res.list || []
     total.value = res.total || 0
   } catch (error: any) {
     ElMessage.error(error.message || '查询失败')
@@ -287,8 +391,9 @@ const handleSearch = async () => {
 
 // 重置搜索
 const handleResetSearch = () => {
-  searchParams.iccid = ''
-  searchParams.user_id = undefined
+  searchParams.keyword = ''
+  searchParams.status = ''
+  searchParams.carrier = ''
   searchParams.page = 1
   handleSearch()
 }
@@ -404,8 +509,105 @@ const formatFlow = (mb: number) => {
   return `${mb}MB`
 }
 
+// 格式化运营商
+const formatCarrier = (carrier: string) => {
+  const map: Record<string, string> = { cmcc: '移动', cucc: '联通', ctcc: '电信' }
+  return map[carrier] || carrier
+}
+
+// 状态名称
+const getStatusName = (status: string) => {
+  const map: Record<string, string> = {
+    stock: '库存', testing: '测试期', silent: '沉默期',
+    activated: '已激活', expired: '已过期', suspended: '已停机', cancelled: '已注销'
+  }
+  return map[status] || status
+}
+
+// 状态标签类型
+const getStatusType = (status: string) => {
+  const map: Record<string, string> = {
+    stock: 'info', testing: 'warning', silent: '',
+    activated: 'success', expired: 'danger', suspended: 'danger', cancelled: 'info'
+  }
+  return map[status] || ''
+}
+
+// Excel文件解析
+const handleFileChange = (file: any) => {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target?.result as ArrayBuffer)
+      const workbook = XLSX.read(data, { type: 'array' })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+
+      // 提取第一列的ICCID，跳过表头
+      const iccids: { iccid: string }[] = []
+      for (let i = 0; i < rows.length; i++) {
+        const val = String(rows[i]?.[0] || '').trim()
+        if (val && val.length >= 10 && /^\d+$/.test(val)) {
+          iccids.push({ iccid: val })
+        }
+      }
+
+      if (iccids.length === 0) {
+        ElMessage.warning('未从Excel中解析到有效的ICCID')
+        return
+      }
+
+      excelIccids.value = iccids
+      ElMessage.success(`成功解析 ${iccids.length} 个ICCID`)
+    } catch {
+      ElMessage.error('Excel文件解析失败')
+    }
+  }
+  reader.readAsArrayBuffer(file.raw)
+}
+
+const handleFileRemove = () => {
+  excelIccids.value = []
+}
+
+// Excel批量回收
+const handleExcelRecycle = async () => {
+  if (!excelRecycleFormRef.value) return
+  const valid = await excelRecycleFormRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  recycling.value = true
+  try {
+    const iccids = excelIccids.value.map(item => item.iccid)
+    const res = await stockApi.recycleByIccids({
+      iccids,
+      recycle_reason: excelRecycleForm.recycle_reason,
+      remark: excelRecycleForm.remark
+    })
+
+    let msg = `回收完成！成功 ${res.success} 张，失败 ${res.failed} 张`
+    if (res.not_found?.length > 0) {
+      msg += `\n未找到: ${res.not_found.slice(0, 5).join(', ')}${res.not_found.length > 5 ? '...' : ''}`
+    }
+    ElMessage.success(msg)
+
+    // 重置
+    showExcelRecycleDialog.value = false
+    excelRecycleForm.recycle_reason = ''
+    excelRecycleForm.remark = ''
+    excelIccids.value = []
+    uploadRef.value?.clearFiles()
+
+    activeTab.value = 'records'
+    handleQueryRecords()
+  } catch (error: any) {
+    ElMessage.error(error.message || '回收失败')
+  } finally {
+    recycling.value = false
+  }
+}
+
 onMounted(() => {
-  fetchUsers()
   handleSearch()
   handleQueryRecords()
 })

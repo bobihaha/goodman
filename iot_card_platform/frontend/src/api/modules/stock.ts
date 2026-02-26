@@ -97,6 +97,13 @@ export const stockApi = {
   },
 
   /**
+   * 通过ICCID批量回收
+   */
+  recycleByIccids(data: { iccids: string[]; recycle_reason: string; remark?: string }) {
+    return request.post('/stock/recycle/by-iccids', data)
+  },
+
+  /**
    * 获取回收记录
    */
   getRecycleRecords(params: any) {

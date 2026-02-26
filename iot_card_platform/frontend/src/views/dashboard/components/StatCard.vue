@@ -2,12 +2,12 @@
   <el-card 
     class="stat-card" 
     :class="{ 'is-clickable': clickable }"
-    :body-style="{ padding: '20px' }"
+    :body-style="{ padding: '14px 16px' }"
     @click="handleClick"
   >
     <div class="stat-content">
       <div class="stat-icon" :style="{ background: iconBg }">
-        <el-icon :size="32" :color="iconColor">
+        <el-icon :size="24" :color="iconColor">
           <component :is="icon" />
         </el-icon>
       </div>
@@ -57,19 +57,19 @@ const handleClick = () => {
     cursor: pointer;
 
     &:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      transform: translateY(-2px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
     }
   }
 
   .stat-content {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
 
     .stat-icon {
-      width: 56px;
-      height: 56px;
+      width: 44px;
+      height: 44px;
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -82,13 +82,13 @@ const handleClick = () => {
       min-width: 0;
 
       .stat-label {
-        font-size: 14px;
+        font-size: 13px;
         color: #8c8c8c;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
       }
 
       .stat-value {
-        font-size: 24px;
+        font-size: 20px;
         font-weight: 600;
         color: #262626;
         margin: 0;
@@ -96,7 +96,7 @@ const handleClick = () => {
 
       .stat-extra {
         font-size: 12px;
-        margin-top: 4px;
+        margin-top: 2px;
       }
     }
   }

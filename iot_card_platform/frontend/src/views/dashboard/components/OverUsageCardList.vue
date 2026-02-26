@@ -13,41 +13,41 @@
       <el-table
         :data="overUsageCards"
         style="width: 100%"
-        :max-height="400"
+        :max-height="300"
       >
-        <el-table-column prop="iccid" label="ICCID" width="180" />
-        <el-table-column prop="msisdn" label="号码" width="120" />
-        <el-table-column prop="carrier" label="运营商" width="100">
+        <el-table-column prop="iccid" label="ICCID" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="msisdn" label="号码" min-width="110" show-overflow-tooltip />
+        <el-table-column prop="carrier" label="运营商" width="80">
           <template #default="{ row }">
             {{ formatCarrier(row.carrier) }}
           </template>
         </el-table-column>
-        <el-table-column prop="user_name" label="所属客户" width="120" />
-        <el-table-column prop="data_used" label="已用流量" width="120">
+        <el-table-column prop="user_name" label="客户" min-width="90" show-overflow-tooltip />
+        <el-table-column prop="data_used" label="已用" width="90">
           <template #default="{ row }">
             {{ formatFlowSize(row.data_used) }}
           </template>
         </el-table-column>
-        <el-table-column prop="data_total" label="套餐流量" width="120">
+        <el-table-column prop="data_total" label="套餐" width="90">
           <template #default="{ row }">
             {{ formatFlowSize(row.data_total) }}
           </template>
         </el-table-column>
-        <el-table-column prop="usage_percent" label="使用率" width="100">
+        <el-table-column prop="usage_percent" label="使用率" width="80">
           <template #default="{ row }">
             <el-tag type="danger" size="small">
               {{ formatPercent(row.usage_percent) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="over_usage" label="超量流量" width="120">
+        <el-table-column prop="over_usage" label="超量" width="90">
           <template #default="{ row }">
             <span style="color: #ff4d4f; font-weight: 600;">
               {{ formatFlowSize(row.over_usage) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button type="warning" size="small" link @click="handleSuspend(row)">
               停机

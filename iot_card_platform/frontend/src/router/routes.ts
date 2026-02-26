@@ -177,16 +177,6 @@ export const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
-      // 权限管理
-      {
-        path: 'permissions',
-        name: 'Permissions',
-        component: () => import('@/views/permissions/index.vue'),
-        meta: {
-          title: '权限管理',
-          requiresAuth: true
-        }
-      },
       // 系统设置
       {
         path: 'system/config',

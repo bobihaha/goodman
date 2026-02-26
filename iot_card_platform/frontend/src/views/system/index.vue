@@ -2,6 +2,9 @@
   <div class="system-container">
     <el-card shadow="never">
       <el-tabs v-model="activeTab">
+        <el-tab-pane label="个人中心" name="profile">
+          <ProfilePanel />
+        </el-tab-pane>
         <el-tab-pane label="系统配置" name="config">
           <ConfigPanel />
         </el-tab-pane>
@@ -23,14 +26,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import ProfilePanel from './components/ProfilePanel.vue'
 import ConfigPanel from './components/ConfigPanel.vue'
 import AlertRulesPanel from './components/AlertRulesPanel.vue'
 import LoginLogPanel from './components/LoginLogPanel.vue'
 import OperationLogPanel from './components/OperationLogPanel.vue'
 import NotifyTemplatePanel from './components/NotifyTemplatePanel.vue'
 
-const activeTab = ref('config')
+const route = useRoute()
+const activeTab = ref(route.query.tab as string || 'profile')
 </script>
 
 <style scoped lang="scss">

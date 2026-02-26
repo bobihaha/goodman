@@ -13,30 +13,30 @@
       <el-table
         :data="expiringCards"
         style="width: 100%"
-        :max-height="400"
+        :max-height="300"
       >
-        <el-table-column prop="iccid" label="ICCID" width="180" />
-        <el-table-column prop="msisdn" label="号码" width="120" />
-        <el-table-column prop="carrier" label="运营商" width="100">
+        <el-table-column prop="iccid" label="ICCID" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="msisdn" label="号码" min-width="110" show-overflow-tooltip />
+        <el-table-column prop="carrier" label="运营商" width="80">
           <template #default="{ row }">
             {{ formatCarrier(row.carrier) }}
           </template>
         </el-table-column>
-        <el-table-column prop="user_name" label="所属客户" width="120" />
-        <el-table-column prop="package_name" label="套餐" width="150" />
-        <el-table-column prop="expired_at" label="到期日期" width="120">
+        <el-table-column prop="user_name" label="所属客户" min-width="90" show-overflow-tooltip />
+        <el-table-column prop="package_name" label="套餐" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="expired_at" label="到期日期" width="100">
           <template #default="{ row }">
             {{ formatDateShort(row.expired_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="days_left" label="剩余天数" width="100">
+        <el-table-column prop="days_left" label="剩余" width="70">
           <template #default="{ row }">
             <el-tag :type="getDaysLeftType(row.days_left)" size="small">
               {{ row.days_left }}天
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="handleRenew(row)">
               续费
