@@ -110,5 +110,10 @@ export const cardApi = {
   // 导出卡片
   export(params: CardExportParams): Promise<Blob> {
     return post<Blob>('/cards/export', params, { responseType: 'blob' })
+  },
+
+  // 批量查询续费价格
+  queryRenewPrice(iccids: string[]): Promise<{ found: any[]; not_found: string[] }> {
+    return post<{ found: any[]; not_found: string[] }>('/cards/batch/renew-price-query', iccids)
   }
 }

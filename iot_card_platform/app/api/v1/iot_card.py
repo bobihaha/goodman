@@ -29,6 +29,15 @@ async def get_cards(
     card_type: Optional[str] = Query(None, description="卡片类型: single/pool"),
     pool_id: Optional[int] = Query(None, description="流量池ID"),
     is_pool_member: Optional[bool] = Query(None, description="是否加入流量池"),
+    remark: Optional[str] = Query(None, description="备注关键词"),
+    customer_id: Optional[int] = Query(None, description="关联客户ID"),
+    batch_id: Optional[int] = Query(None, description="出库单号/批次ID"),
+    stock_out_start: Optional[str] = Query(None, description="出库开始日期 YYYY-MM-DD"),
+    stock_out_end: Optional[str] = Query(None, description="出库结束日期 YYYY-MM-DD"),
+    activated_start: Optional[str] = Query(None, description="激活开始日期 YYYY-MM-DD"),
+    activated_end: Optional[str] = Query(None, description="激活结束日期 YYYY-MM-DD"),
+    expired_start: Optional[str] = Query(None, description="到期开始日期 YYYY-MM-DD"),
+    expired_end: Optional[str] = Query(None, description="到期结束日期 YYYY-MM-DD"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_db),
@@ -47,6 +56,15 @@ async def get_cards(
         card_type=card_type,
         pool_id=pool_id,
         is_pool_member=is_pool_member,
+        remark=remark,
+        customer_id=customer_id,
+        batch_id=batch_id,
+        stock_out_start=stock_out_start,
+        stock_out_end=stock_out_end,
+        activated_start=activated_start,
+        activated_end=activated_end,
+        expired_start=expired_start,
+        expired_end=expired_end,
         page=page,
         page_size=page_size
     )
@@ -165,6 +183,23 @@ async def batch_renew_by_iccids(
         current_user_id=current_user.id, user_level=current_user.user_level
     )
     return ResponseModel(data=result, msg=f"成功续费 {result['success']} 张卡片")
+
+
+@router.post("/batch/renew-price-query", summary="批量查询续费价格", response_model=ResponseModel)
+async def batch_renew_price_query(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """批量查询卡片续费价格（出库价格）"""
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多查询10000个ICCID")
+
+    result = await iot_card_service.query_renew_price(
+        db=db, iccids=iccids,
+        current_user_id=current_user.id, user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
 
 
 @router.post("/batch/suspend-by-iccids", summary="通过ICCID批量停机", response_model=ResponseModel)

@@ -52,13 +52,13 @@
 
     <!-- 搜索和筛选 -->
     <el-card class="search-card" shadow="never">
-      <el-form :model="searchForm" inline>
+      <el-form :model="searchForm" inline class="search-form">
         <el-form-item label="关键词">
           <el-input
             v-model="searchForm.keyword"
-            placeholder="ICCID/MSISDN/后6位"
+            placeholder="ICCID / MSISDN / 后6位"
             clearable
-            style="width: 240px"
+            style="width: 293px"
             @keyup.enter="handleSearch"
           >
             <template #prefix>
@@ -72,7 +72,7 @@
             v-model="searchForm.status"
             placeholder="全部状态"
             clearable
-            style="width: 140px"
+            style="width: 213px"
           >
             <el-option
               v-for="item in CARD_STATUS_OPTIONS"
@@ -88,7 +88,7 @@
             v-model="searchForm.carrier"
             placeholder="全部运营商"
             clearable
-            style="width: 140px"
+            style="width: 213px"
           >
             <el-option
               v-for="item in CARRIER_OPTIONS"
@@ -104,7 +104,7 @@
             v-model="searchForm.period_type"
             placeholder="全部周期"
             clearable
-            style="width: 120px"
+            style="width: 187px"
           >
             <el-option
               v-for="item in PERIOD_TYPE_OPTIONS"
@@ -120,7 +120,7 @@
             v-model="searchForm.is_pool_member"
             placeholder="全部"
             clearable
-            style="width: 120px"
+            style="width: 187px"
           >
             <el-option label="在池中" :value="true" />
             <el-option label="不在池中" :value="false" />
@@ -136,6 +136,89 @@
             <el-icon><RefreshLeft /></el-icon>
             重置
           </el-button>
+          <el-button link type="primary" @click="showAdvanced = !showAdvanced">
+            <el-icon><ArrowDown v-if="!showAdvanced" /><ArrowUp v-else /></el-icon>
+            {{ showAdvanced ? '收起' : '高级搜索' }}
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <!-- 高级搜索 -->
+      <el-form v-if="showAdvanced" :model="searchForm" inline class="search-form advanced-form">
+        <el-form-item label="关联客户">
+          <el-select
+            v-model="searchForm.customer_id"
+            placeholder="全部客户"
+            filterable
+            remote
+            clearable
+            :remote-method="searchCustomers"
+            :loading="customerLoading"
+            style="width: 213px"
+          >
+            <el-option
+              v-for="item in customerList"
+              :key="item.id"
+              :label="`${item.account} (${item.name})`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="备注">
+          <el-input
+            v-model="searchForm.remark"
+            placeholder="备注关键词"
+            clearable
+            style="width: 187px"
+            @keyup.enter="handleSearch"
+          />
+        </el-form-item>
+
+        <el-form-item label="出库单号">
+          <el-input
+            v-model.number="searchForm.batch_id"
+            placeholder="批次ID"
+            clearable
+            style="width: 160px"
+            @keyup.enter="handleSearch"
+          />
+        </el-form-item>
+
+        <el-form-item label="出库时间">
+          <el-date-picker
+            v-model="stockOutRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 280px"
+          />
+        </el-form-item>
+
+        <el-form-item label="激活时间">
+          <el-date-picker
+            v-model="activatedRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 280px"
+          />
+        </el-form-item>
+
+        <el-form-item label="到期时间">
+          <el-date-picker
+            v-model="expiredRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 280px"
+          />
         </el-form-item>
       </el-form>
     </el-card>
@@ -201,11 +284,22 @@
       </div>
     </el-card>
 
+    <!-- 批量查询筛选提示 -->
+    <div v-if="isBatchQueryMode" class="batch-query-bar">
+      <el-icon><Filter /></el-icon>
+      <span>批量查询结果：共 <strong>{{ cardList.length }}</strong> 张卡片</span>
+      <span v-if="batchQueryNotFound.length > 0" class="not-found-info">
+        ，未找到 <strong>{{ batchQueryNotFound.length }}</strong> 张
+      </span>
+      <el-button type="primary" link @click="clearBatchQuery">清除筛选</el-button>
+    </div>
+
     <!-- 卡片列表 -->
     <el-card class="table-card" shadow="never">
       <el-table
         v-loading="loading"
         :data="cardList"
+        border
         stripe
         @selection-change="handleSelectionChange"
       >
@@ -270,6 +364,7 @@
               <el-progress
                 :percentage="formatUsagePercent(row.data_used, row.data_total)"
                 :color="getProgressColor(formatUsagePercent(row.data_used, row.data_total))"
+                :format="(val: number) => `${Math.round(val)}%`"
               />
               <div class="flow-text">
                 {{ formatFlow(row.data_used) }} / {{ formatFlow(row.data_total) }}
@@ -349,7 +444,7 @@
       </el-table>
 
       <!-- 分页 -->
-      <div class="pagination">
+      <div v-if="!isBatchQueryMode" class="pagination">
         <el-pagination
           v-model:current-page="pagination.page"
           v-model:page-size="pagination.page_size"
@@ -429,10 +524,15 @@ import {
   Edit,
   Refresh,
   CircleClose,
-  Download
+  Download,
+  Filter,
+  ArrowDown,
+  ArrowUp
 } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
+import { userApi } from '@/api'
 import type { Card, CardListParams, CardStats } from '@/types/card'
+import type { User } from '@/types/user'
 import {
   CARRIER_MAP,
   CARRIER_OPTIONS,
@@ -458,6 +558,14 @@ const loading = ref(false)
 const cardList = ref<Card[]>([])
 const selectedCards = ref<Card[]>([])
 const currentCard = ref<Card | null>(null)
+const isBatchQueryMode = ref(false)
+const batchQueryNotFound = ref<string[]>([])
+const showAdvanced = ref(false)
+const customerLoading = ref(false)
+const customerList = ref<User[]>([])
+const stockOutRange = ref<string[]>([])
+const activatedRange = ref<string[]>([])
+const expiredRange = ref<string[]>([])
 
 // 统计数据
 const stats = ref<CardStats>({
@@ -482,7 +590,10 @@ const searchForm = reactive<CardListParams>({
   status: undefined,
   carrier: undefined,
   period_type: undefined,
-  is_pool_member: undefined
+  is_pool_member: undefined,
+  remark: undefined,
+  customer_id: undefined,
+  batch_id: undefined
 })
 
 // 分页
@@ -512,7 +623,13 @@ const fetchCardList = async () => {
     const params: CardListParams = {
       page: pagination.page,
       page_size: pagination.page_size,
-      ...searchForm
+      ...searchForm,
+      stock_out_start: stockOutRange.value?.[0] || undefined,
+      stock_out_end: stockOutRange.value?.[1] || undefined,
+      activated_start: activatedRange.value?.[0] || undefined,
+      activated_end: activatedRange.value?.[1] || undefined,
+      expired_start: expiredRange.value?.[0] || undefined,
+      expired_end: expiredRange.value?.[1] || undefined
     }
     
     const response = await cardApi.getList(params)
@@ -540,6 +657,23 @@ const fetchStats = async () => {
   }
 }
 
+// 搜索客户
+const searchCustomers = async (query: string) => {
+  customerLoading.value = true
+  try {
+    const response = await userApi.getList({
+      keyword: query || undefined,
+      page: 1,
+      page_size: 50
+    })
+    customerList.value = response.list
+  } catch (error) {
+    console.error('搜索客户失败:', error)
+  } finally {
+    customerLoading.value = false
+  }
+}
+
 // 搜索
 const handleSearch = () => {
   pagination.page = 1
@@ -553,8 +687,14 @@ const handleReset = () => {
     status: undefined,
     carrier: undefined,
     period_type: undefined,
-    is_pool_member: undefined
+    is_pool_member: undefined,
+    remark: undefined,
+    customer_id: undefined,
+    batch_id: undefined
   })
+  stockOutRange.value = []
+  activatedRange.value = []
+  expiredRange.value = []
   handleSearch()
 }
 
@@ -652,8 +792,22 @@ const showRemarkDialog = (card: Card) => {
 }
 
 // 批量查询成功回调
-const handleBatchQuerySuccess = () => {
-  // 批量查询结果在对话框中展示，不需要刷新列表
+const handleBatchQuerySuccess = (data: { found: Card[]; not_found: string[] }) => {
+  isBatchQueryMode.value = true
+  batchQueryNotFound.value = data.not_found
+  cardList.value = data.found.map(card => ({
+    ...card,
+    usage_percent: formatUsagePercent(card.data_used, card.data_total)
+  }))
+  pagination.total = data.found.length
+  pagination.page = 1
+}
+
+// 清除批量查询筛选
+const clearBatchQuery = () => {
+  isBatchQueryMode.value = false
+  batchQueryNotFound.value = []
+  fetchCardList()
 }
 
 // 批量划拨成功回调
@@ -716,36 +870,40 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .card-list-page {
-  padding: 20px;
+  padding: 16px 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  color: #1d2129;
 }
 
 .stats-row {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .stat-card {
   display: flex;
   align-items: center;
-  padding: 20px;
+  padding: 16px 20px;
   background: #fff;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   transition: all 0.3s;
 
   &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
 
   .stat-icon {
-    width: 60px;
-    height: 60px;
+    width: 48px;
+    height: 48px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 12px;
-    font-size: 28px;
-    margin-right: 16px;
+    border-radius: 10px;
+    font-size: 22px;
+    margin-right: 14px;
 
     &.total {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -772,16 +930,16 @@ onMounted(() => {
     flex: 1;
 
     .stat-value {
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 600;
-      color: #303133;
-      line-height: 1;
-      margin-bottom: 8px;
+      color: #1d2129;
+      line-height: 1.2;
+      margin-bottom: 4px;
     }
 
     .stat-label {
-      font-size: 14px;
-      color: #909399;
+      font-size: 13px;
+      color: #86909c;
     }
   }
 }
@@ -789,32 +947,68 @@ onMounted(() => {
 .search-card,
 .toolbar-card,
 .table-card {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+}
+
+.search-card {
+  :deep(.el-card__body) {
+    padding: 16px 20px 8px;
+  }
+}
+
+.search-form {
+  :deep(.el-form-item) {
+    margin-bottom: 10px;
+    margin-right: 16px;
+  }
+
+  :deep(.el-form-item__label) {
+    font-size: 13px;
+    color: #4e5969;
+    font-weight: 500;
+  }
+
+  :deep(.el-input__wrapper),
+  :deep(.el-select .el-input__wrapper) {
+    height: 36px;
+    font-size: 13px;
+  }
+
+  &.advanced-form {
+    border-top: 1px dashed #e5e6eb;
+    padding-top: 12px;
+    margin-top: 4px;
+  }
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 
   .toolbar-left,
   .toolbar-right {
     display: flex;
     gap: 8px;
   }
+
+  :deep(.el-button) {
+    font-size: 13px;
+    padding: 8px 14px;
+  }
 }
 
 .selection-info {
-  padding: 12px;
-  background: #ecf5ff;
+  padding: 10px 14px;
+  background: #e8f3ff;
   border-radius: 4px;
-  color: #409eff;
-  font-size: 14px;
+  color: #165dff;
+  font-size: 13px;
 
   .selection-count {
     font-weight: 600;
-    font-size: 16px;
+    font-size: 14px;
     margin: 0 4px;
   }
 }
@@ -822,8 +1016,30 @@ onMounted(() => {
 .flow-usage {
   .flow-text {
     font-size: 12px;
-    color: #606266;
-    margin-top: 4px;
+    color: #86909c;
+    margin-top: 2px;
+  }
+}
+
+.batch-query-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: #fff7e6;
+  border: 1px solid #ffe4b5;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #d46b08;
+
+  strong {
+    font-size: 14px;
+    margin: 0 2px;
+  }
+
+  .not-found-info {
+    color: #F56C6C;
   }
 }
 
@@ -832,12 +1048,49 @@ onMounted(() => {
 }
 
 .text-muted {
-  color: #909399;
+  color: #c9cdd4;
+}
+
+.table-card {
+  :deep(.el-table) {
+    font-size: 13px;
+
+    th.el-table__cell {
+      background: #f7f8fa;
+      color: #4e5969;
+      font-weight: 500;
+      font-size: 13px;
+      padding: 10px 0;
+    }
+
+    td.el-table__cell {
+      padding: 8px 0;
+      color: #1d2129;
+    }
+
+    .el-tag {
+      font-size: 12px;
+    }
+  }
+
+  :deep(.el-card__body) {
+    padding: 16px 20px;
+  }
+}
+
+.toolbar-card {
+  :deep(.el-card__body) {
+    padding: 14px 20px;
+  }
 }
 
 .pagination {
-  margin-top: 20px;
+  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+
+  :deep(.el-pagination) {
+    font-size: 13px;
+  }
 }
 </style>

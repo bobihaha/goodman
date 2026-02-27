@@ -145,7 +145,8 @@ import {
   UserFilled,
   OfficeBuilding,
   Setting as SettingIcon,
-  WarningFilled
+  WarningFilled,
+  Money
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores'
 import SuperLoginBanner from '@/components/common/SuperLoginBanner.vue'
@@ -186,7 +187,8 @@ const iconMap: Record<string, any> = {
   'suspend_alerts': WarningFilled,
   'system': SettingIcon,
   'system_config': SettingIcon,
-  'permissions': SettingIcon
+  'permissions': SettingIcon,
+  'renewal': Money
 }
 
 // 从后端菜单数据转换为前端菜单格式

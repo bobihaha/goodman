@@ -265,6 +265,7 @@ GET    /api/v1/sync/logs                  # 同步日志
 - [x] 按 ICCID/IMSI/MSISDN 查询
 - [x] 支持后6位模糊查询
 - [x] 按状态/套餐/运营商筛选
+- [x] 高级搜索：备注模糊搜索、关联客户、出库单号、出库/激活/到期时间范围
 
 **查看**：
 - [x] 卡片详情 (状态/流量/到期日)
@@ -291,7 +292,7 @@ GET    /api/v1/sync/logs                  # 同步日志
 **API 端点**：
 ```
 # 卡片列表与查询
-GET    /api/v1/cards                      # 我的卡片列表
+GET    /api/v1/cards                      # 我的卡片列表 (支持高级搜索: remark, customer_id, batch_id, stock_out_start/end, activated_start/end, expired_start/end)
 GET    /api/v1/cards/{id}                 # 卡片详情
 GET    /api/v1/cards/search               # 快速搜索 (后6位)
 GET    /api/v1/cards/stats                # 卡片统计
@@ -306,6 +307,9 @@ PUT    /api/v1/cards/batch/remark         # 批量备注
 
 # 导出
 POST   /api/v1/cards/export               # 导出卡片数据
+
+# 续费价格查询
+POST   /api/v1/cards/batch/renew-price-query  # 批量查询续费价格（JOIN sale_packages 获取 price_sale）
 ```
 
 ---

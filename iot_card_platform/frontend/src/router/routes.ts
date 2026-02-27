@@ -149,6 +149,16 @@ export const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
+      // 续费管理
+      {
+        path: 'renewal/management',
+        name: 'RenewalManagement',
+        component: () => import('@/views/renewal/index.vue'),
+        meta: {
+          title: '续费管理',
+          requiresAuth: true
+        }
+      },
       // 停卡管理
       {
         path: 'suspend/policy',

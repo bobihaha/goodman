@@ -45,6 +45,15 @@ class IotCardCRUD:
         card_type: Optional[str] = None,
         pool_id: Optional[int] = None,
         is_pool_member: Optional[bool] = None,
+        remark: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        batch_id: Optional[int] = None,
+        stock_out_start: Optional[str] = None,
+        stock_out_end: Optional[str] = None,
+        activated_start: Optional[str] = None,
+        activated_end: Optional[str] = None,
+        expired_start: Optional[str] = None,
+        expired_end: Optional[str] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[IotCardModel], int]:
@@ -111,6 +120,46 @@ class IotCardCRUD:
             member_value = 1 if is_pool_member else 0
             query = query.where(IotCardModel.is_pool_member == member_value)
             count_query = count_query.where(IotCardModel.is_pool_member == member_value)
+
+        # 备注模糊搜索
+        if remark:
+            remark_filter = IotCardModel.remark.like(f"%{remark}%")
+            query = query.where(remark_filter)
+            count_query = count_query.where(remark_filter)
+
+        # 关联客户过滤
+        if customer_id is not None:
+            query = query.where(IotCardModel.user_id == customer_id)
+            count_query = count_query.where(IotCardModel.user_id == customer_id)
+
+        # 出库单号/批次过滤
+        if batch_id is not None:
+            query = query.where(IotCardModel.batch_id == batch_id)
+            count_query = count_query.where(IotCardModel.batch_id == batch_id)
+
+        # 出库时间范围
+        if stock_out_start:
+            query = query.where(IotCardModel.stock_out_date >= stock_out_start)
+            count_query = count_query.where(IotCardModel.stock_out_date >= stock_out_start)
+        if stock_out_end:
+            query = query.where(IotCardModel.stock_out_date <= stock_out_end)
+            count_query = count_query.where(IotCardModel.stock_out_date <= stock_out_end)
+
+        # 激活时间范围
+        if activated_start:
+            query = query.where(IotCardModel.activated_at >= activated_start)
+            count_query = count_query.where(IotCardModel.activated_at >= activated_start)
+        if activated_end:
+            query = query.where(IotCardModel.activated_at <= activated_end)
+            count_query = count_query.where(IotCardModel.activated_at <= activated_end)
+
+        # 到期时间范围
+        if expired_start:
+            query = query.where(IotCardModel.expired_at >= expired_start)
+            count_query = count_query.where(IotCardModel.expired_at >= expired_start)
+        if expired_end:
+            query = query.where(IotCardModel.expired_at <= expired_end)
+            count_query = count_query.where(IotCardModel.expired_at <= expired_end)
 
         # 统计总数
         total_result = await db.execute(count_query)

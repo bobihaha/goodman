@@ -69,6 +69,16 @@ export interface CardListParams {
   pool_id?: number
   is_pool_member?: boolean
   keyword?: string
+  // 高级搜索
+  remark?: string
+  customer_id?: number
+  batch_id?: number
+  stock_out_start?: string
+  stock_out_end?: string
+  activated_start?: string
+  activated_end?: string
+  expired_start?: string
+  expired_end?: string
 }
 
 // 卡片统计

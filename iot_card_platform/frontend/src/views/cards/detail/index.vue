@@ -64,8 +64,18 @@
           <el-descriptions-item label="套餐规格">
             {{ card ? `${formatFlow(card.flow_size)}/${PERIOD_TYPE_MAP[card.period_type]}` : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="入库时间">
-            {{ formatDateTime(card?.stock_in_at) }}
+          <el-descriptions-item label="激活时间">
+            {{ formatDateTime(card?.activated_at) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="沉默期到期">
+            <span :class="{ 'text-danger': isExpired(card?.silent_expire_date) }">
+              {{ formatDate(card?.silent_expire_date) }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="到期时间">
+            <span :class="{ 'text-danger': isExpired(card?.expired_at) }">
+              {{ formatDateTime(card?.expired_at) }}
+            </span>
           </el-descriptions-item>
           <el-descriptions-item label="出库时间">
             {{ formatDateTime(card?.stock_out_at) }}
@@ -86,19 +96,6 @@
           <el-descriptions-item label="测试期到期">
             <span :class="{ 'text-danger': isExpired(card?.test_expire_date) }">
               {{ formatDate(card?.test_expire_date) }}
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="沉默期到期">
-            <span :class="{ 'text-danger': isExpired(card?.silent_expire_date) }">
-              {{ formatDate(card?.silent_expire_date) }}
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="激活时间">
-            {{ formatDateTime(card?.activated_at) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="到期时间">
-            <span :class="{ 'text-danger': isExpired(card?.expired_at) }">
-              {{ formatDateTime(card?.expired_at) }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="停机时间">
@@ -127,9 +124,9 @@
               :color="getProgressColor(usagePercent)"
               :width="200"
             >
-              <template #default="{ percentage }">
+              <template #default>
                 <div class="progress-content">
-                  <div class="percentage">{{ percentage }}%</div>
+                  <div class="percentage">{{ usagePercent.toFixed(0) }}%</div>
                   <div class="usage-text">已使用</div>
                 </div>
               </template>
@@ -146,12 +143,12 @@
               </el-descriptions-item>
               <el-descriptions-item label="剩余流量">
                 <span class="flow-value remaining">
-                  {{ formatFlow((card?.data_total || 0) - (card?.data_used || 0)) }}
+                  {{ formatFlow(Math.max((card?.data_total || 0) - (card?.data_used || 0), 0)) }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="使用率">
                 <span class="flow-value" :class="{ 'text-danger': usagePercent >= 90 }">
-                  {{ usagePercent.toFixed(2) }}%
+                  {{ usagePercent.toFixed(0) }}%
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="数据同步时间" :span="2">

@@ -25,11 +25,19 @@ class IotCardService:
         card_type: Optional[str] = None,
         pool_id: Optional[int] = None,
         is_pool_member: Optional[bool] = None,
+        remark: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        batch_id: Optional[int] = None,
+        stock_out_start: Optional[str] = None,
+        stock_out_end: Optional[str] = None,
+        activated_start: Optional[str] = None,
+        activated_end: Optional[str] = None,
+        expired_start: Optional[str] = None,
+        expired_end: Optional[str] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[dict], int]:
         """获取卡片列表 (根据用户权限过滤)"""
-        # 超级管理员可以看全部，用户/子用户只能看自己的
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
 
         items, total = await iot_card_crud.get_list(
@@ -43,6 +51,15 @@ class IotCardService:
             card_type=card_type,
             pool_id=pool_id,
             is_pool_member=is_pool_member,
+            remark=remark,
+            customer_id=customer_id,
+            batch_id=batch_id,
+            stock_out_start=stock_out_start,
+            stock_out_end=stock_out_end,
+            activated_start=activated_start,
+            activated_end=activated_end,
+            expired_start=expired_start,
+            expired_end=expired_end,
             page=page,
             page_size=page_size
         )
@@ -252,6 +269,47 @@ class IotCardService:
             db=db, card_id=card_id, page=page, page_size=page_size
         )
         return [item.to_dict() for item in items], total
+
+    async def query_renew_price(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """批量查询续费价格"""
+        from sqlalchemy import select
+        from app.db.models.package import SalePackageModel
+
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+
+        query = select(IotCardModel, SalePackageModel.price_sale).outerjoin(
+            SalePackageModel, IotCardModel.sale_package_id == SalePackageModel.id
+        ).where(
+            IotCardModel.iccid.in_(iccids),
+            IotCardModel.is_deleted == 0
+        )
+
+        if user_filter is not None:
+            query = query.where(IotCardModel.user_id == user_filter)
+
+        result = await db.execute(query)
+        rows = result.all()
+
+        found_iccids = set()
+        found_list = []
+        for card, price_sale in rows:
+            found_iccids.add(card.iccid)
+            card_dict = card.to_dict()
+            card_dict["price_sale"] = float(price_sale) if price_sale else None
+            found_list.append(card_dict)
+
+        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
+
+        return {
+            "found": found_list,
+            "not_found": not_found
+        }
 
     async def batch_query_cards(
         self,

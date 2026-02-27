@@ -1214,14 +1214,16 @@ POST /api/v1/stock/inventory/export       // 导出库存
 **功能**：
 
 #### 6.1 卡片列表
-- 分页表格
+- 分页表格（带网格线border）
 - 快速搜索（ICCID/IMSI/MSISDN/后6位）
-- **支持输入ICCID批量查询卡信息**
-- 高级筛选（状态/运营商/套餐/流量池）
+- **支持输入ICCID批量查询卡信息**（结果直接显示在主列表，非弹窗）
+- 基础筛选（状态/运营商/周期/流量池）
+- **高级搜索**（可展开/收起）：关联客户（远程搜索）、备注关键词、出库单号、出库时间范围、激活时间范围、到期时间范围
 - 批量操作（划拨/备注/导出/续费/停机/复机）
 - **批量续费功能**
 - **批量停复机功能**
 - 卡片详情查看
+- **流量显示格式**：2G（非2.00GB）、M（非MB）、使用百分比0位小数
 
 **表格字段**（与后端完全一致）：
 ```typescript
@@ -1308,7 +1310,7 @@ POST /api/v1/stock/inventory/export       // 导出库存
 
 **API**：
 ```typescript
-GET    /api/v1/cards
+GET    /api/v1/cards                       // 卡片列表（支持高级搜索参数：remark, customer_id, batch_id, stock_out_start/end, activated_start/end, expired_start/end）
 GET    /api/v1/cards/{id}
 GET    /api/v1/cards/search
 POST   /api/v1/cards/batch-query          // 批量查询
@@ -1572,8 +1574,9 @@ export const permission = {
 - 存储格式：`2026-01-31` (YYYY-MM-DD)
 
 ### 流量单位
-- 显示：自动转换 (1024MB → 1GB)
+- 显示：自动转换，无小数位 (1024MB → 1G, 512MB → 512M)
 - 存储：统一使用 MB
+- 使用百分比：0位小数（Math.round）
 
 ### 运营商映射
 ```typescript
@@ -3348,15 +3351,19 @@ const WarehousePermissions = [
 
 #### 8. 卡片管理模块 ✅
 - 卡片列表（统计卡片、关键词搜索、状态/运营商/周期/流量池筛选）
+- **高级搜索**（可展开/收起）：关联客户（远程搜索）、备注关键词、出库单号、出库时间范围、激活时间范围、到期时间范围
+- **批量查询**（BatchQueryDialog）：支持输入最多10000个ICCID，查询结果直接显示在主列表表格中（非弹窗），带橙色筛选提示栏，支持清除筛选
 - 卡片详情页
-- **批量查询**（BatchQueryDialog）：支持输入最多10000个ICCID，显示查询结果和未找到卡号
 - **批量划拨**（BatchTransferDialog）
 - **批量备注**（BatchRemarkDialog）
 - **批量续费**（BatchRenewDialog）：选择续费周期1/3/6/12个月
 - **批量停机**（BatchSuspendDialog）：输入ICCID + 停机原因
 - **批量复机**（BatchResumeDialog）：输入ICCID恢复
-- 单卡划拨（TransferDialog）、单卡备注（RemarkDialog）
+- 单卡划拨（TransferDialog）：打开时自动加载客户列表，支持空关键词搜索
+- 单卡备注（RemarkDialog）
 - 数据导出
+- **UI优化**：表格网格线（border）、搜索框宽度优化（关键词293px、状态/运营商213px、周期/流量池187px）
+- **数据格式优化**：流量显示简化（2G代替2.00GB、M代替MB）、使用百分比0位小数
 - **文件**：`views/cards/list/index.vue` 及 `components/` 下8个子组件、`views/cards/detail/index.vue`、`api/modules/card.ts`
 
 #### 9. 流量池管理模块 ✅
@@ -3550,4 +3557,76 @@ const WarehousePermissions = [
 - 功能完成后必须在浏览器中测试
 - 检查控制台是否有错误
 - 检查网络请求是否正常
+
+---
+
+## 🆕 卡片管理优化记录（2026-02-27更新）
+
+### 1. UI/UX 优化
+
+#### 1.1 搜索框宽度调整
+- 关键词输入框：293px
+- 状态/运营商下拉：213px
+- 周期/流量池下拉：187px
+
+#### 1.2 表格优化
+- 添加表格网格线（`border` 属性）
+- 字体、间距、统计卡片样式优化
+
+#### 1.3 数据格式优化
+- 流量显示：`2G` 代替 `2.00GB`，`512M` 代替 `512MB`
+- 使用百分比：0位小数（`Math.round`）
+- 进度条百分比同步去除小数
+
+### 2. 高级搜索功能（前后端联动）
+
+#### 2.1 前端
+- 可展开/收起的高级搜索区域（虚线分隔）
+- 搜索字段：关联客户（远程搜索）、备注关键词、出库单号（batch_id）、出库时间范围、激活时间范围、到期时间范围
+- 重置按钮同时清空高级搜索字段和日期范围
+- `CardListParams` 类型扩展：`remark`, `customer_id`, `batch_id`, `stock_out_start/end`, `activated_start/end`, `expired_start/end`
+
+#### 2.2 后端
+- API 层（`iot_card.py`）：新增 Query 参数
+- Service 层（`iot_card_service.py`）：透传参数
+- CRUD 层（`iot_card_crud.py`）：remark LIKE 模糊搜索、customer_id/batch_id 精确匹配、日期范围过滤（stock_out_date、activated_at、expired_at）
+
+### 3. 批量查询优化
+- 查询结果直接显示在主列表表格中（非弹窗），可看到所有字段
+- 橙色筛选提示栏显示查询结果数量和未找到数量
+- 批量查询模式下隐藏分页
+- 支持"清除筛选"恢复正常列表
+
+### 4. 划拨对话框修复
+- 打开时自动加载客户列表（`fetchUsers()` on dialog open）
+- 支持空关键词搜索，解决"无目标客户可选"问题
+
+### 5. 卡片详情页优化
+- 基本信息区域：移除"入库时间"显示，新增"激活时间"、"沉默期到期"、"到期时间"字段
+- 生命周期信息区域：移除重复的激活时间/沉默期到期/到期时间（已移至基本信息），仅保留测试期到期、停机时间、停机类型、停机原因
+- 流量使用百分比：去除小数位（`.toFixed(2)` → `.toFixed(0)`）
+- 进度条百分比：使用 `usagePercent.toFixed(0)` 替代 slot 的 `percentage`
+- 剩余流量计算修复：`Math.max((data_total - data_used), 0)` 防止负数
+- **文件**：`views/cards/detail/index.vue`
+
+### 6. 续费管理模块（新增） ✅
+
+#### 6.1 后端
+- 新增 `POST /api/v1/cards/batch/renew-price-query` 接口
+- 接收 `iccids: List[str]`（最多10000个）
+- LEFT JOIN `sale_packages` 表获取 `price_sale`（续费价格/出库价格）
+- 返回：`{ found: [...], not_found: [...] }`
+- **文件**：`app/api/v1/iot_card.py`、`app/services/iot_card_service.py`
+
+#### 6.2 前端
+- 新增路由：`/renewal/management` → `RenewalManagement`
+- 新增页面：`views/renewal/index.vue`
+  - ICCID 批量输入（textarea，支持换行/逗号/空格分隔，最多10000个）
+  - 查询结果表格：ICCID、号码、运营商、套餐规格、续费价格(¥)、状态、到期时间
+  - 未找到 ICCID 告警提示
+  - 下载 Excel 功能（纯前端导出，使用 xlsx 库）
+- 新增 API 方法：`cardApi.queryRenewPrice(iccids)`
+- MainLayout 图标映射：`'renewal': Money`
+- 数据库菜单记录：`sys_menus` (id=75) + `sys_user_menus` 关联
+- **文件**：`views/renewal/index.vue`、`router/routes.ts`、`api/modules/card.ts`、`components/layout/MainLayout.vue`
 

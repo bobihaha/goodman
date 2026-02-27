@@ -101,19 +101,14 @@ const visible = computed({
   set: (value) => emit('update:modelValue', value)
 })
 
-// 搜索用户
-const searchUsers = async (query: string) => {
-  if (!query) {
-    userList.value = []
-    return
-  }
-
+// 加载用户列表
+const fetchUsers = async (keyword?: string) => {
   userLoading.value = true
   try {
     const response = await userApi.getList({
-      keyword: query,
+      keyword: keyword || undefined,
       page: 1,
-      page_size: 20
+      page_size: 50
     })
     userList.value = response.list
   } catch (error) {
@@ -121,6 +116,11 @@ const searchUsers = async (query: string) => {
   } finally {
     userLoading.value = false
   }
+}
+
+// 远程搜索用户
+const searchUsers = (query: string) => {
+  fetchUsers(query)
 }
 
 // 提交
@@ -163,9 +163,11 @@ const resetForm = () => {
   formRef.value?.clearValidate()
 }
 
-// 监听对话框关闭
+// 监听对话框打开/关闭
 watch(visible, (newVal) => {
-  if (!newVal) {
+  if (newVal) {
+    fetchUsers()
+  } else {
     setTimeout(resetForm, 300)
   }
 })

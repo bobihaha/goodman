@@ -45,12 +45,13 @@ export function formatDateTime(date: string | null | undefined): string {
  */
 export function formatFlow(mb: number | null | undefined): string {
   if (mb === null || mb === undefined || isNaN(mb)) return '-'
-  
+
   if (mb >= 1024) {
-    return `${(mb / 1024).toFixed(2)}GB`
+    const gb = mb / 1024
+    return Number.isInteger(gb) ? `${gb}G` : `${Math.round(gb)}G`
   }
-  
-  return `${mb}MB`
+
+  return `${mb}M`
 }
 
 /**
@@ -58,9 +59,9 @@ export function formatFlow(mb: number | null | undefined): string {
  */
 export function formatUsagePercent(used: number, total: number): number {
   if (!total || total <= 0) return 0
-  
+
   const percent = (used / total) * 100
-  return Math.min(Math.max(percent, 0), 100)
+  return Math.round(Math.min(Math.max(percent, 0), 100))
 }
 
 /**
