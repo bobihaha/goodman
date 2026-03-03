@@ -89,7 +89,7 @@
               编辑
             </el-button>
             <el-button
-              v-if="canAssignPermission()"
+              v-if="canAssignPermission(row)"
               type="primary"
               link
               :icon="Setting"
@@ -246,16 +246,25 @@ const fetchUserList = async () => {
 
 /**
  * 检查是否可以分配权限
- * 只有超级管理员可以分配权限
+ * 超级管理员可以为所有用户分配权限，二级用户可以为自己的子用户分配权限
  */
-const canAssignPermission = (): boolean => {
+const canAssignPermission = (user: User): boolean => {
   const currentUser = authStore.userInfo
   if (!currentUser) {
     return false
   }
-  
-  // 只有超级管理员（user_level = 1）可以分配权限
-  return currentUser.user_level === 1
+
+  // 超级管理员（user_level = 1）可以为所有用户分配权限
+  if (currentUser.user_level === 1) {
+    return true
+  }
+
+  // 二级用户（user_level = 2）可以为自己的子用户（user_level = 3）分配权限
+  if (currentUser.user_level === 2 && user.user_level === 3 && user.parent_id === currentUser.id) {
+    return true
+  }
+
+  return false
 }
 
 /**

@@ -99,7 +99,7 @@ export const cardApi = {
 
   // 通过ICCID批量复机
   batchResumeByIccids(data: { iccids: string[] }): Promise<any> {
-    return post('/cards/batch/resume-by-iccids', data)
+    return post('/cards/batch/resume-by-iccids', data.iccids)
   },
 
   // 获取划拨记录

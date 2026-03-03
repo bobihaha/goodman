@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.services.iot_card_service import iot_card_service
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_user_level
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.schemas.iot_card import (
@@ -172,7 +172,7 @@ async def batch_renew_by_iccids(
     iccids: List[str] = Body(..., description="ICCID列表"),
     renew_months: int = Body(..., description="续费月数"),
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user)
+    current_user: CurrentUser = Depends(require_user_level)
 ):
     """通过ICCID批量续费"""
     if len(iccids) > 10000:
@@ -189,7 +189,7 @@ async def batch_renew_by_iccids(
 async def batch_renew_price_query(
     iccids: List[str] = Body(..., description="ICCID列表"),
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user)
+    current_user: CurrentUser = Depends(require_user_level)
 ):
     """批量查询卡片续费价格（出库价格）"""
     if len(iccids) > 10000:

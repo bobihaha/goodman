@@ -24,13 +24,17 @@
       label-width="100px"
     >
       <el-form-item label="新密码" prop="password">
-        <el-input
-          v-model="formData.password"
-          type="password"
-          placeholder="请输入新密码（6-50位）"
-          maxlength="50"
-          show-password
-        />
+        <div style="display: flex; gap: 8px; width: 100%">
+          <el-input
+            v-model="formData.password"
+            type="password"
+            placeholder="请输入新密码（6-50位）"
+            maxlength="50"
+            show-password
+            style="flex: 1"
+          />
+          <el-button @click="generatePassword">生成密码</el-button>
+        </div>
       </el-form-item>
 
       <el-form-item label="确认密码" prop="confirmPassword">
@@ -109,6 +113,31 @@ const formRules: FormRules = {
 
 // 提交状态
 const submitting = ref(false)
+
+/** 生成随机高强度密码 */
+const generatePassword = () => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+  const lower = 'abcdefghjkmnpqrstuvwxyz'
+  const digits = '23456789'
+  const symbols = '!@#$%&*'
+  const all = upper + lower + digits + symbols
+  // 确保每类至少一个
+  let pwd = [
+    upper[Math.floor(Math.random() * upper.length)],
+    lower[Math.floor(Math.random() * lower.length)],
+    digits[Math.floor(Math.random() * digits.length)],
+    symbols[Math.floor(Math.random() * symbols.length)],
+  ]
+  for (let i = pwd.length; i < 16; i++) {
+    pwd.push(all[Math.floor(Math.random() * all.length)])
+  }
+  // 打乱顺序
+  pwd.sort(() => Math.random() - 0.5)
+  const password = pwd.join('')
+  formData.password = password
+  formData.confirmPassword = password
+  ElMessage.success('已生成密码，请妥善保存')
+}
 
 /**
  * 提交表单

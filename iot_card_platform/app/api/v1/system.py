@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.db.database import get_db
-from app.utils.auth import get_current_user, require_super_admin
+from app.utils.auth import get_current_user, require_super_admin, require_user_level
 from app.schemas.common import ResponseModel, PageResponseModel
 from app.schemas.system import (
     ConfigCreate, ConfigUpdate, ConfigBatchUpdate,
@@ -59,9 +59,9 @@ async def get_config(
 async def create_config(
     data: ConfigCreate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(require_user_level)
 ):
-    """创建系统配置 (仅管理员)"""
+    """创建系统配置"""
     # 检查是否已存在
     existing = await SystemConfigService.get_config(db, data.config_key)
     if existing:
@@ -76,9 +76,9 @@ async def update_config(
     config_key: str,
     data: ConfigUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(require_user_level)
 ):
-    """更新系统配置 (仅管理员)"""
+    """更新系统配置"""
     config = await SystemConfigService.update_config(db, config_key, data)
     if not config:
         return ResponseModel(code=404, msg="配置不存在")
@@ -89,9 +89,9 @@ async def update_config(
 async def batch_update_configs(
     data: ConfigBatchUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(require_user_level)
 ):
-    """批量更新系统配置 (仅管理员)"""
+    """批量更新系统配置"""
     # 将列表转为字典
     configs_dict = {}
     for item in data.configs:
@@ -106,9 +106,9 @@ async def batch_update_configs(
 async def delete_config(
     config_key: str,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_super_admin)
+    current_user = Depends(require_user_level)
 ):
-    """删除系统配置 (仅管理员)"""
+    """删除系统配置"""
     success = await SystemConfigService.delete_config(db, config_key)
     if not success:
         return ResponseModel(code=404, msg="配置不存在")

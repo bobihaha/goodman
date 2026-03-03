@@ -313,6 +313,8 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="imsi" label="IMSI" width="180" />
+
         <el-table-column prop="msisdn" label="号码" width="130" />
 
         <el-table-column prop="card_type" label="卡片类型" width="110">

@@ -16,6 +16,11 @@
       style="width: 100%"
     >
       <el-table-column prop="config_key" label="配置键" min-width="180" />
+      <el-table-column label="中文说明" min-width="180">
+        <template #default="{ row }">
+          {{ configKeyLabels[row.config_key] || row.description || '-' }}
+        </template>
+      </el-table-column>
       <el-table-column prop="config_value" label="配置值" min-width="200" show-overflow-tooltip />
       <el-table-column prop="config_type" label="类型" width="100">
         <template #default="{ row }">
@@ -69,6 +74,16 @@ const configList = ref<SystemConfig[]>([])
 const loading = ref(false)
 const formDialogVisible = ref(false)
 const currentConfig = ref<SystemConfig | null>(null)
+
+const configKeyLabels: Record<string, string> = {
+  site_name: '网站名称',
+  alert_warning_threshold: '普通告警阈值（%）',
+  alert_critical_threshold: '紧急告警阈值（%）',
+  alert_stop_threshold: '停卡阈值（%）',
+  alert_expired_days: '到期预警天数',
+  alert_auto_suspend: '告警自动停卡',
+  alert_auto_notify: '告警自动通知',
+}
 
 const fetchConfigs = async () => {
   loading.value = true

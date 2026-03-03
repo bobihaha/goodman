@@ -114,6 +114,9 @@ class SysUserService:
     
     @staticmethod
     def _check_manage_permission(operator: CurrentUser, target: SysUserModel):
+        # 允许用户编辑自己的信息
+        if operator.id == target.id:
+            return
         if operator.is_super_admin() and target.user_level == UserLevel.USER.value:
             return
         if operator.is_user() and target.user_level == UserLevel.SUB_USER.value and target.parent_id == operator.id:
