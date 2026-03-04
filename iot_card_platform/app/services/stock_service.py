@@ -155,6 +155,16 @@ class StockService:
         remark: Optional[str] = None
     ) -> dict:
         """批量出库"""
+        # 验证销售套餐权限
+        from app.crud.package_crud import sale_package_crud
+        sale_package = await sale_package_crud.get_by_id(db, sale_package_id)
+        if not sale_package:
+            raise BusinessException(code=404, msg="销售套餐不存在")
+
+        # 如果套餐有专属客户，验证出库目标客户是否匹配
+        if sale_package.user_id and sale_package.user_id != to_user_id:
+            raise BusinessException(code=403, msg="该套餐为专属套餐，不能出库给其他客户")
+
         record, success, failed = await stock_out_crud.create(
             db=db,
             card_ids=card_ids,
@@ -480,7 +490,14 @@ class StockService:
                 card.stock_out_date = item.stock_out_date
                 card.test_expire_date = item.test_expire_date
                 card.silent_expire_date = item.silent_expire_date
-                card.status = CardStatus.silent
+
+                # 根据运营商类型设置初始状态
+                from app.db.models.package import CarrierType
+                if card.carrier == CarrierType.cmcc and item.test_expire_date:
+                    card.status = CardStatus.testing
+                else:
+                    card.status = CardStatus.silent
+
                 card.stock_out_at = datetime.now()
 
                 success += 1

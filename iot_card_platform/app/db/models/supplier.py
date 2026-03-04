@@ -1,7 +1,7 @@
 """
 供应商模型
 """
-from sqlalchemy import Column, String, Enum, BigInteger, Text, JSON
+from sqlalchemy import Column, String, Enum, BigInteger, Integer, Text, JSON
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel
 
@@ -36,6 +36,7 @@ class SupplierModel(BaseModel):
     api_key = Column(String(255), nullable=True, comment="API Key")
     api_secret = Column(String(255), nullable=True, comment="API Secret")
     api_config = Column(JSON, nullable=True, comment="API配置")
+    sync_interval = Column(Integer, nullable=True, default=60, comment="同步间隔(分钟)")
     remark = Column(String(500), nullable=True, comment="备注")
     status = Column(Enum(SupplierStatus), default=SupplierStatus.enable, comment="状态")
     created_by = Column(BigInteger, nullable=True, comment="创建人ID")
@@ -53,6 +54,7 @@ class SupplierModel(BaseModel):
             "has_api_key": bool(self.api_key),
             "has_api_secret": bool(self.api_secret),
             "api_config": self.api_config,
+            "sync_interval": self.sync_interval,
             "remark": self.remark,
             "status": self.status.value if self.status else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

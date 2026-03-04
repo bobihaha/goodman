@@ -21,6 +21,7 @@ export interface Supplier {
   has_api_key?: boolean
   has_api_secret?: boolean
   api_config?: Record<string, any>
+  sync_interval?: number
   remark?: string
   status: SupplierStatus
   created_at?: string
@@ -39,6 +40,7 @@ export interface CreateSupplierRequest {
   api_key?: string
   api_secret?: string
   api_config?: Record<string, any>
+  sync_interval?: number
   remark?: string
 }
 
@@ -53,6 +55,7 @@ export interface UpdateSupplierRequest {
   api_key?: string
   api_secret?: string
   api_config?: Record<string, any>
+  sync_interval?: number
   remark?: string
   status?: SupplierStatus
 }

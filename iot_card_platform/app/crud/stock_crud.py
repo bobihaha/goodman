@@ -337,7 +337,14 @@ class StockOutCRUD:
                 card.stock_out_date = stock_out_date
                 card.test_expire_date = test_expire_date
                 card.silent_expire_date = silent_expire_date
-                card.status = CardStatus.silent  # 出库后进入沉默期
+
+                # 根据运营商类型设置初始状态
+                from app.db.models.package import CarrierType
+                if card.carrier == CarrierType.cmcc and test_expire_date:
+                    card.status = CardStatus.testing
+                else:
+                    card.status = CardStatus.silent
+
                 card.stock_out_at = datetime.now()
                 success_count += 1
                 out_card_infos.append({"card_id": card.id, "iccid": card.iccid})
@@ -348,13 +355,22 @@ class StockOutCRUD:
 
         db.add(record)
         await db.flush()  # 获取record.id
-        
+
         # 获取销售套餐价格信息（价格单位：元，需要转换为分）
         sale_package_query = text("SELECT price_sale FROM sale_packages WHERE id = :package_id")
         sale_package_result = await db.execute(sale_package_query, {"package_id": sale_package_id})
         sale_package_row = sale_package_result.fetchone()
         unit_price = int(sale_package_row.price_sale * 100) if sale_package_row and sale_package_row.price_sale else 0
         total_amount = unit_price * success_count
+
+        # 记录套餐单价到已出库的卡片（用于续费价格锁定）
+        if sale_package_row and sale_package_row.price_sale:
+            sale_price_decimal = sale_package_row.price_sale
+            for card_id in card_ids:
+                await db.execute(
+                    text("UPDATE iot_cards SET sale_price = :sale_price WHERE id = :card_id"),
+                    {"sale_price": sale_price_decimal, "card_id": card_id}
+                )
         
         # 创建新表记录（stock_out_records）
         new_record_sql = """

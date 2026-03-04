@@ -286,16 +286,20 @@ const fetchList = async () => {
 const fetchSupplierPackages = async () => {
   try {
     console.log('正在请求底层套餐列表...')
-    supplierPackageList.value = await supplierPackageApi.getEnabled()
-    console.log('底层套餐列表响应:', supplierPackageList.value)
-    
+    const result = await supplierPackageApi.getEnabled()
+    console.log('底层套餐API原始响应:', result)
+    console.log('响应类型:', typeof result, '是否为数组:', Array.isArray(result))
+
+    supplierPackageList.value = Array.isArray(result) ? result : []
+    console.log('最终底层套餐列表:', supplierPackageList.value)
+
     if (supplierPackageList.value.length === 0) {
-      console.warn('数据库中暂无底层套餐数据，请先在底层套餐管理中创建套餐')
-      ElMessage.warning('暂无底层套餐数据，请先创建底层套餐后再创建销售套餐')
+      console.warn('暂无启用的底层套餐，请先在底层套餐管理中创建并启用套餐')
+      ElMessage.warning('暂无启用的底层套餐，请先创建并启用底层套餐')
     }
   } catch (error) {
     console.error('获取底层套餐列表失败:', error)
-    ElMessage.error('获取底层套餐列表失败，请查看控制台了解详情')
+    ElMessage.error('获取底层套餐列表失败')
   }
 }
 
@@ -324,7 +328,9 @@ const handleCreate = () => {
 
 // 编辑
 const handleEdit = (row: SalePackage) => {
+  console.log('编辑套餐，原始数据:', row)
   currentPackage.value = { ...row }
+  console.log('设置currentPackage:', currentPackage.value)
   dialogVisible.value = true
 }
 

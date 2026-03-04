@@ -118,9 +118,10 @@ class SalePackageService:
                 raise BusinessException(code=400, msg="关联的底层套餐不存在")
             base_package_name = base_package.name
 
-        # 超级管理员创建的是平台套餐 (user_id=None)
-        # 普通用户创建的是自己的套餐
-        user_id = None if current_user.user_level == UserLevel.SUPER_ADMIN.value else current_user.id
+        # 确定套餐归属
+        # 1. 如果指定了user_id，则为该用户的专属套餐
+        # 2. 否则为平台通用套餐
+        user_id = data.user_id if data.user_id else None
 
         package = await sale_package_crud.create(db, data, user_id, current_user.id)
         result = package.to_dict()

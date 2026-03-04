@@ -78,15 +78,34 @@
         <div class="form-tip">实际流量：{{ formatFlowSize(formData.flow_size) }}</div>
       </el-form-item>
 
-      <el-form-item label="有效天数" prop="effective_days">
+      <el-form-item
+        v-if="formData.period_type === 'monthly'"
+        label="套餐周期"
+        prop="period_months"
+      >
         <el-input-number
-          v-model="formData.effective_days"
+          v-model="formData.period_months"
+          :min="1"
+          :max="120"
+          :precision="0"
+          style="width: 200px"
+        />
+        <span style="margin-left: 10px; color: #909399">个月（按自然月计算）</span>
+      </el-form-item>
+
+      <el-form-item
+        v-if="formData.period_type === 'yearly'"
+        label="套餐周期"
+        prop="period_days"
+      >
+        <el-input-number
+          v-model="formData.period_days"
           :min="1"
           :max="3650"
           :precision="0"
           style="width: 200px"
         />
-        <span style="margin-left: 10px; color: #909399">天（月包默认30天，年包默认360天）</span>
+        <span style="margin-left: 10px; color: #909399">天（固定天数）</span>
       </el-form-item>
 
       <el-row :gutter="20">
@@ -198,7 +217,8 @@ const formData = reactive<CreateSupplierPackageRequest>({
   carrier: 'cmcc',
   flow_size: 1024,
   period_type: 'monthly',
-  effective_days: 30,
+  period_months: 1,
+  period_days: undefined,
   price_cost: 0,
   supplier_id: 0,
   status: 'enable',
@@ -216,7 +236,8 @@ const resetForm = () => {
     carrier: 'cmcc',
     flow_size: 1024,
     period_type: 'monthly',
-    effective_days: 30,
+    period_months: 1,
+    period_days: undefined,
     price_cost: 0,
     supplier_id: 0,
     status: 'enable',
@@ -232,6 +253,17 @@ watch([flowValue, flowUnit], () => {
   formData.flow_size = flowValue.value * flowUnit.value
 })
 
+// 监听周期类型变化
+watch(() => formData.period_type, (newType) => {
+  if (newType === 'monthly') {
+    formData.period_months = formData.period_months || 1
+    formData.period_days = undefined
+  } else {
+    formData.period_days = formData.period_days || 360
+    formData.period_months = undefined
+  }
+})
+
 // 监听套餐数据变化
 watch(
   () => props.packageData,
@@ -244,13 +276,14 @@ watch(
         carrier: data.carrier,
         flow_size: data.flow_size,
         period_type: data.period_type,
-        effective_days: data.effective_days,
+        period_months: data.period_months,
+        period_days: data.period_days,
         price_cost: data.price_cost,
         supplier_id: data.supplier_id,
         status: data.status,
         remark: data.remark || ''
       })
-      
+
       // 计算流量单位
       if (data.flow_size >= 1024 && data.flow_size % 1024 === 0) {
         flowValue.value = data.flow_size / 1024
@@ -288,8 +321,29 @@ const rules: FormRules = {
   period_type: [
     { required: true, message: '请选择周期类型', trigger: 'change' }
   ],
-  effective_days: [
-    { type: 'number', min: 1, max: 3650, message: '有效天数在 1 到 3650 天之间', trigger: 'blur' }
+  period_months: [
+    {
+      validator: (rule, value, callback) => {
+        if (formData.period_type === 'monthly' && !value) {
+          callback(new Error('请输入套餐周期（月）'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
+  period_days: [
+    {
+      validator: (rule, value, callback) => {
+        if (formData.period_type === 'yearly' && !value) {
+          callback(new Error('请输入套餐周期（天）'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
   ],
   price_cost: [
     { required: true, message: '请输入成本价', trigger: 'blur' },

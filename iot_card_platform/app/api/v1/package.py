@@ -42,6 +42,17 @@ async def get_supplier_package_list(
     return ResponseModel(data=result)
 
 
+@router.get("/supplier/options", summary="获取启用的底层套餐选项", response_model=ResponseModel)
+async def get_enabled_supplier_packages(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取所有启用的底层套餐 (用于下拉选择)"""
+    query = SupplierPackageQuery(status="enable", page=1, page_size=100)
+    result = await supplier_package_service.get_package_list(db, query)
+    return ResponseModel(data=result.get("list", []))
+
+
 @router.get("/supplier/options/{supplier_id}", summary="获取供应商套餐选项", response_model=ResponseModel)
 async def get_supplier_package_options(
     supplier_id: int = Path(..., description="供应商ID"),

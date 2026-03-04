@@ -12,7 +12,9 @@ export interface SupplierPackage {
   carrier: Carrier                // 运营商
   flow_size: number               // 流量大小(MB)
   period_type: PeriodType         // 周期类型
-  effective_days: number          // 有效天数
+  effective_days?: number         // [已废弃]有效天数
+  period_months?: number          // 套餐周期(月) - 月包使用
+  period_days?: number            // 套餐周期(天) - 年包使用
   price_cost: number              // 采购成本（元）
   supplier_id: number             // 供应商ID
   supplier_name?: string          // 供应商名称（关联查询）
@@ -32,10 +34,14 @@ export interface SalePackage {
   carrier: Carrier                // 运营商
   flow_size: number               // 流量大小(MB)
   period_type: PeriodType         // 周期类型
-  effective_days: number          // 有效天数
+  effective_days?: number         // [已废弃]有效天数
+  period_months?: number          // 套餐周期(月) - 月包使用
+  period_days?: number            // 套餐周期(天) - 年包使用
   price_cost: number              // 成本价（元）
   price_sale: number              // 销售价格（元）
   profit_margin?: number          // 利润率(%) - 前端计算
+  user_id?: number                // 专属客户ID
+  user_name?: string              // 客户名称（关联查询）
   is_public?: boolean             // 是否公开
   sort_order?: number             // 排序
   status: 'enable' | 'disable'    // 状态
@@ -67,7 +73,9 @@ export interface CreateSupplierPackageRequest {
   carrier: Carrier                // 运营商
   flow_size: number               // 流量大小(MB)
   period_type: PeriodType         // 周期类型
-  effective_days?: number         // 有效天数（可选，后端有默认值）
+  effective_days?: number         // [已废弃]有效天数
+  period_months?: number          // 套餐周期(月) - 月包使用
+  period_days?: number            // 套餐周期(天) - 年包使用
   price_cost: number              // 采购成本（元）
   supplier_id: number             // 供应商ID
   remark?: string                 // 备注
@@ -87,9 +95,12 @@ export interface CreateSalePackageRequest {
   carrier: Carrier                // 运营商
   flow_size: number               // 流量大小(MB)
   period_type: PeriodType         // 周期类型
-  effective_days?: number         // 有效天数（可选）
+  effective_days?: number         // [已废弃]有效天数
+  period_months?: number          // 套餐周期(月) - 月包使用
+  period_days?: number            // 套餐周期(天) - 年包使用
   price_cost: number              // 成本价（元）
   price_sale: number              // 销售价格（元）
+  user_id?: number                // 专属客户ID（可选）
   is_public?: boolean             // 是否公开（默认false）
   sort_order?: number             // 排序（默认0）
   status?: 'enable' | 'disable'   // 状态

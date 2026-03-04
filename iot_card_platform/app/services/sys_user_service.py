@@ -16,7 +16,7 @@ class SysUserService:
     async def create_user(cls, db: AsyncSession, operator: CurrentUser, user_data: UserCreate) -> UserInfo:
         if await sys_user_crud.check_account_exists(db, user_data.account):
             raise BusinessException(code=400, msg="账户已存在")
-        
+
         if operator.is_super_admin():
             new_level = UserLevel.USER.value
             parent_id = operator.id
@@ -26,14 +26,19 @@ class SysUserService:
             await cls._check_sub_user_quota(db, operator)
         else:
             raise PermissionDeniedException()
-        
+
         user_dict = user_data.model_dump()
         user_dict["password"] = AuthService.hash_password(user_data.password)
         user_dict["user_level"] = new_level
         user_dict["parent_id"] = parent_id
         user_dict["created_by"] = operator.id
-        
+
         user = await sys_user_crud.create(db, user_dict)
+
+        # 如果是三级用户，自动继承父用户菜单并添加项目管理菜单
+        if new_level == UserLevel.SUB_USER.value:
+            await cls._assign_default_menus_for_sub_user(db, user.id, parent_id)
+
         return UserInfo.model_validate(user)
     
     @classmethod
@@ -137,6 +142,33 @@ class SysUserService:
         current_count = await sys_user_crud.count_children(db, operator.id)
         if current_count >= max_sub_users:
             raise BusinessException(code=400, msg=f"子用户数量已达上限({max_sub_users}个)")
+
+    @staticmethod
+    async def _assign_default_menus_for_sub_user(db: AsyncSession, user_id: int, parent_id: int):
+        """为三级用户自动分配菜单：继承父用户菜单 + 项目管理菜单"""
+        from app.crud.sys_menu_crud import sys_user_menu_crud, sys_menu_crud
+        from sqlalchemy import select, insert
+        from app.db.models.sys_menu import SysUserMenuModel
+
+        # 获取父用户的所有菜单
+        parent_menu_ids = await sys_user_menu_crud.get_user_menu_ids(db, parent_id)
+
+        # 获取项目管理菜单ID
+        project_menu = await db.execute(select(sys_menu_crud.model).where(sys_menu_crud.model.code == 'projects'))
+        project_menu_obj = project_menu.scalar_one_or_none()
+
+        # 合并菜单ID（去重）
+        menu_ids = set(parent_menu_ids)
+        if project_menu_obj:
+            menu_ids.add(project_menu_obj.id)
+
+        # 批量插入
+        if menu_ids:
+            await db.execute(
+                insert(SysUserMenuModel),
+                [{"user_id": user_id, "menu_id": mid} for mid in menu_ids]
+            )
+            await db.commit()
 
 
 sys_user_service = SysUserService()

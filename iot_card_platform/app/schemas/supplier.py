@@ -50,6 +50,7 @@ class SupplierUpdate(BaseModel):
     api_key: Optional[str] = Field(None, max_length=255)
     api_secret: Optional[str] = Field(None, max_length=255)
     api_config: Optional[dict] = None
+    sync_interval: Optional[int] = Field(None, ge=1, le=1440)
     remark: Optional[str] = Field(None, max_length=500)
     status: Optional[SupplierStatus] = None
 

@@ -30,6 +30,7 @@ from app.db.models.suspend import (
     SuspendActionType, AlertLevel, AlertTargetType,
     SUSPEND_ACTION_NAMES, ALERT_LEVEL_NAMES, ALERT_TARGET_NAMES
 )
+from app.db.models.project import ProjectModel
 
 __all__ = [
     "Base", "BaseModel",
@@ -49,4 +50,5 @@ __all__ = [
     "SuspendPolicyModel", "SuspendLogModel", "AlertLogModel",
     "SuspendActionType", "AlertLevel", "AlertTargetType",
     "SUSPEND_ACTION_NAMES", "ALERT_LEVEL_NAMES", "ALERT_TARGET_NAMES",
+    "ProjectModel",
 ]

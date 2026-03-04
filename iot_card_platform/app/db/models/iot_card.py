@@ -2,7 +2,7 @@
 物联网卡模型
 包含: 卡片表、采购批次表、流量池表、划拨记录表
 """
-from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text
+from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel
@@ -76,6 +76,8 @@ class IotCardModel(BaseModel):
     supplier_id = Column(BigInteger, nullable=True, index=True, comment="供应商ID")
     batch_id = Column(BigInteger, nullable=True, index=True, comment="采购批次ID")
     sale_package_id = Column(BigInteger, nullable=True, comment="销售套餐ID")
+    sale_price = Column(DECIMAL(10, 2), nullable=True, comment="套餐单价(元/周期) - 出库时记录")
+    project_id = Column(BigInteger, nullable=True, index=True, comment="所属项目ID")
     
     # 规格信息 (冗余，方便查询和组池)
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
@@ -161,6 +163,8 @@ class IotCardModel(BaseModel):
             "supplier_id": self.supplier_id,
             "batch_id": self.batch_id,
             "sale_package_id": self.sale_package_id,
+            "sale_price": float(self.sale_price) if self.sale_price else None,
+            "project_id": self.project_id,
             # 规格信息
             "carrier": self.carrier.value if self.carrier else None,
             "carrier_name": CARRIER_NAMES.get(self.carrier.value, "") if self.carrier else None,

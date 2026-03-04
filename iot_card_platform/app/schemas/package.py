@@ -3,7 +3,7 @@
 规格三要素: 运营商 + 流量 + 周期类型
 """
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 from datetime import datetime
 
@@ -38,11 +38,25 @@ class SupplierPackageCreate(BaseModel):
     carrier: CarrierType = Field(..., description="运营商")
     flow_size: int = Field(..., gt=0, description="流量大小(MB)")
     period_type: PeriodType = Field(default=PeriodType.monthly, description="周期类型: 月包/年包")
-    # 有效期 (月包默认30天, 年包默认360天)
-    effective_days: Optional[int] = Field(None, ge=1, description="激活后有效天数")
+    # 有效期配置
+    effective_days: Optional[int] = Field(None, ge=1, description="[已废弃]激活后有效天数")
+    period_months: Optional[int] = Field(None, ge=1, le=120, description="套餐周期(月) - 月包使用")
+    period_days: Optional[int] = Field(None, ge=1, le=3650, description="套餐周期(天) - 年包使用")
     # 价格
     price_cost: float = Field(..., ge=0, description="成本价(元)")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+    @model_validator(mode='after')
+    def validate_period(self):
+        if self.period_type == PeriodType.monthly:
+            if not self.period_months:
+                raise ValueError("月包必须指定 period_months")
+            self.period_days = None
+        elif self.period_type == PeriodType.yearly:
+            if not self.period_days:
+                raise ValueError("年包必须指定 period_days")
+            self.period_months = None
+        return self
 
 
 class SupplierPackageUpdate(BaseModel):
@@ -52,6 +66,8 @@ class SupplierPackageUpdate(BaseModel):
     flow_size: Optional[int] = Field(None, gt=0)
     period_type: Optional[PeriodType] = None
     effective_days: Optional[int] = Field(None, ge=1)
+    period_months: Optional[int] = Field(None, ge=1, le=120)
+    period_days: Optional[int] = Field(None, ge=1, le=3650)
     price_cost: Optional[float] = Field(None, ge=0)
     remark: Optional[str] = Field(None, max_length=500)
     status: Optional[PackageStatus] = None
@@ -70,7 +86,9 @@ class SupplierPackageInfo(BaseModel):
     flow_size_display: Optional[str] = None
     period_type: Optional[str] = None
     period_name: Optional[str] = None
-    effective_days: int
+    effective_days: Optional[int] = None
+    period_months: Optional[int] = None
+    period_days: Optional[int] = None
     spec_name: Optional[str] = None  # 规格名称: 移动1G/月
     price_cost: float
     remark: Optional[str] = None
@@ -111,8 +129,10 @@ class SalePackageCreate(BaseModel):
     carrier: CarrierType = Field(..., description="运营商")
     flow_size: int = Field(..., gt=0, description="流量大小(MB)")
     period_type: PeriodType = Field(default=PeriodType.monthly, description="周期类型")
-    # 有效期
-    effective_days: Optional[int] = Field(None, ge=1, description="激活后有效天数")
+    # 有效期配置
+    effective_days: Optional[int] = Field(None, ge=1, description="[已废弃]激活后有效天数")
+    period_months: Optional[int] = Field(None, ge=1, le=120, description="套餐周期(月)")
+    period_days: Optional[int] = Field(None, ge=1, le=3650, description="套餐周期(天)")
     # 价格
     price_cost: float = Field(..., ge=0, description="成本价(元)")
     price_sale: float = Field(..., ge=0, description="销售价(元)")
@@ -120,6 +140,18 @@ class SalePackageCreate(BaseModel):
     is_public: bool = Field(default=False, description="是否公开")
     sort_order: int = Field(default=0, description="排序")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+    @model_validator(mode='after')
+    def validate_period(self):
+        if self.period_type == PeriodType.monthly:
+            if not self.period_months:
+                raise ValueError("月包必须指定 period_months")
+            self.period_days = None
+        elif self.period_type == PeriodType.yearly:
+            if not self.period_days:
+                raise ValueError("年包必须指定 period_days")
+            self.period_months = None
+        return self
 
 
 class SalePackageUpdate(BaseModel):
@@ -130,6 +162,8 @@ class SalePackageUpdate(BaseModel):
     flow_size: Optional[int] = Field(None, gt=0)
     period_type: Optional[PeriodType] = None
     effective_days: Optional[int] = Field(None, ge=1)
+    period_months: Optional[int] = Field(None, ge=1, le=120)
+    period_days: Optional[int] = Field(None, ge=1, le=3650)
     price_cost: Optional[float] = Field(None, ge=0)
     price_sale: Optional[float] = Field(None, ge=0)
     is_public: Optional[bool] = None
@@ -152,7 +186,9 @@ class SalePackageInfo(BaseModel):
     flow_size_display: Optional[str] = None
     period_type: Optional[str] = None
     period_name: Optional[str] = None
-    effective_days: int
+    effective_days: Optional[int] = None
+    period_months: Optional[int] = None
+    period_days: Optional[int] = None
     spec_name: Optional[str] = None  # 规格名称
     price_cost: float
     price_sale: float

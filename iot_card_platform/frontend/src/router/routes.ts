@@ -58,6 +58,15 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'projects',
+        name: 'Projects',
+        component: () => import('@/views/projects/index.vue'),
+        meta: {
+          title: '项目管理',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'packages/supplier',
         name: 'SupplierPackage',
         component: () => import('@/views/packages/supplier/index.vue'),

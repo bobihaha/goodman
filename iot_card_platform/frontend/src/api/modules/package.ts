@@ -56,11 +56,8 @@ export const supplierPackageApi = {
   },
 
   // 获取所有启用的底层套餐（用于下拉选择）
-  async getEnabled(): Promise<SupplierPackage[]> {
-    const res = await get<PaginationResponse<SupplierPackage>>('/packages/supplier', { 
-      params: { status: 'enable', page: 1, page_size: 100 }  // 最大100
-    })
-    return res.list || []
+  getEnabled(): Promise<SupplierPackage[]> {
+    return get<SupplierPackage[]>('/packages/supplier/options')
   }
 }
 

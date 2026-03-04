@@ -59,6 +59,7 @@ class CardInfo(BaseModel):
     supplier_id: Optional[int] = None
     batch_id: Optional[int] = None
     sale_package_id: Optional[int] = None
+    sale_price: Optional[float] = Field(None, description="套餐单价(元/周期)")
     # 规格
     carrier: Optional[str] = None
     carrier_name: Optional[str] = None

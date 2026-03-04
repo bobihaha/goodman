@@ -28,6 +28,7 @@ class IotCardService:
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
         batch_id: Optional[int] = None,
+        project_id: Optional[int] = None,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
         activated_start: Optional[str] = None,
@@ -54,6 +55,7 @@ class IotCardService:
             remark=remark,
             customer_id=customer_id,
             batch_id=batch_id,
+            project_id=project_id,
             stock_out_start=stock_out_start,
             stock_out_end=stock_out_end,
             activated_start=activated_start,
@@ -279,13 +281,10 @@ class IotCardService:
     ) -> dict:
         """批量查询续费价格"""
         from sqlalchemy import select
-        from app.db.models.package import SalePackageModel
 
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
 
-        query = select(IotCardModel, SalePackageModel.price_sale).outerjoin(
-            SalePackageModel, IotCardModel.sale_package_id == SalePackageModel.id
-        ).where(
+        query = select(IotCardModel).where(
             IotCardModel.iccid.in_(iccids),
             IotCardModel.is_deleted == 0
         )
@@ -294,14 +293,24 @@ class IotCardService:
             query = query.where(IotCardModel.user_id == user_filter)
 
         result = await db.execute(query)
-        rows = result.all()
+        cards = result.scalars().all()
 
         found_iccids = set()
         found_list = []
-        for card, price_sale in rows:
+        for card in cards:
             found_iccids.add(card.iccid)
             card_dict = card.to_dict()
-            card_dict["price_sale"] = float(price_sale) if price_sale else None
+            # 使用卡片记录的单价，如果为空则查询套餐价格作为兜底
+            if card.sale_price:
+                card_dict["price_sale"] = float(card.sale_price)
+            elif card.sale_package_id:
+                from app.db.models.package import SalePackageModel
+                pkg_query = select(SalePackageModel.price_sale).where(SalePackageModel.id == card.sale_package_id)
+                pkg_result = await db.execute(pkg_query)
+                price = pkg_result.scalar_one_or_none()
+                card_dict["price_sale"] = float(price) if price else None
+            else:
+                card_dict["price_sale"] = None
             found_list.append(card_dict)
 
         not_found = [iccid for iccid in iccids if iccid not in found_iccids]
@@ -492,7 +501,9 @@ class IotCardService:
     ) -> dict:
         """通过ICCID批量续费"""
         from sqlalchemy import select
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, date
+        from app.crud.package_crud import sale_package_crud
+        from app.utils.date_utils import calculate_expiry_date
         
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         
@@ -519,11 +530,21 @@ class IotCardService:
             
             try:
                 # 续费逻辑：延长到期日期
-                if card.expired_at:
-                    from datetime import date
-                    card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
+                if package:
+                    base_date = card.expired_at if card.expired_at else date.today()
+                    card.expired_at = calculate_expiry_date(
+                        base_date,
+                        package.period_type.value,
+                        package.period_months,
+                        package.period_days
+                    )
                 else:
-                    card.expired_at = date.today() + timedelta(days=renew_months * 30)
+                    # 兼容旧逻辑：无套餐信息时按30天/月计算
+                    if card.expired_at:
+                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                    else:
+                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
                 
                 success_list.append({
                     "iccid": card.iccid,
@@ -839,7 +860,9 @@ class IotCardService:
     ) -> dict:
         """通过ICCID批量续费"""
         from sqlalchemy import select
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, date
+        from app.crud.package_crud import sale_package_crud
+        from app.utils.date_utils import calculate_expiry_date
         
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         
@@ -866,11 +889,21 @@ class IotCardService:
             
             try:
                 # 续费逻辑：延长到期日期
-                if card.expired_at:
-                    from datetime import date
-                    card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
+                if package:
+                    base_date = card.expired_at if card.expired_at else date.today()
+                    card.expired_at = calculate_expiry_date(
+                        base_date,
+                        package.period_type.value,
+                        package.period_months,
+                        package.period_days
+                    )
                 else:
-                    card.expired_at = date.today() + timedelta(days=renew_months * 30)
+                    # 兼容旧逻辑：无套餐信息时按30天/月计算
+                    if card.expired_at:
+                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                    else:
+                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
                 
                 success_list.append({
                     "iccid": card.iccid,
@@ -1186,7 +1219,9 @@ class IotCardService:
     ) -> dict:
         """通过ICCID批量续费"""
         from sqlalchemy import select
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, date
+        from app.crud.package_crud import sale_package_crud
+        from app.utils.date_utils import calculate_expiry_date
         
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         
@@ -1213,11 +1248,21 @@ class IotCardService:
             
             try:
                 # 续费逻辑：延长到期日期
-                if card.expired_at:
-                    from datetime import date
-                    card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
+                if package:
+                    base_date = card.expired_at if card.expired_at else date.today()
+                    card.expired_at = calculate_expiry_date(
+                        base_date,
+                        package.period_type.value,
+                        package.period_months,
+                        package.period_days
+                    )
                 else:
-                    card.expired_at = date.today() + timedelta(days=renew_months * 30)
+                    # 兼容旧逻辑：无套餐信息时按30天/月计算
+                    if card.expired_at:
+                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                    else:
+                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
                 
                 success_list.append({
                     "iccid": card.iccid,
@@ -1533,7 +1578,9 @@ class IotCardService:
     ) -> dict:
         """通过ICCID批量续费"""
         from sqlalchemy import select
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, date
+        from app.crud.package_crud import sale_package_crud
+        from app.utils.date_utils import calculate_expiry_date
         
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         
@@ -1560,11 +1607,21 @@ class IotCardService:
             
             try:
                 # 续费逻辑：延长到期日期
-                if card.expired_at:
-                    from datetime import date
-                    card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
+                if package:
+                    base_date = card.expired_at if card.expired_at else date.today()
+                    card.expired_at = calculate_expiry_date(
+                        base_date,
+                        package.period_type.value,
+                        package.period_months,
+                        package.period_days
+                    )
                 else:
-                    card.expired_at = date.today() + timedelta(days=renew_months * 30)
+                    # 兼容旧逻辑：无套餐信息时按30天/月计算
+                    if card.expired_at:
+                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
+                    else:
+                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
                 
                 success_list.append({
                     "iccid": card.iccid,

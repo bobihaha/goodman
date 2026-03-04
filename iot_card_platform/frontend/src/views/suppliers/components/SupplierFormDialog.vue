@@ -124,6 +124,20 @@
         </div>
       </el-form-item>
 
+      <el-form-item label="同步间隔" prop="sync_interval">
+        <el-input-number
+          v-model="formData.sync_interval"
+          :min="1"
+          :max="1440"
+          placeholder="请输入同步间隔"
+          style="width: 200px"
+        />
+        <span style="margin-left: 10px; color: #909399;">分钟</span>
+        <div class="form-tip">
+          设置流量数据自动同步的时间间隔，范围：1-1440分钟
+        </div>
+      </el-form-item>
+
       <el-form-item label="状态" prop="status">
         <el-radio-group v-model="formData.status">
           <el-radio label="enable">启用</el-radio>
@@ -230,6 +244,7 @@ const formData = reactive<CreateSupplierRequest>({
   api_key: '',
   api_secret: '',
   api_config: undefined,
+  sync_interval: 60,
   remark: ''
 })
 
@@ -268,6 +283,7 @@ const resetForm = () => {
     api_key: '',
     api_secret: '',
     api_config: undefined,
+    sync_interval: 60,
     remark: ''
   })
   apiConfigText.value = ''
@@ -295,6 +311,7 @@ watch(
         api_key: '',
         api_secret: '',
         api_config: data.api_config,
+        sync_interval: data.sync_interval || 60,
         remark: data.remark || ''
       })
       
@@ -338,6 +355,10 @@ const rules: FormRules = {
   ],
   api_url: [
     { type: 'url', message: '请输入正确的URL地址', trigger: 'blur' }
+  ],
+  sync_interval: [
+    { required: true, message: '请输入同步间隔', trigger: 'blur' },
+    { type: 'number', min: 1, max: 1440, message: '同步间隔范围为1-1440分钟', trigger: 'blur' }
   ]
 }
 

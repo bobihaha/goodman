@@ -103,6 +103,11 @@ class SyncService:
                             card.data_used = data.get("data_used", 0)
                             card.data_total = data.get("data_total", card.data_total)
                             card.data_sync_at = datetime.now()
+
+                            # 检查并更新卡片状态
+                            from app.services.card_status_service import check_and_update_card_status
+                            await check_and_update_card_status(db, card)
+
                             success_count += 1
                             sync_details.append({
                                 "iccid": card.iccid,
@@ -363,6 +368,10 @@ class SyncService:
             card.data_used = usage_data.get("data_used", 0)
             card.data_total = usage_data.get("data_total", card.data_total)
             card.data_sync_at = datetime.now()
+
+            # 检查并更新卡片状态
+            from app.services.card_status_service import check_and_update_card_status
+            await check_and_update_card_status(db, card)
 
             # 记录旧状态
             old_status = card.status

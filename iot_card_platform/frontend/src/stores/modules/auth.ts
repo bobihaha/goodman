@@ -208,8 +208,8 @@ export const useAuthStore = defineStore('auth', () => {
       const menuItem = menuMap.get(menu.id)
       if (!menuItem) return
 
-      if (menu.parent_id === 0) {
-        // 根菜单
+      if (menu.parent_id === 0 || menu.parent_id === null) {
+        // 根菜单（parent_id 为 0 或 null）
         rootMenus.push(menuItem)
       } else {
         // 子菜单

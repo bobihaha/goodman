@@ -64,6 +64,28 @@ const fetchData = async () => {
 
 基于 **Vue 3.4+ / TypeScript 5.x / Element Plus** 的物联网卡管理平台前端，支持三级多租户 SaaS 架构。
 
+### 🔄 卡片状态自动更新机制 (2026-03-04 新增)
+
+**功能说明**：系统通过定时任务自动同步供应商流量数据，并在同步时自动更新卡片状态和日期。
+
+**自动转换规则**：
+1. **testing → silent**：当前日期 > test_expire_date
+2. **testing/silent → activated**：检测到流量使用（data_used > 0）
+   - 自动设置 activated_at = 当前日期
+   - 自动计算 expired_at = activated_at + 套餐周期
+3. **activated → suspended**：当前日期 > expired_at（到期停机）
+4. **修复规则**：已激活但缺少日期的卡片自动补全日期
+
+**同步间隔配置**：
+- 供应商管理页面可设置同步间隔（单位：分钟）
+- 默认值：60分钟
+- 支持随时修改，自动重新加载定时任务
+
+**前端显示**：
+- 激活日期（activated_at）和到期日期（expired_at）自动显示
+- 日期格式：26/1/31
+- 过期日期显示为红色
+
 **技术栈**：
 - Vue 3.4+ (Composition API + `<script setup>`)
 - TypeScript 5.x (严格模式)
@@ -3392,24 +3414,39 @@ const WarehousePermissions = [
 - 通知模板管理（NotifyTemplatePanel + NotifyTemplateFormDialog）
 - **文件**：`views/system/index.vue` 及 `components/` 下6个子组件、`api/modules/system.ts`
 
+#### 12. 续费管理模块 ✅
+- 批量查询续费价格（输入ICCID，最多10000个）
+- 查询结果表格（ICCID、号码、运营商、套餐规格、续费价格、状态、到期时间）
+- 未找到ICCID告警提示
+- Excel导出功能（纯前端，使用xlsx库）
+- **文件**：`views/renewal/index.vue`、`api/modules/card.ts`
+
+#### 13. 项目管理模块 ✅
+- 项目列表（搜索、分页）
+- 创建/编辑项目（ProjectFormDialog）
+- 删除项目（二次确认）
+- 项目信息：ID、名称、卡片数量、备注、创建时间
+- 权限控制：用户仅可管理自己的项目
+- **文件**：`views/projects/index.vue`、`views/projects/components/ProjectFormDialog.vue`、`api/modules/project.ts`、`types/project.d.ts`
+
 ### 二、基础设施完成
 
-#### 12. 路由系统 ✅
-- 22个路由页面全部配置完成
+#### 14. 路由系统 ✅
+- 24个路由页面全部配置完成（新增：续费管理、项目管理）
 - 路由守卫（登录验证、权限校验、动态菜单）
 - 路由懒加载
 - **文件**：`router/routes.ts`、`router/guards.ts`、`router/index.ts`
 
-#### 13. API层 ✅
-- 12个API模块全部完成：auth、user、card、pool、package、stock、supplier、suspend、dashboard、menu、permission、system
+#### 15. API层 ✅
+- 13个API模块全部完成：auth、user、card、pool、package、stock、supplier、suspend、dashboard、menu、permission、system、project
 - Axios封装（请求/响应拦截器、Token管理、错误处理）
-- **文件**：`api/modules/` 下12个模块、`api/index.ts`
+- **文件**：`api/modules/` 下13个模块、`api/index.ts`
 
-#### 14. 状态管理 ✅
+#### 16. 状态管理 ✅
 - Auth Store（登录状态、Token管理、用户信息、权限缓存、超级登录）
 - **文件**：`stores/modules/auth.ts`
 
-#### 15. 布局与通用组件 ✅
+#### 17. 布局与通用组件 ✅
 - 主布局（MainLayout）
 - 超级登录横幅（SuperLoginBanner）
 - 权限指令（v-permission）
@@ -3481,7 +3518,7 @@ const WarehousePermissions = [
 
 ## 📊 开发进度统计
 
-**总体进度**：15 / 15 个核心模块已完成前端开发（100%）
+**总体进度**：17 / 17 个核心模块已完成前端开发（100%）
 
 **已完成的核心模块**：
 - ✅ 登录与认证
@@ -3495,8 +3532,10 @@ const WarehousePermissions = [
 - ✅ 流量池管理（含充值加油包）
 - ✅ 停复机管理（策略、记录、告警）
 - ✅ 系统设置（配置、告警规则、日志、通知模板）
-- ✅ 路由系统（22个页面）
-- ✅ API层（12个模块）
+- ✅ 续费管理（批量查询续费价格、Excel导出）
+- ✅ 项目管理（项目CRUD、卡片分组）
+- ✅ 路由系统（24个页面）
+- ✅ API层（13个模块）
 - ✅ 状态管理
 - ✅ 布局与通用组件
 
@@ -3629,4 +3668,50 @@ const WarehousePermissions = [
 - MainLayout 图标映射：`'renewal': Money`
 - 数据库菜单记录：`sys_menus` (id=75) + `sys_user_menus` 关联
 - **文件**：`views/renewal/index.vue`、`router/routes.ts`、`api/modules/card.ts`、`components/layout/MainLayout.vue`
+
+### 7. 项目管理模块（新增） ✅
+
+#### 7.1 功能概述
+- 用户可创建项目对卡片进行分组管理
+- 支持为卡片关联项目，便于按项目维度统计和查询
+- 项目与用户绑定，仅可管理自己的项目
+
+#### 7.2 后端实现
+- 数据库表：`projects` (id, name, user_id, remark, card_count, created_at, updated_at)
+- API 接口：
+  - `GET /api/v1/projects` - 项目列表（分页、关键词搜索）
+  - `GET /api/v1/projects/all` - 所有项目（下拉选择用）
+  - `GET /api/v1/projects/{id}` - 项目详情
+  - `POST /api/v1/projects` - 创建项目
+  - `PUT /api/v1/projects/{id}` - 更新项目
+  - `DELETE /api/v1/projects/{id}` - 删除项目
+- 权限控制：用户仅可操作自己创建的项目
+- **文件**：`app/api/v1/project.py`、`app/schemas/project.py`、`app/crud/project_crud.py`、`app/db/models/project.py`
+
+#### 7.3 前端实现
+- 新增路由：`/projects` → `Projects`
+- 新增页面：`views/projects/index.vue`
+  - 搜索栏：项目名称关键词搜索
+  - 操作栏：新增项目按钮
+  - 项目列表表格：ID、项目名称、卡片数量、备注、创建时间、操作（编辑/删除）
+  - 分页组件
+- 新增组件：`views/projects/components/ProjectFormDialog.vue`（创建/编辑项目表单弹窗）
+- 新增 API 模块：`api/modules/project.ts`
+- 新增类型定义：`types/project.d.ts`
+- MainLayout 图标映射：`'projects': FolderOpened`
+- 数据库菜单记录：`sys_menus` (id=76) + `sys_user_menus` 关联
+- **文件**：`views/projects/index.vue`、`views/projects/components/ProjectFormDialog.vue`、`router/routes.ts`、`api/modules/project.ts`、`types/project.d.ts`
+
+#### 7.4 数据结构
+```typescript
+interface Project {
+  id: number
+  name: string              // 项目名称
+  user_id: number           // 所属用户ID
+  remark?: string           // 备注
+  card_count: number        // 关联卡片数量
+  created_at?: string
+  updated_at?: string
+}
+```
 

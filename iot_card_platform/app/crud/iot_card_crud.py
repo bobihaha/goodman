@@ -48,6 +48,7 @@ class IotCardCRUD:
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
         batch_id: Optional[int] = None,
+        project_id: Optional[int] = None,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
         activated_start: Optional[str] = None,
@@ -136,6 +137,11 @@ class IotCardCRUD:
         if batch_id is not None:
             query = query.where(IotCardModel.batch_id == batch_id)
             count_query = count_query.where(IotCardModel.batch_id == batch_id)
+
+        # 项目过滤
+        if project_id is not None:
+            query = query.where(IotCardModel.project_id == project_id)
+            count_query = count_query.where(IotCardModel.project_id == project_id)
 
         # 出库时间范围
         if stock_out_start:

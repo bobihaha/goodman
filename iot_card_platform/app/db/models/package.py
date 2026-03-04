@@ -57,8 +57,10 @@ class SupplierPackageModel(BaseModel):
     flow_size = Column(BigInteger, nullable=False, comment="流量大小(MB)")
     period_type = Column(Enum(PeriodType), default=PeriodType.monthly, comment="周期类型: 月包/年包")
     
-    # 有效期配置 (激活后有效天数: 月包30天, 年包360天)
-    effective_days = Column(Integer, nullable=False, default=30, comment="激活后有效天数")
+    # 有效期配置
+    effective_days = Column(Integer, nullable=True, comment="[已废弃]激活后有效天数")
+    period_months = Column(Integer, nullable=True, comment="套餐周期(月) - 月包使用")
+    period_days = Column(Integer, nullable=True, comment="套餐周期(天) - 年包使用")
     
     # 价格
     price_cost = Column(DECIMAL(10, 2), nullable=False, comment="成本价(元)")
@@ -100,6 +102,8 @@ class SupplierPackageModel(BaseModel):
             "period_type": self.period_type.value if self.period_type else None,
             "period_name": PERIOD_CONFIG.get(self.period_type.value, {}).get("name", "") if self.period_type else None,
             "effective_days": self.effective_days,
+            "period_months": self.period_months,
+            "period_days": self.period_days,
             "spec_name": self.get_spec_name(),
             "price_cost": float(self.price_cost) if self.price_cost else 0,
             "remark": self.remark,
@@ -128,7 +132,9 @@ class SalePackageModel(BaseModel):
     period_type = Column(Enum(PeriodType), default=PeriodType.monthly, comment="周期类型")
     
     # 有效期配置
-    effective_days = Column(Integer, nullable=False, default=30, comment="激活后有效天数")
+    effective_days = Column(Integer, nullable=True, comment="[已废弃]激活后有效天数")
+    period_months = Column(Integer, nullable=True, comment="套餐周期(月) - 月包使用")
+    period_days = Column(Integer, nullable=True, comment="套餐周期(天) - 年包使用")
     
     # 价格
     price_cost = Column(DECIMAL(10, 2), nullable=False, comment="成本价(元)")
@@ -174,6 +180,8 @@ class SalePackageModel(BaseModel):
             "period_type": self.period_type.value if self.period_type else None,
             "period_name": PERIOD_CONFIG.get(self.period_type.value, {}).get("name", "") if self.period_type else None,
             "effective_days": self.effective_days,
+            "period_months": self.period_months,
+            "period_days": self.period_days,
             "spec_name": self.get_spec_name(),
             "price_cost": float(self.price_cost) if self.price_cost else 0,
             "price_sale": float(self.price_sale) if self.price_sale else 0,

@@ -204,9 +204,9 @@ DELETE /api/v1/packages/sale/{id}         # 删除销售套餐
 - [x] 回收记录查询
 
 **数据同步 (调用供应商API)**：
-- [ ] 批量同步流量使用情况 (单位: MB)
-- [ ] 批量同步生命周期日期 (测试期/沉默期/激活日/过期日)
-- [ ] 同步卡片状态
+- [x] 批量同步流量使用情况 (单位: MB)
+- [x] 自动更新卡片状态和日期 (激活日/过期日)
+- [x] 定时任务调度器 (APScheduler)
 
 **API 端点**：
 ```
@@ -431,13 +431,15 @@ POST   /api/v1/suspend/alerts/{id}/handle    # 处理告警 ✅
 
 ---
 
-### 模块 7: 供应商对接 🔗 (部分完成)
+### 模块 7: 供应商对接 ✅ 已完成
 
 **功能**：
 - [x] 供应商信息管理 (CRUD)
 - [x] API 配置管理 (URL/Key/Secret)
-- [ ] 接口调用日志
-- [ ] 供应商API对接 (流量同步等)
+- [x] 同步间隔配置 (sync_interval 字段，单位：分钟)
+- [x] 供应商API对接 (流量同步)
+- [x] 定时任务自动同步 (基于供应商配置的间隔)
+- [x] 卡片状态自动转换服务
 
 **API 端点**：
 ```
@@ -447,6 +449,11 @@ GET    /api/v1/suppliers/{id}             # 供应商详情 ✅
 PUT    /api/v1/suppliers/{id}             # 更新供应商 ✅
 DELETE /api/v1/suppliers/{id}             # 删除供应商 ✅
 POST   /api/v1/suppliers/{id}/test        # 测试API连通性
+
+# 数据同步 (2026-03-04 新增)
+POST   /api/v1/sync/usage                 # 手动同步流量 ✅
+POST   /api/v1/sync/cards/{iccid}         # 同步单卡 ✅
+GET    /api/v1/sync/logs                  # 同步日志 ✅
 ```
 
 ---
@@ -510,6 +517,49 @@ POST   /api/v1/system/notify/templates           # 创建模板 ✅
 PUT    /api/v1/system/notify/templates/{id}      # 更新模板 ✅
 DELETE /api/v1/system/notify/templates/{id}      # 删除模板 ✅
 ```
+
+---
+
+### 模块 10: 项目管理 ✅ 已完成
+
+**模块定位**: 用户可创建项目对卡片进行分组管理
+
+**功能**：
+- [x] 项目 CRUD (创建/读取/更新/删除)
+- [x] 项目列表查询 (分页、关键词搜索)
+- [x] 项目详情查看
+- [x] 卡片数量统计
+- [x] 权限控制 (用户仅可操作自己的项目)
+
+**数据模型**：
+```python
+class Project:
+    id: int                    # 项目ID
+    name: str                  # 项目名称
+    user_id: int               # 所属用户ID
+    remark: Optional[str]      # 备注
+    card_count: int            # 关联卡片数量
+    created_at: datetime       # 创建时间
+    updated_at: datetime       # 更新时间
+```
+
+**API 端点**：
+```
+GET    /api/v1/projects                   # 项目列表 ✅
+GET    /api/v1/projects/all               # 所有项目(下拉选择) ✅
+GET    /api/v1/projects/{id}              # 项目详情 ✅
+POST   /api/v1/projects                   # 创建项目 ✅
+PUT    /api/v1/projects/{id}              # 更新项目 ✅
+DELETE /api/v1/projects/{id}              # 删除项目 ✅
+```
+
+**前端页面**：
+- ✅ `/projects` - 项目管理页面
+- ✅ 项目表单弹窗 (ProjectFormDialog)
+
+**开发文件**：
+- 后端：`app/api/v1/project.py`、`app/schemas/project.py`、`app/crud/project_crud.py`、`app/db/models/project.py`
+- 前端：`views/projects/index.vue`、`views/projects/components/ProjectFormDialog.vue`、`api/modules/project.ts`、`types/project.d.ts`
 
 ---
 
@@ -723,10 +773,26 @@ CREATE TABLE `suspend_logs` (
     `trigger_value` VARCHAR(50) DEFAULT NULL COMMENT '触发值',
     `reason` VARCHAR(200) DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     PRIMARY KEY (`id`),
     KEY `idx_card_id` (`card_id`)
 ) COMMENT='停卡记录表';
+
+-- 项目表 ✅ 已实现
+CREATE TABLE `projects` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `name` VARCHAR(100) NOT NULL COMMENT '项目名称',
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '所属用户ID',
+    `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+    `card_count` INT NOT NULL DEFAULT 0 COMMENT '关联卡片数量',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` TINYINT DEFAULT 0,
+
+    PRIMARY KEY (`id`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_name` (`name`)
+) COMMENT='项目表';
 ```
 
 ---
@@ -788,9 +854,10 @@ iot_card_platform/
 | Phase 4 | 卡片管理 | 2-3天 | ✅ 已完成 |
 | Phase 5 | 流量池管理 | 1-2天 | ✅ 已完成 |
 | Phase 6 | 停卡策略 | 1天 | ✅ 已完成 |
-| Phase 7 | 供应商对接 | 3-5天 | 🔄 部分完成 |
+| Phase 7 | 供应商对接 + 自动同步 | 3-5天 | ✅ 已完成 |
 | Phase 8 | 仪表盘 | 1-2天 | ✅ 已完成 |
 | Phase 9 | 系统设置 | 1天 | ✅ 已完成 |
+| Phase 10 | 项目管理 | 1天 | ✅ 已完成 |
 
 ---
 
