@@ -136,6 +136,8 @@ class SalePackageCreate(BaseModel):
     # 价格
     price_cost: float = Field(..., ge=0, description="成本价(元)")
     price_sale: float = Field(..., ge=0, description="销售价(元)")
+    # 归属配置
+    user_id: Optional[int] = Field(None, description="用户ID(专属套餐)")
     # 展示配置
     is_public: bool = Field(default=False, description="是否公开")
     sort_order: int = Field(default=0, description="排序")

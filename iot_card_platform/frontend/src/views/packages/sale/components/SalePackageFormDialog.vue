@@ -278,7 +278,7 @@ const formData = reactive<CreateSalePackageRequest>({
   flow_size: 1024,
   period_type: 'monthly',
   period_months: 1,
-  period_days: undefined,
+  period_days: 360,
   price_cost: 0,
   price_sale: 0,
   user_id: undefined,
@@ -300,23 +300,16 @@ const customerLoading = ref(false)
 
 // 搜索客户
 const searchCustomers = async (keyword: string) => {
-  if (!keyword) {
-    customerList.value = []
-    return
-  }
-
   customerLoading.value = true
   try {
     const { userApi } = await import('@/api/modules/user')
     const res = await userApi.getList({
       user_level: 3,
-      keyword: keyword,
+      keyword: keyword || undefined,
       page: 1,
       page_size: 50
     })
-    console.log('客户搜索API响应:', res)
     customerList.value = res.list || res.items || []
-    console.log('客户列表:', customerList.value)
   } catch (error) {
     console.error('搜索客户失败:', error)
     customerList.value = []
@@ -361,6 +354,7 @@ const resetForm = () => {
     remark: ''
   })
   selectedSupplierPackage.value = null
+  customerList.value = []
   formRef.value?.clearValidate()
 }
 
@@ -454,13 +448,19 @@ watch(
   { immediate: true }
 )
 
+// 监听弹窗打开，加载初始客户列表
+watch(visible, (isVisible) => {
+  if (isVisible && !isEdit.value) {
+    // 新增模式：加载客户列表
+    searchCustomers('')
+  }
+})
+
 // 监听套餐数据变化
 watch(
   () => props.packageData,
-  (data) => {
-    console.log('监听到packageData变化:', data)
+  async (data) => {
     if (data) {
-      console.log('编辑模式, user_id:', data.user_id)
       // 编辑模式，填充数据
       Object.assign(formData, {
         code: data.code,
@@ -497,7 +497,7 @@ watch(
 
       // 加载专属客户信息
       if (data.user_id) {
-        loadCustomerInfo(data.user_id)
+        await loadCustomerInfo(data.user_id)
       }
     } else {
       // 新增模式，重置表单

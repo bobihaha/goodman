@@ -235,21 +235,21 @@ const handleSuspend = async () => {
         iccids,
         reason: form.value.reason || undefined
       })
-      
+
       operationResult.value = {
-        success_count: result.success || 0,
-        failed_count: result.failed || 0,
-        success_list: result.success_list || [],
-        failed_list: result.failed_list || []
+        success_count: result.success_count || 0,
+        failed_count: result.fail_count || 0,
+        success_list: result.success_cards?.map((iccid: string) => ({ iccid, message: '停机成功' })) || [],
+        failed_list: result.fail_cards || []
       }
-      
-      if (result.success > 0) {
-        ElMessage.success(`成功停机 ${result.success} 张卡片`)
+
+      if (result.success_count > 0) {
+        ElMessage.success(`成功停机 ${result.success_count} 张卡片`)
         emit('success')
       }
-      
-      if (result.failed > 0) {
-        ElMessage.warning(`${result.failed} 张卡片停机失败`)
+
+      if (result.fail_count > 0) {
+        ElMessage.warning(`${result.fail_count} 张卡片停机失败`)
       }
     } catch (error) {
       console.error('批量停机失败:', error)

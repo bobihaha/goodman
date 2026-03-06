@@ -109,7 +109,7 @@
       <div v-if="currentStep === 1" class="step-content">
         <el-form :model="outForm" :rules="rules" ref="formRef" label-width="140px" style="max-width: 700px; margin: 40px auto">
           <el-form-item label="目标用户" prop="to_user_id">
-            <el-select v-model="outForm.to_user_id" placeholder="请选择目标用户" filterable style="width: 100%">
+            <el-select v-model="outForm.to_user_id" placeholder="请选择目标用户" filterable style="width: 100%" @change="handleUserChange">
               <el-option
                 v-for="user in users"
                 :key="user.id"
@@ -495,10 +495,25 @@ const fetchUsers = async () => {
 // 获取销售套餐列表
 const fetchSalePackages = async () => {
   try {
-    const res = await packageApi.getSalePackages({ page: 1, page_size: 100, status: 'enable' })
-    salePackages.value = res.list || []  // 销售套餐API返回 list
+    const params: any = { page: 1, page_size: 100, status: 'enable' }
+    // 如果选择了目标用户，只获取该用户可用的套餐
+    if (outForm.to_user_id) {
+      params.user_id = outForm.to_user_id
+    }
+    const res = await packageApi.getSalePackages(params)
+    salePackages.value = res.list || []
   } catch (error) {
     console.error('获取销售套餐列表失败', error)
+  }
+}
+
+// 用户变化时重新获取套餐
+const handleUserChange = async () => {
+  outForm.sale_package_id = undefined
+  try {
+    await fetchSalePackages()
+  } catch (error) {
+    ElMessage.error('获取套餐列表失败')
   }
 }
 

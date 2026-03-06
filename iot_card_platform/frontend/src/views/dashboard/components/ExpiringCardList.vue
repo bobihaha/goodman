@@ -1,5 +1,5 @@
 <template>
-  <el-card>
+  <el-card class="expiring-card" shadow="never">
     <template #header>
       <div class="card-header">
         <span>本月到期卡明细</span>
@@ -13,39 +13,32 @@
       <el-table
         :data="expiringCards"
         style="width: 100%"
-        :max-height="300"
+        :max-height="280"
+        size="small"
       >
-        <el-table-column prop="iccid" label="ICCID" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="msisdn" label="号码" min-width="110" show-overflow-tooltip />
-        <el-table-column prop="carrier" label="运营商" width="80">
+        <el-table-column prop="iccid" label="ICCID" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="msisdn" label="号码" min-width="100" show-overflow-tooltip />
+        <el-table-column prop="carrier" label="运营商" width="70">
           <template #default="{ row }">
             {{ formatCarrier(row.carrier) }}
           </template>
         </el-table-column>
-        <el-table-column prop="user_name" label="所属客户" min-width="90" show-overflow-tooltip />
-        <el-table-column prop="package_name" label="套餐" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="expired_at" label="到期日期" width="100">
+        <el-table-column prop="user_name" label="客户" min-width="80" show-overflow-tooltip />
+        <el-table-column prop="expired_at" label="到期日期" width="90">
           <template #default="{ row }">
             {{ formatDateShort(row.expired_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="days_left" label="剩余" width="70">
+        <el-table-column prop="days_left" label="剩余" width="60">
           <template #default="{ row }">
             <el-tag :type="getDaysLeftType(row.days_left)" size="small">
               {{ row.days_left }}天
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" link @click="handleRenew(row)">
-              续费
-            </el-button>
-          </template>
-        </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && expiringCards.length === 0" description="暂无到期卡片" />
+      <el-empty v-if="!loading && expiringCards.length === 0" description="暂无到期卡片" :image-size="80" />
     </div>
   </el-card>
 </template>
@@ -96,10 +89,18 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.expiring-card {
+  border-radius: 12px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  height: 100%;
+}
+
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
+  font-size: 14px;
 }
 </style>

@@ -24,6 +24,26 @@ async def check_and_update_card_status(
     today = date.today()
     status_changed = False
 
+    # 规则0: stock → testing/silent/activated
+    if card.status == CardStatus.stock:
+        if card.test_expire_date and today <= card.test_expire_date:
+            card.status = CardStatus.testing
+            status_changed = True
+        elif card.silent_expire_date and today <= card.silent_expire_date:
+            card.status = CardStatus.silent
+            status_changed = True
+        elif card.data_used > 0:
+            card.status = CardStatus.activated
+            card.activated_at = today
+            if card.period_type:
+                card.expired_at = calculate_expiry_date(
+                    start_date=today,
+                    period_type=card.period_type.value,
+                    period_months=card.period_count if card.period_type.value == "monthly" else None,
+                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None
+                )
+            status_changed = True
+
     # 规则1: testing → silent (测试期到期)
     if card.status == CardStatus.testing:
         if card.test_expire_date and today > card.test_expire_date:

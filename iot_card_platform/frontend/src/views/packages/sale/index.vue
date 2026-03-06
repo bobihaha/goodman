@@ -40,6 +40,23 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="归属客户">
+          <el-select
+            v-model="searchForm.user_id"
+            placeholder="全部客户"
+            clearable
+            filterable
+            style="width: 200px"
+          >
+            <el-option
+              v-for="item in customerList"
+              :key="item.id"
+              :label="`${item.name} (${item.account})`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="状态">
           <el-select
             v-model="searchForm.status"
@@ -194,6 +211,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { salePackageApi, supplierPackageApi } from '@/api/modules/package'
+import { userApi } from '@/api/modules/user'
 import type { SalePackage, SupplierPackage } from '@/types/package'
 import { formatFlowSize, formatMoney, formatDateShort, formatPercent } from '@/utils/formatter'
 import {
@@ -204,10 +222,19 @@ import {
 } from '@/constants/package'
 import SalePackageFormDialog from './components/SalePackageFormDialog.vue'
 
+// 客户类型定义
+interface Customer {
+  id: number
+  name: string
+  account: string
+  user_level: number
+}
+
 // 搜索表单
 const searchForm = reactive({
   keyword: '',
   base_package_id: undefined as number | undefined,
+  user_id: undefined as number | undefined,
   status: ''
 })
 
@@ -224,6 +251,9 @@ const pagination = reactive({
 
 // 底层套餐列表
 const supplierPackageList = ref<SupplierPackage[]>([])
+
+// 客户列表
+const customerList = ref<Customer[]>([])
 
 // 弹窗控制
 const dialogVisible = ref(false)
@@ -303,6 +333,16 @@ const fetchSupplierPackages = async () => {
   }
 }
 
+// 获取客户列表
+const fetchCustomers = async () => {
+  try {
+    const res = await userApi.getList({ page: 1, page_size: 100, user_level: 2 })
+    customerList.value = res.list || []
+  } catch (error) {
+    console.error('获取客户列表失败:', error)
+  }
+}
+
 // 搜索
 const handleSearch = () => {
   pagination.page = 1
@@ -314,6 +354,7 @@ const handleReset = () => {
   Object.assign(searchForm, {
     keyword: '',
     base_package_id: undefined,
+    user_id: undefined,
     status: ''
   })
   pagination.page = 1
@@ -410,6 +451,7 @@ const handlePageChange = () => {
 // 初始化
 onMounted(() => {
   fetchSupplierPackages()
+  fetchCustomers()
   fetchList()
 })
 </script>

@@ -4,6 +4,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime
+import logging
 
 from app.crud.suspend_crud import (
     SuspendPolicyCRUD, SuspendLogCRUD, AlertLogCRUD, CardSuspendCRUD
@@ -13,9 +14,14 @@ from app.db.models.suspend import (
     SuspendActionType, AlertLevel, AlertTargetType
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
+from app.db.models.supplier import SupplierModel
 from app.schemas.suspend import (
     PolicyCreate, PolicyUpdate, ManualSuspend, ManualResume, SuspendResult
 )
+from app.clients.supplier_api import get_supplier_client
+from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 
 class SuspendPolicyService:
@@ -105,10 +111,19 @@ class SuspendActionService:
 
         # 获取卡片
         cards = await CardSuspendCRUD.get_cards_by_ids(
-            db, data.card_ids, 
+            db, data.card_ids,
             user_id=None if is_admin else user_id
         )
         card_map = {c.id: c for c in cards}
+
+        # 预加载供应商信息（避免N+1查询）
+        supplier_ids = {c.supplier_id for c in cards if c.supplier_id}
+        supplier_query = select(SupplierModel).where(
+            SupplierModel.id.in_(supplier_ids),
+            SupplierModel.is_deleted == 0
+        )
+        supplier_result = await db.execute(supplier_query)
+        supplier_map = {s.id: s for s in supplier_result.scalars().all()}
 
         for card_id in data.card_ids:
             card = card_map.get(card_id)
@@ -125,7 +140,22 @@ class SuspendActionService:
                 fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": f"卡片状态不支持停卡: {card.status.value}"})
                 continue
 
-            # 执行停卡
+            # 调用供应商API停机
+            api_success = False
+            supplier = supplier_map.get(card.supplier_id)
+            if supplier:
+                try:
+                    supplier_client = get_supplier_client(
+                        supplier_id=card.supplier_id,
+                        api_url=supplier.api_url or "",
+                        api_key=supplier.api_key or "",
+                        api_secret=supplier.api_secret or ""
+                    )
+                    api_success = await supplier_client.suspend_card(card.iccid, data.reason)
+                except Exception as e:
+                    logger.error(f"供应商API停机失败: iccid={card.iccid}, error={e}")
+
+            # 执行停卡（即使API失败也更新数据库）
             await CardSuspendCRUD.suspend_card(
                 db=db,
                 card_id=card_id,
@@ -167,10 +197,19 @@ class SuspendActionService:
 
         # 获取卡片
         cards = await CardSuspendCRUD.get_cards_by_ids(
-            db, data.card_ids, 
+            db, data.card_ids,
             user_id=None if is_admin else user_id
         )
         card_map = {c.id: c for c in cards}
+
+        # 预加载供应商信息（避免N+1查询）
+        supplier_ids = {c.supplier_id for c in cards if c.supplier_id}
+        supplier_query = select(SupplierModel).where(
+            SupplierModel.id.in_(supplier_ids),
+            SupplierModel.is_deleted == 0
+        )
+        supplier_result = await db.execute(supplier_query)
+        supplier_map = {s.id: s for s in supplier_result.scalars().all()}
 
         for card_id in data.card_ids:
             card = card_map.get(card_id)
@@ -189,7 +228,22 @@ class SuspendActionService:
                 fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "到期停卡，请先续费"})
                 continue
 
-            # 执行复机
+            # 调用供应商API复机
+            api_success = False
+            supplier = supplier_map.get(card.supplier_id)
+            if supplier:
+                try:
+                    supplier_client = get_supplier_client(
+                        supplier_id=card.supplier_id,
+                        api_url=supplier.api_url or "",
+                        api_key=supplier.api_key or "",
+                        api_secret=supplier.api_secret or ""
+                    )
+                    api_success = await supplier_client.resume_card(card.iccid)
+                except Exception as e:
+                    logger.error(f"供应商API复机失败: iccid={card.iccid}, error={e}")
+
+            # 执行复机（即使API失败也更新数据库）
             old_suspend_type = card.suspend_type.value if card.suspend_type else "manual"
             await CardSuspendCRUD.resume_card(db=db, card_id=card_id)
 

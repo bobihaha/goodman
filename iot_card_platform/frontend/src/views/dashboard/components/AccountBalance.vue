@@ -1,5 +1,5 @@
 <template>
-  <el-card>
+  <el-card class="balance-card" shadow="never">
     <template #header>
       <div class="card-header">
         <span>账户余额</span>
@@ -74,29 +74,37 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.balance-card {
+  border-radius: 12px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  height: 100%;
+}
+
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
+  font-size: 14px;
 }
 
 .balance-content {
   .balance-main {
     text-align: center;
-    padding: 12px 0;
+    padding: 8px 0;
 
     .balance-label {
-      font-size: 14px;
+      font-size: 13px;
       color: #8c8c8c;
-      margin-bottom: 12px;
+      margin: 0 0 8px 0;
     }
 
     .balance-value {
-      font-size: 36px;
+      font-size: 32px;
       font-weight: 600;
       color: #262626;
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
 
       &.is-alert {
         color: #ff4d4f;
@@ -119,22 +127,22 @@ onMounted(() => {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 0;
+      padding: 6px 0;
 
       .info-label {
-        font-size: 14px;
+        font-size: 13px;
         color: #8c8c8c;
       }
 
       .info-value {
-        font-size: 14px;
+        font-size: 13px;
         color: #262626;
         font-weight: 500;
 
         .info-time {
           font-size: 12px;
           color: #8c8c8c;
-          margin-left: 8px;
+          margin-left: 6px;
         }
       }
     }

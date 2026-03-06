@@ -147,9 +147,22 @@ class IotCardService:
         remark: Optional[str] = None
     ) -> dict:
         """划拨卡片给子用户"""
+        from sqlalchemy import select
+        from app.db.models.sys_user import SysUserModel
+
         # 用户只能划拨自己的卡给子用户
         if user_level == UserLevel.SUB_USER.value:
             raise BusinessException(code=403, msg="子用户无权划拨卡片")
+
+        # 验证目标用户存在
+        target_user_result = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
+        target_user = target_user_result.scalar_one_or_none()
+        if not target_user:
+            raise BusinessException(code=422, msg="目标用户不存在")
+
+        # 验证目标用户是当前用户的子用户
+        if user_level != UserLevel.SUPER_ADMIN.value and target_user.parent_id != current_user_id:
+            raise BusinessException(code=422, msg="只能划拨给直属子用户")
 
         from_user_id = current_user_id
         if user_level == UserLevel.SUPER_ADMIN.value:
@@ -183,8 +196,21 @@ class IotCardService:
         remark: Optional[str] = None
     ) -> dict:
         """批量划拨"""
+        from sqlalchemy import select
+        from app.db.models.sys_user import SysUserModel
+
         if user_level == UserLevel.SUB_USER.value:
             raise BusinessException(code=403, msg="子用户无权划拨卡片")
+
+        # 验证目标用户存在
+        target_user_result = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
+        target_user = target_user_result.scalar_one_or_none()
+        if not target_user:
+            raise BusinessException(code=422, msg="目标用户不存在")
+
+        # 验证目标用户是当前用户的子用户
+        if user_level != UserLevel.SUPER_ADMIN.value and target_user.parent_id != current_user_id:
+            raise BusinessException(code=422, msg="只能划拨给直属子用户")
 
         from_user_id = current_user_id
 

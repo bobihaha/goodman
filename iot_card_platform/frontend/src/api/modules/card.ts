@@ -44,7 +44,7 @@ export const cardApi = {
 
   // 单卡划拨
   transfer(id: number, targetUserId: number, remark?: string): Promise<void> {
-    return post<void>(`/cards/${id}/transfer`, { target_user_id: targetUserId, remark })
+    return post<void>(`/cards/${id}/transfer`, { to_user_id: targetUserId, remark })
   },
 
   // 批量划拨
@@ -84,7 +84,7 @@ export const cardApi = {
 
   // 批量停机
   batchSuspend(data: CardBatchSuspendRequest): Promise<{ success: number; failed: number }> {
-    return post<{ success: number; failed: number }>('/cards/batch-suspend', data)
+    return post<{ success: number; failed: number }>('/suspend/cards/suspend', data)
   },
 
   // 通过ICCID批量停机

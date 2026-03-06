@@ -1,5 +1,5 @@
 <template>
-  <el-card>
+  <el-card class="pool-usage-card" shadow="never">
     <template #header>
       <div class="card-header">
         <span>流量池用量实时百分比</span>
@@ -35,6 +35,7 @@
               :percentage="pool.usage_percent"
               :color="getProgressColor(pool.usage_percent)"
               :show-text="false"
+              :stroke-width="6"
             />
           </div>
 
@@ -96,25 +97,33 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.pool-usage-card {
+  border-radius: 12px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  height: 100%;
+}
+
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
+  font-size: 14px;
 }
 
 .pool-usage-content {
   .pool-list {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    max-height: 350px;
+    gap: 12px;
+    max-height: 280px;
     overflow-y: auto;
 
     .pool-item {
-      padding: 16px;
+      padding: 12px;
       background: #fafafa;
-      border-radius: 8px;
+      border-radius: 10px;
       border: 1px solid #f0f0f0;
       transition: all 0.3s;
 
@@ -132,17 +141,17 @@ onMounted(() => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
 
         .pool-info {
           flex: 1;
           min-width: 0;
 
           .pool-name {
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 600;
             color: #262626;
-            margin: 0 0 4px 0;
+            margin: 0 0 3px 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -155,10 +164,10 @@ onMounted(() => {
         }
 
         .pool-percent {
-          font-size: 20px;
+          font-size: 18px;
           font-weight: 600;
           color: #262626;
-          margin-left: 16px;
+          margin-left: 12px;
 
           &.is-alert {
             color: #ff4d4f;
@@ -167,7 +176,7 @@ onMounted(() => {
       }
 
       .pool-progress {
-        margin-bottom: 8px;
+        margin-bottom: 6px;
       }
 
       .pool-footer {

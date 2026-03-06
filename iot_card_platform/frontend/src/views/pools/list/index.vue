@@ -415,13 +415,13 @@ onMounted(() => {
 
       .stat-label {
         font-size: 12px;
-        color: #909399;
+        color: #000000;
       }
 
       .stat-value {
         font-size: 20px;
         font-weight: 600;
-        color: #303133;
+        color: #000000;
 
         &.enabled {
           color: #67c23a;
@@ -440,8 +440,8 @@ onMounted(() => {
 
   .pools-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 30px;
     margin-bottom: 20px;
 
     .pool-card {
@@ -455,94 +455,94 @@ onMounted(() => {
       }
 
       :deep(.el-card__body) {
-        padding: 20px;
+        padding: 10px;
       }
 
       .pool-header {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        margin-bottom: 20px;
-        padding-bottom: 16px;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
         border-bottom: 1px solid #f0f0f0;
 
         .pool-title {
           flex: 1;
 
           h3 {
-            margin: 0 0 8px 0;
-            font-size: 18px;
+            margin: 0 0 4px 0;
+            font-size: 14px;
             font-weight: 600;
-            color: #303133;
+            color: #000000;
           }
         }
       }
 
       .pool-usage {
-        margin-bottom: 20px;
+        margin-bottom: 10px;
 
         .usage-title {
-          font-size: 14px;
-          color: #606266;
-          margin-bottom: 12px;
+          font-size: 12px;
+          color: #000000;
+          margin-bottom: 6px;
         }
 
         .usage-stats {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 8px;
-          font-size: 14px;
+          margin-bottom: 4px;
+          font-size: 12px;
 
           .total {
-            color: #606266;
+            color: #000000;
           }
 
           .remaining {
-            color: #909399;
+            color: #000000;
 
             .value {
               color: #409eff;
               font-weight: 600;
-              font-size: 16px;
+              font-size: 12px;
             }
           }
         }
 
         .usage-percent-text {
           text-align: right;
-          font-size: 12px;
-          color: #909399;
-          margin-top: 4px;
+          font-size: 11px;
+          color: #000000;
+          margin-top: 2px;
         }
       }
 
       .pool-cards {
-        margin-bottom: 16px;
+        margin-bottom: 8px;
 
         .cards-title {
-          font-size: 14px;
-          color: #606266;
-          margin-bottom: 12px;
+          font-size: 12px;
+          color: #000000;
+          margin-bottom: 6px;
         }
 
         .cards-stats {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 8px;
+          margin-bottom: 4px;
 
           .stat-item {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 4px;
+            gap: 2px;
 
             .label {
-              font-size: 12px;
-              color: #909399;
+              font-size: 11px;
+              color: #000000;
             }
 
             .value {
-              font-size: 16px;
+              font-size: 13px;
               font-weight: 600;
 
               &.activated {
@@ -570,13 +570,13 @@ onMounted(() => {
       }
 
       .pool-footer {
-        padding-top: 12px;
+        padding-top: 6px;
         border-top: 1px solid #f0f0f0;
-        margin-bottom: 16px;
+        margin-bottom: 8px;
 
         .sync-time {
-          font-size: 12px;
-          color: #909399;
+          font-size: 11px;
+          color: #000000;
         }
       }
 

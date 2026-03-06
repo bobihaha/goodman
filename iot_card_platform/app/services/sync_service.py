@@ -4,7 +4,7 @@
 from typing import Optional, List, Tuple
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 from app.crud.sync_crud import sync_log_crud, sync_task_crud
 from app.db.models.sync import SyncType, SyncStatus
 from app.db.models.iot_card import IotCardModel, CardStatus
@@ -133,6 +133,18 @@ class SyncService:
 
             await db.commit()
 
+            # 更新流量池统计
+            pool_ids = set()
+            for card in cards:
+                if card.pool_id:
+                    pool_ids.add(card.pool_id)
+            
+            if pool_ids:
+                from app.crud.pool_crud import pool_crud
+                for pool_id in pool_ids:
+                    await pool_crud.update_stats(db, pool_id)
+
+
             # 更新同步日志
             final_status = SyncStatus.success if fail_count == 0 else (
                 SyncStatus.partial if success_count > 0 else SyncStatus.failed
@@ -257,7 +269,11 @@ class SyncService:
                             # 更新状态
                             if data.get("status"):
                                 card.status = CardStatus(data["status"])
-                            
+
+                            # 检查并更新卡片状态（根据沉默期等规则）
+                            from app.services.card_status_service import check_and_update_card_status
+                            await check_and_update_card_status(db, card)
+
                             # 如果卡片从非激活状态变为激活状态，且是流量池卡，自动加入流量池
                             from app.db.models.iot_card import CardType
                             if (old_status != CardStatus.activated and 
@@ -546,8 +562,13 @@ class SyncService:
         if iccid_list:
             query = query.where(IotCardModel.iccid.in_(iccid_list))
         else:
-            # 只同步已出库的卡片
-            query = query.where(IotCardModel.user_id.isnot(None))
+            # 同步已出库的卡片 或 已激活的库存卡
+            query = query.where(
+                or_(
+                    IotCardModel.user_id.isnot(None),
+                    and_(IotCardModel.user_id.is_(None), IotCardModel.status == CardStatus.activated)
+                )
+            )
 
         result = await db.execute(query)
         return list(result.scalars().all())
