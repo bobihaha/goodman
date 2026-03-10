@@ -47,17 +47,17 @@ class SyncLogModel(BaseModel):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="日志ID")
     sync_no = Column(String(50), nullable=False, unique=True, comment="同步单号")
     sync_type = Column(Enum(SyncType), nullable=False, comment="同步类型")
-    
+
     # 同步范围
     supplier_id = Column(BigInteger, nullable=True, index=True, comment="供应商ID")
     card_id = Column(BigInteger, nullable=True, index=True, comment="卡片ID (单卡同步)")
     iccid = Column(String(30), nullable=True, comment="ICCID (单卡同步)")
-    
+
     # 同步统计
     total_count = Column(Integer, nullable=False, default=0, comment="总数")
     success_count = Column(Integer, nullable=False, default=0, comment="成功数")
     fail_count = Column(Integer, nullable=False, default=0, comment="失败数")
-    
+
     # 同步结果
     status = Column(Enum(SyncStatus), default=SyncStatus.pending, comment="状态")
     error_message = Column(Text, nullable=True, comment="错误信息")
@@ -104,11 +104,11 @@ class SyncTaskModel(BaseModel):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
     task_name = Column(String(100), nullable=False, comment="任务名称")
     sync_type = Column(Enum(SyncType), nullable=False, comment="同步类型")
-    
+
     # 任务配置
     supplier_id = Column(BigInteger, nullable=True, comment="供应商ID (NULL=全部)")
     cron_expression = Column(String(100), nullable=True, comment="Cron表达式")
-    
+
     # 任务状态
     is_enabled = Column(Integer, nullable=False, default=1, comment="是否启用")
     last_run_at = Column(DateTime, nullable=True, comment="上次运行时间")

@@ -155,6 +155,15 @@ class StockService:
         remark: Optional[str] = None
     ) -> dict:
         """批量出库"""
+        # 验证目标用户存在且状态正常
+        from app.crud.sys_user_crud import sys_user_crud
+        from app.db.models.sys_user import UserStatus
+        target_user = await sys_user_crud.get_by_id(db, to_user_id)
+        if not target_user:
+            raise BusinessException(code=404, msg="目标用户不存在")
+        if target_user.status != UserStatus.enable:
+            raise BusinessException(code=403, msg="目标用户已被禁用，无法出库")
+
         # 验证销售套餐权限
         from app.crud.package_crud import sale_package_crud
         sale_package = await sale_package_crud.get_by_id(db, sale_package_id)
@@ -407,6 +416,9 @@ class StockService:
         iccids: List[str]
     ) -> dict:
         """批量查询卡片"""
+        MAX_BATCH_SIZE = 10000
+        if len(iccids) > MAX_BATCH_SIZE:
+            raise BusinessException(code=400, msg=f"单次最多查询{MAX_BATCH_SIZE}张卡片")
         return await stock_summary_crud.batch_query_cards(db, iccids)
 
     async def export_inventory(

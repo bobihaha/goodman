@@ -45,6 +45,7 @@ class IotCardCRUD:
         card_type: Optional[str] = None,
         pool_id: Optional[int] = None,
         is_pool_member: Optional[bool] = None,
+        over_usage: Optional[bool] = None,
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
         batch_id: Optional[int] = None,
@@ -69,11 +70,11 @@ class IotCardCRUD:
 
         # 关键词搜索 (ICCID/MSISDN/后6位)
         if keyword:
-            keyword = keyword.strip()
+            keyword = keyword.strip().replace('%', '\\%').replace('_', '\\_')
             if len(keyword) <= 6:
-                # 后6位模糊查询
+                # 后6位精确查询
                 keyword_filter = or_(
-                    IotCardModel.iccid.like(f"%{keyword}"),
+                    IotCardModel.iccid_suffix == keyword,
                     IotCardModel.msisdn.like(f"%{keyword}")
                 )
             else:
@@ -121,6 +122,16 @@ class IotCardCRUD:
             member_value = 1 if is_pool_member else 0
             query = query.where(IotCardModel.is_pool_member == member_value)
             count_query = count_query.where(IotCardModel.is_pool_member == member_value)
+
+        # 超量卡过滤
+        if over_usage is not None and over_usage:
+            over_usage_filter = and_(
+                IotCardModel.status == CardStatus.activated,
+                IotCardModel.data_total > 0,
+                IotCardModel.data_used > IotCardModel.data_total
+            )
+            query = query.where(over_usage_filter)
+            count_query = count_query.where(over_usage_filter)
 
         # 备注模糊搜索
         if remark:
@@ -197,7 +208,7 @@ class IotCardCRUD:
         if len(keyword) <= 6:
             query = query.where(
                 or_(
-                    IotCardModel.iccid.like(f"%{keyword}"),
+                    IotCardModel.iccid_suffix == keyword,
                     IotCardModel.msisdn.like(f"%{keyword}")
                 )
             )
@@ -408,5 +419,74 @@ class CardTransferCRUD:
         return items, total
 
 
+class CardUsageHistoryCRUD:
+    """卡片用量历史 CRUD"""
+
+    async def create_snapshot(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        iccid: str,
+        data_used: int,
+        data_total: int,
+        period_type: str,
+        snapshot_date,
+        snapshot_type: str,
+        snapshot_month: Optional[str] = None
+    ):
+        """创建用量快照"""
+        from app.db.models.iot_card import CardUsageHistoryModel
+        snapshot = CardUsageHistoryModel(
+            card_id=card_id,
+            iccid=iccid,
+            data_used=data_used,
+            data_total=data_total,
+            period_type=period_type,
+            snapshot_date=snapshot_date,
+            snapshot_type=snapshot_type,
+            snapshot_month=snapshot_month
+        )
+        db.add(snapshot)
+        await db.flush()
+        return snapshot
+
+    async def get_card_history(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        start_date=None,
+        end_date=None
+    ):
+        """获取卡片历史记录"""
+        from app.db.models.iot_card import CardUsageHistoryModel
+        query = select(CardUsageHistoryModel).where(CardUsageHistoryModel.card_id == card_id)
+        if start_date:
+            query = query.where(CardUsageHistoryModel.snapshot_date >= start_date)
+        if end_date:
+            query = query.where(CardUsageHistoryModel.snapshot_date <= end_date)
+        query = query.order_by(CardUsageHistoryModel.snapshot_date.desc())
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_cards_history(
+        self,
+        db: AsyncSession,
+        card_ids: List[int],
+        start_date=None,
+        end_date=None
+    ):
+        """批量获取卡片历史记录"""
+        from app.db.models.iot_card import CardUsageHistoryModel
+        query = select(CardUsageHistoryModel).where(CardUsageHistoryModel.card_id.in_(card_ids))
+        if start_date:
+            query = query.where(CardUsageHistoryModel.snapshot_date >= start_date)
+        if end_date:
+            query = query.where(CardUsageHistoryModel.snapshot_date <= end_date)
+        query = query.order_by(CardUsageHistoryModel.card_id, CardUsageHistoryModel.snapshot_date.desc())
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+
 iot_card_crud = IotCardCRUD()
 card_transfer_crud = CardTransferCRUD()
+card_usage_history_crud = CardUsageHistoryCRUD()

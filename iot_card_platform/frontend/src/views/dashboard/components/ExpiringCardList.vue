@@ -44,11 +44,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dashboardApi, type ExpiringCard } from '@/api'
 import { formatCarrier, formatDateShort } from '@/utils/formatter'
+
+const props = defineProps<{
+  carrier?: string
+}>()
 
 const router = useRouter()
 const loading = ref(false)
@@ -58,13 +62,18 @@ const expiringCards = ref<ExpiringCard[]>([])
 const fetchExpiringCards = async () => {
   loading.value = true
   try {
-    expiringCards.value = await dashboardApi.getExpiringCards()
+    expiringCards.value = await dashboardApi.getExpiringCards(props.carrier)
   } catch (error) {
     console.error('获取到期卡明细失败:', error)
   } finally {
     loading.value = false
   }
 }
+
+// 监听 carrier 变化
+watch(() => props.carrier, () => {
+  fetchExpiringCards()
+})
 
 // 获取剩余天数标签类型
 const getDaysLeftType = (days: number): string => {

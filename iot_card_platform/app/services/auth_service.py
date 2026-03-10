@@ -57,29 +57,32 @@ class AuthService:
     @classmethod
     async def login(cls, db: AsyncSession, request: LoginRequest, ip: Optional[str] = None, user_agent: Optional[str] = None) -> LoginResponse:
         user = await sys_user_crud.get_by_account(db, request.account)
-        
+
         login_log = SysLoginLogModel(account=request.account, login_type=LoginType.normal, ip=ip, user_agent=user_agent)
-        
+
         if not user:
             login_log.is_success = 0
             login_log.fail_reason = "账户不存在"
             db.add(login_log)
+            await db.commit()
             raise BusinessException(code=400, msg="账号或密码错误")
-        
+
         if not cls.verify_password(request.password, user.password):
             login_log.user_id = user.id
             login_log.is_success = 0
             login_log.fail_reason = "密码错误"
             db.add(login_log)
+            await db.commit()
             raise BusinessException(code=400, msg="账号或密码错误")
-        
+
         if user.status != UserStatus.enable:
             login_log.user_id = user.id
             login_log.is_success = 0
             login_log.fail_reason = "用户已禁用"
             db.add(login_log)
+            await db.commit()
             raise BusinessException(code=403, msg="用户已被禁用")
-        
+
         permissions = await cls._get_user_permissions(db, user)
         
         token_data = {"sub": str(user.id), "account": user.account, "user_level": user.user_level, "is_super_login": False}

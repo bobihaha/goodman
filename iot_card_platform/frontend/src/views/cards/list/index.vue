@@ -272,6 +272,13 @@
             <el-icon><Download /></el-icon>
             导出
           </el-button>
+          <el-button
+            :disabled="selectedCards.length === 0"
+            @click="showExportHistoryDialog"
+          >
+            <el-icon><Download /></el-icon>
+            导出历史用量
+          </el-button>
           <el-button @click="fetchCardList">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -477,6 +484,12 @@
       @success="handleBatchRemarkSuccess"
     />
 
+    <!-- 导出历史用量对话框 -->
+    <ExportHistoryDialog
+      v-model="exportHistoryVisible"
+      :card-ids="selectedCards.map(c => c.id)"
+    />
+
     <!-- 批量续费对话框 -->
     <BatchRenewDialog
       v-model="batchRenewVisible"
@@ -513,7 +526,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CreditCard,
@@ -552,8 +565,10 @@ import BatchSuspendDialog from './components/BatchSuspendDialog.vue'
 import BatchResumeDialog from './components/BatchResumeDialog.vue'
 import TransferDialog from './components/TransferDialog.vue'
 import RemarkDialog from './components/RemarkDialog.vue'
+import ExportHistoryDialog from './components/ExportHistoryDialog.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 // 数据
 const loading = ref(false)
@@ -593,6 +608,7 @@ const searchForm = reactive<CardListParams>({
   carrier: undefined,
   period_type: undefined,
   is_pool_member: undefined,
+  over_usage: undefined,
   remark: undefined,
   customer_id: undefined,
   batch_id: undefined
@@ -614,6 +630,7 @@ const batchSuspendVisible = ref(false)
 const batchResumeVisible = ref(false)
 const transferVisible = ref(false)
 const remarkVisible = ref(false)
+const exportHistoryVisible = ref(false)
 
 // 计算属性
 const selectedCardIds = computed(() => selectedCards.value.map(card => card.id))
@@ -735,6 +752,15 @@ const showBatchQueryDialog = () => {
 // 显示批量划拨对话框
 const showBatchTransferDialog = () => {
   batchTransferVisible.value = true
+}
+
+// 显示导出历史用量对话框
+const showExportHistoryDialog = () => {
+  if (selectedCards.value.length === 0) {
+    ElMessage.warning('请先选择卡片')
+    return
+  }
+  exportHistoryVisible.value = true
 }
 
 // 显示批量备注对话框
@@ -865,6 +891,30 @@ const getProgressColor = (percent: number) => {
 
 // 初始化
 onMounted(() => {
+  // 读取 URL 参数
+  const carrierParam = route.query.carrier as string
+  if (carrierParam) {
+    searchForm.carrier = carrierParam
+  }
+
+  // 到期卡筛选
+  const expiringParam = route.query.expiring as string
+  if (expiringParam === 'true') {
+    const today = new Date()
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+    expiredRange.value = [
+      monthStart.toISOString().split('T')[0],
+      monthEnd.toISOString().split('T')[0]
+    ]
+  }
+
+  // 超量卡筛选
+  const overUsageParam = route.query.over_usage as string
+  if (overUsageParam === 'true') {
+    searchForm.over_usage = true
+  }
+
   fetchCardList()
   fetchStats()
 })

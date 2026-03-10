@@ -226,6 +226,55 @@
           />
         </div>
       </el-card>
+
+      <!-- 历史用量 -->
+      <el-card class="info-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span>历史用量</span>
+            <div>
+              <el-date-picker
+                v-model="historyDateRange"
+                type="daterange"
+                range-separator="至"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                size="small"
+                style="margin-right: 10px"
+                @change="fetchUsageHistory"
+              />
+              <el-button type="text" size="small" @click="fetchUsageHistory">
+                <el-icon><Refresh /></el-icon>
+                刷新
+              </el-button>
+            </div>
+          </div>
+        </template>
+
+        <div v-loading="historyLoading">
+          <el-empty v-if="historyList.length === 0" description="暂无历史数据" />
+          <template v-else>
+            <div ref="chartRef" style="width: 100%; height: 300px; margin-bottom: 20px"></div>
+
+            <el-table :data="historyList" stripe>
+            <el-table-column prop="snapshot_date" label="快照日期" width="120" />
+            <el-table-column prop="snapshot_type" label="类型" width="100">
+              <template #default="{ row }">
+                {{ row.snapshot_type === 'month_end' ? '月末' : '周期末' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="snapshot_month" label="月份" width="100" />
+            <el-table-column prop="data_used" label="已用流量(MB)" width="140" />
+            <el-table-column prop="data_total" label="总流量(MB)" width="140" />
+            <el-table-column label="使用率" width="120">
+              <template #default="{ row }">
+                {{ ((row.data_used / row.data_total) * 100).toFixed(2) }}%
+              </template>
+            </el-table-column>
+          </el-table>
+          </template>
+        </div>
+      </el-card>
     </div>
 
     <!-- 单卡划拨对话框 -->
@@ -245,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -255,8 +304,9 @@ import {
   CircleCheck,
   Refresh
 } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
 import { cardApi } from '@/api'
-import type { Card } from '@/types/card'
+import type { Card, UsageHistory } from '@/types/card'
 import {
   CARRIER_MAP,
   CARD_STATUS_MAP,
@@ -279,6 +329,13 @@ const transferList = ref<any[]>([])
 // 对话框显示状态
 const transferVisible = ref(false)
 const remarkVisible = ref(false)
+
+// 历史用量
+const historyLoading = ref(false)
+const historyList = ref<UsageHistory[]>([])
+const historyDateRange = ref<[Date, Date]>()
+const chartRef = ref<HTMLElement>()
+let chartInstance: echarts.ECharts | null = null
 
 // 划拨记录分页
 const transferPagination = ref({
@@ -325,6 +382,45 @@ const fetchTransfers = async () => {
   } finally {
     transferLoading.value = false
   }
+}
+
+// 获取历史用量
+const fetchUsageHistory = async () => {
+  historyLoading.value = true
+  try {
+    const startDate = historyDateRange.value?.[0] ? formatDateToString(historyDateRange.value[0]) : undefined
+    const endDate = historyDateRange.value?.[1] ? formatDateToString(historyDateRange.value[1]) : undefined
+    historyList.value = await cardApi.getUsageHistory(cardId.value, startDate, endDate)
+    await nextTick()
+    renderChart()
+  } catch (error) {
+    console.error('获取历史用量失败:', error)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+// 渲染图表
+const renderChart = () => {
+  if (!chartRef.value || historyList.value.length === 0) return
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartRef.value)
+  }
+  const dates = historyList.value.map(h => h.snapshot_date).reverse()
+  const usages = historyList.value.map(h => h.data_used).reverse()
+  chartInstance.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: dates },
+    yAxis: { type: 'value', name: '流量(MB)' },
+    series: [{ data: usages, type: 'line', smooth: true }]
+  })
+}
+
+const formatDateToString = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 // 返回
@@ -414,6 +510,12 @@ const getProgressColor = (percent: number) => {
 onMounted(() => {
   fetchCardDetail()
   fetchTransfers()
+  // 默认显示最近30天
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - 30)
+  historyDateRange.value = [start, end]
+  fetchUsageHistory()
 })
 </script>
 

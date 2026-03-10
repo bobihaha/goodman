@@ -15,6 +15,8 @@ class SupplierCRUD:
 
     async def create(self, db: AsyncSession, data: SupplierCreate, created_by: int = None) -> SupplierModel:
         """创建供应商"""
+        from app.utils.const import encrypt_secret
+
         supplier = SupplierModel(
             name=data.name,
             code=data.code,
@@ -23,8 +25,8 @@ class SupplierCRUD:
             contact_phone=data.contact_phone,
             contact_email=data.contact_email,
             api_url=data.api_url,
-            api_key=data.api_key,
-            api_secret=data.api_secret,
+            api_key=encrypt_secret(data.api_key) if data.api_key else None,
+            api_secret=encrypt_secret(data.api_secret) if data.api_secret else None,
             api_config=data.api_config,
             remark=data.remark,
             created_by=created_by,
@@ -92,12 +94,16 @@ class SupplierCRUD:
 
     async def update(self, db: AsyncSession, supplier_id: int, data: SupplierUpdate) -> Optional[SupplierModel]:
         """更新供应商"""
+        from app.utils.const import encrypt_secret
+
         supplier = await self.get_by_id(db, supplier_id)
         if not supplier:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
+            if key in ('api_key', 'api_secret') and value:
+                value = encrypt_secret(value)
             setattr(supplier, key, value)
 
         await db.commit()

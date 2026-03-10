@@ -34,22 +34,22 @@ class TrafficPoolModel(BaseModel):
     flow_size = Column(BigInteger, nullable=False, comment="套餐流量(MB)")
     period_type = Column(Enum(PeriodType), nullable=False, comment="周期类型")
     sale_package_id = Column(BigInteger, nullable=True, index=True, comment="销售套餐ID（组池依据）")
-    
+
     # 归属
     user_id = Column(BigInteger, nullable=True, index=True, comment="所属用户ID(NULL=平台池)")
-    
+
     # 统计 (实时更新)
     card_count = Column(Integer, nullable=False, default=0, comment="卡片数量")
     data_total = Column(BigInteger, nullable=False, default=0, comment="总流量(MB)")
     data_used = Column(BigInteger, nullable=False, default=0, comment="已用流量(MB)")
     package_flow = Column(BigInteger, nullable=False, default=0, comment="套餐流量(MB)")
     addon_flow = Column(BigInteger, nullable=False, default=0, comment="叠加流量包(MB)")
-    
+
     # 阈值设置
     alert_threshold_1 = Column(Integer, nullable=True, comment="告警阈值1百分比")
     alert_threshold_2 = Column(Integer, nullable=True, comment="告警阈值2百分比")
     alert_threshold_3 = Column(Integer, nullable=True, comment="告警阈值3百分比")
-    
+
     # 状态
     status = Column(Enum(PoolStatus), nullable=False, default=PoolStatus.enable, comment="状态")
     

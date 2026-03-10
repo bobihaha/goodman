@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     db_name: str = "iot_card_platform"
     
     # JWT 配置
-    secret_key: str = "dev_secret_key_change_in_production"
+    secret_key: str
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 120
     refresh_token_expire_days: int = 7
@@ -31,7 +31,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # CORS 配置
-    allow_origins: List[str] = ["http://localhost:3000", "http://localhost:8080", "*"]
+    allow_origins: List[str] = ["http://localhost:3000", "http://localhost:8080"]
+
+    # 批量操作限制
+    max_batch_operation_size: int = 10000
+    max_export_size: int = 10000
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -40,7 +44,6 @@ class Settings(BaseSettings):
         extra="ignore"  # 忽略额外的环境变量
     )
     
-    @computed_field
     @property
     def db_url(self) -> str:
         """构建 MySQL 数据库连接 URL"""
@@ -48,3 +51,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# 安全检查：生产环境必须配置SECRET_KEY
+if settings.app_env == "production" and not settings.secret_key:
+    raise ValueError("生产环境必须设置 SECRET_KEY 环境变量")

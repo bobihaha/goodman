@@ -59,16 +59,16 @@ class PurchaseBatchModel(BaseModel):
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
     flow_size = Column(BigInteger, nullable=False, comment="套餐流量(MB)")
     period_type = Column(Enum(PeriodType), nullable=False, comment="周期类型")
-    
+
     # 生命周期配置
     test_expire_date = Column(Date, nullable=True, comment="测试期到期日")
     silent_expire_date = Column(Date, nullable=False, comment="沉默期到期日")
-    
+
     # 数量统计
     card_count = Column(Integer, nullable=False, default=0, comment="卡片总数")
     stocked_count = Column(Integer, nullable=False, default=0, comment="已入库数")
     out_count = Column(Integer, nullable=False, default=0, comment="已出库数")
-    
+
     purchase_date = Column(Date, nullable=False, comment="采购日期")
     remark = Column(String(500), nullable=True, comment="备注")
     status = Column(Enum(BatchStatus), default=BatchStatus.pending, comment="状态")
@@ -213,6 +213,14 @@ class StockInRecordCardModel(BaseModel):
     card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
     iccid = Column(String(30), nullable=False, comment="ICCID")
 
+    # 业务字段（冗余存储便于查询）
+    test_expire_date = Column(Date, nullable=True, comment="测试期到期日")
+    silent_expire_date = Column(Date, nullable=True, comment="沉默期到期日")
+    supplier_id = Column(BigInteger, nullable=True, comment="供应商ID")
+    supplier_name = Column(String(100), nullable=True, comment="供应商名称")
+    base_package_id = Column(BigInteger, nullable=True, comment="底层套餐ID")
+    base_package_name = Column(String(200), nullable=True, comment="底层套餐名称")
+
 
 class StockOutRecordCardModel(BaseModel):
     """出库记录卡片关联模型"""
@@ -223,6 +231,18 @@ class StockOutRecordCardModel(BaseModel):
     card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
     iccid = Column(String(30), nullable=False, comment="ICCID")
 
+    # 业务字段（冗余存储便于查询）
+    test_expire_date = Column(Date, nullable=True, comment="测试期到期日")
+    silent_expire_date = Column(Date, nullable=True, comment="沉默期到期日")
+    supplier_id = Column(BigInteger, nullable=True, comment="供应商ID")
+    supplier_name = Column(String(100), nullable=True, comment="供应商名称")
+    base_package_id = Column(BigInteger, nullable=True, comment="底层套餐ID")
+    base_package_name = Column(String(200), nullable=True, comment="底层套餐名称")
+    sale_package_id = Column(BigInteger, nullable=True, comment="销售套餐ID")
+    sale_package_name = Column(String(200), nullable=True, comment="销售套餐名称")
+    target_user_id = Column(BigInteger, nullable=True, comment="目标用户ID")
+    target_user_name = Column(String(100), nullable=True, comment="目标用户名称")
+
 
 class StockRecycleRecordCardModel(BaseModel):
     """回收记录卡片关联模型"""
@@ -232,3 +252,6 @@ class StockRecycleRecordCardModel(BaseModel):
     record_id = Column(BigInteger, nullable=False, index=True, comment="回收记录ID")
     card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
     iccid = Column(String(30), nullable=False, comment="ICCID")
+    original_user_id = Column(BigInteger, nullable=True, comment="原用户ID")
+    original_status = Column(String(20), nullable=True, comment="原状态")
+    original_sale_package_id = Column(BigInteger, nullable=True, comment="原销售套餐ID")

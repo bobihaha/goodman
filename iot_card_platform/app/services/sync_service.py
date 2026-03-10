@@ -5,6 +5,7 @@ from typing import Optional, List, Tuple
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
+import asyncio
 from app.crud.sync_crud import sync_log_crud, sync_task_crud
 from app.db.models.sync import SyncType, SyncStatus
 from app.db.models.iot_card import IotCardModel, CardStatus
@@ -15,6 +16,48 @@ from app.utils.exceptions import BusinessException
 
 class SyncService:
     """数据同步服务"""
+
+    # 重试配置
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0  # 秒
+
+    async def _record_usage_snapshot(self, db: AsyncSession, card, snapshot_type: str):
+        """记录用量快照"""
+        from app.crud.iot_card_crud import card_usage_history_crud
+        from datetime import date
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            snapshot_date = date.today()
+            snapshot_month = None
+            if card.period_type.value == "monthly":
+                snapshot_month = snapshot_date.strftime("%Y-%m")
+            await card_usage_history_crud.create_snapshot(
+                db=db,
+                card_id=card.id,
+                iccid=card.iccid,
+                data_used=card.data_used,
+                data_total=card.data_total,
+                period_type=card.period_type.value,
+                snapshot_date=snapshot_date,
+                snapshot_type=snapshot_type,
+                snapshot_month=snapshot_month
+            )
+        except Exception as e:
+            logger.error(f"记录用量快照失败 - ICCID: {card.iccid}", exc_info=True)
+
+
+    async def _retry_api_call(self, func, *args, **kwargs):
+        """API调用重试包装器"""
+        last_error = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(self.RETRY_DELAY * (attempt + 1))
+        raise last_error
 
     # ============ 流量用量同步 ============
 
@@ -91,9 +134,9 @@ class SyncService:
                         api_secret=supplier.api_secret or ""
                     )
 
-                    # 批量获取流量数据
+                    # 批量获取流量数据（带重试）
                     iccids = [card.iccid for card in sup_cards]
-                    usage_data = await client.get_batch_usage(iccids)
+                    usage_data = await self._retry_api_call(client.get_batch_usage, iccids)
 
                     # 更新卡片流量
                     usage_map = {item["iccid"]: item for item in usage_data}
@@ -107,6 +150,15 @@ class SyncService:
                             # 检查并更新卡片状态
                             from app.services.card_status_service import check_and_update_card_status
                             await check_and_update_card_status(db, card)
+
+                            # 月包：月末记录快照
+                            if card.period_type.value == "monthly":
+                                from datetime import date
+                                import calendar
+                                today = date.today()
+                                last_day = calendar.monthrange(today.year, today.month)[1]
+                                if today.day == last_day:
+                                    await self._record_usage_snapshot(db, card, "month_end")
 
                             success_count += 1
                             sync_details.append({
@@ -238,7 +290,7 @@ class SyncService:
                     )
 
                     iccids = [card.iccid for card in sup_cards]
-                    lifecycle_data = await client.get_batch_lifecycle(iccids)
+                    lifecycle_data = await self._retry_api_call(client.get_batch_lifecycle, iccids)
 
                     lifecycle_map = {item["iccid"]: item for item in lifecycle_data}
                     for card in sup_cards:
@@ -247,7 +299,8 @@ class SyncService:
                             
                             # 记录旧状态
                             old_status = card.status
-                            
+                            old_expired_at = card.expired_at
+
                             # 更新生命周期日期
                             if data.get("test_expire_date"):
                                 card.test_expire_date = datetime.strptime(
@@ -262,10 +315,16 @@ class SyncService:
                                     data["activated_at"], "%Y-%m-%d"
                                 ).date()
                             if data.get("expired_at"):
-                                card.expired_at = datetime.strptime(
+                                new_expired_at = datetime.strptime(
                                     data["expired_at"], "%Y-%m-%d"
                                 ).date()
-                            
+                                # 年包：检测续费
+                                if (card.period_type.value == "yearly" and
+                                    old_expired_at and
+                                    new_expired_at > old_expired_at):
+                                    await self._record_usage_snapshot(db, card, "period_end")
+                                card.expired_at = new_expired_at
+
                             # 更新状态
                             if data.get("status"):
                                 card.status = CardStatus(data["status"])
@@ -340,7 +399,8 @@ class SyncService:
         self,
         db: AsyncSession,
         iccid: str,
-        triggered_by: Optional[int] = None
+        triggered_by: Optional[int] = None,
+        current_user = None
     ) -> dict:
         """同步单卡信息 (流量+生命周期)"""
         # 获取卡片
@@ -350,9 +410,16 @@ class SyncService:
         )
         card_result = await db.execute(card_query)
         card = card_result.scalar_one_or_none()
-        
+
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+
+        # 权限校验：非超级管理员只能同步自己的卡片
+        if current_user:
+            from app.db.models.sys_user import UserLevel
+            if current_user.user_level != UserLevel.SUPER_ADMIN.value:
+                if card.user_id != current_user.id:
+                    raise BusinessException(code=403, msg="无权同步此卡片")
 
         # 创建同步日志
         log = await sync_log_crud.create(
@@ -379,8 +446,8 @@ class SyncService:
                 api_secret=supplier.api_secret or ""
             )
 
-            # 同步流量
-            usage_data = await client.get_card_usage(iccid)
+            # 同步流量（带重试）
+            usage_data = await self._retry_api_call(client.get_card_usage, iccid)
             card.data_used = usage_data.get("data_used", 0)
             card.data_total = usage_data.get("data_total", card.data_total)
             card.data_sync_at = datetime.now()
@@ -392,8 +459,8 @@ class SyncService:
             # 记录旧状态
             old_status = card.status
 
-            # 同步生命周期
-            lifecycle_data = await client.get_card_lifecycle(iccid)
+            # 同步生命周期（带重试）
+            lifecycle_data = await self._retry_api_call(client.get_card_lifecycle, iccid)
             if lifecycle_data.get("test_expire_date"):
                 card.test_expire_date = datetime.strptime(
                     lifecycle_data["test_expire_date"], "%Y-%m-%d"

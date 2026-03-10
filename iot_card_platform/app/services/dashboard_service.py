@@ -16,17 +16,19 @@ from app.schemas.dashboard import (
     CardStats, CardStatsItem, UserStats, PackageStats, PoolStats, AlertStats,
     DashboardOverview, UsageTrend, UsageTrendItem
 )
+from app.utils.const import cache_result
 
 
 class DashboardService:
     """仪表盘服务"""
 
     @staticmethod
+    @cache_result(ttl_seconds=300)
     async def get_card_stats(
         db: AsyncSession,
         user_id: Optional[int] = None
     ) -> CardStats:
-        """获取卡片统计"""
+        """获取卡片统计（缓存5分钟）"""
         # 基础查询条件
         base_condition = [IotCardModel.is_deleted == 0]
         if user_id:
@@ -70,10 +72,42 @@ class DashboardService:
                 "count": row[1]
             })
 
+        # 本月到期卡数
+        today = datetime.now()
+        month_start = datetime(today.year, today.month, 1).date()
+        if today.month == 12:
+            next_month = datetime(today.year + 1, 1, 1)
+        else:
+            next_month = datetime(today.year, today.month + 1, 1)
+        month_end = (next_month - timedelta(days=1)).date()
+
+        expiring_condition = base_condition + [
+            IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
+            IotCardModel.silent_expire_date >= month_start,
+            IotCardModel.silent_expire_date <= month_end
+        ]
+        expiring_result = await db.execute(
+            select(func.count(IotCardModel.id)).where(*expiring_condition)
+        )
+        expiring_count = expiring_result.scalar() or 0
+
+        # 超量卡数
+        over_usage_condition = base_condition + [
+            IotCardModel.status == CardStatus.activated,
+            IotCardModel.data_total > 0,
+            IotCardModel.data_used > IotCardModel.data_total
+        ]
+        over_usage_result = await db.execute(
+            select(func.count(IotCardModel.id)).where(*over_usage_condition)
+        )
+        over_usage_count = over_usage_result.scalar() or 0
+
         return CardStats(
             total=total,
             by_status=by_status,
-            by_carrier=by_carrier
+            by_carrier=by_carrier,
+            expiring_count=expiring_count,
+            over_usage_count=over_usage_count
         )
 
     @staticmethod
@@ -389,27 +423,32 @@ class DashboardService:
         ]
 
     @staticmethod
+    @staticmethod
     async def get_expiring_cards(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        carrier: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """获取本月到期卡明细"""
-        # 本月底
+        # 本月范围
         today = datetime.now()
-        # 计算本月最后一天
+        month_start = datetime(today.year, today.month, 1).date()
         if today.month == 12:
             next_month = datetime(today.year + 1, 1, 1)
         else:
             next_month = datetime(today.year, today.month + 1, 1)
-        month_end = next_month - timedelta(days=1)
-        
+        month_end = (next_month - timedelta(days=1)).date()
+
         base_condition = [
             IotCardModel.is_deleted == 0,
             IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
-            IotCardModel.silent_expire_date <= month_end.date()
+            IotCardModel.silent_expire_date >= month_start,
+            IotCardModel.silent_expire_date <= month_end
         ]
         if user_id:
             base_condition.append(IotCardModel.user_id == user_id)
+        if carrier:
+            base_condition.append(IotCardModel.carrier == carrier)
 
         result = await db.execute(
             select(IotCardModel)
@@ -418,7 +457,7 @@ class DashboardService:
             .limit(50)
         )
         cards = result.scalars().all()
-        
+
         return [
             {
                 "id": card.id,
@@ -436,7 +475,8 @@ class DashboardService:
     @staticmethod
     async def get_over_usage_cards(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        carrier: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """获取超量卡明细"""
         base_condition = [
@@ -446,411 +486,8 @@ class DashboardService:
         ]
         if user_id:
             base_condition.append(IotCardModel.user_id == user_id)
-
-        result = await db.execute(
-            select(IotCardModel)
-            .where(*base_condition)
-        )
-        cards = result.scalars().all()
-        
-        # 筛选超量卡（使用率 > 100%）
-        over_usage_cards = []
-        for card in cards:
-            usage_percent = (card.data_used / card.data_total * 100) if card.data_total > 0 else 0
-            if usage_percent > 100:
-                over_usage_cards.append({
-                    "id": card.id,
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "carrier": card.carrier.value if card.carrier else None,
-                    "data_used": card.data_used,
-                    "data_total": card.data_total,
-                    "usage_percent": round(usage_percent, 2),
-                    "over_usage": card.data_used - card.data_total,
-                    "user_name": ""
-                })
-        
-        # 按超量从大到小排序
-        over_usage_cards.sort(key=lambda x: x["over_usage"], reverse=True)
-        
-        return over_usage_cards[:50]  # 最多返回50条
-
-    @staticmethod
-    async def get_account_balance(
-        db: AsyncSession,
-        user_id: int
-    ) -> Dict[str, Any]:
-        """获取账户余额信息"""
-        # 简化版：返回模拟数据
-        # 实际应该从账户余额表中查询
-        return {
-            "balance": 0,
-            "alert_threshold": 1000,
-            "is_alert": False,
-            "last_recharge_at": None,
-            "last_recharge_amount": 0
-        }
-
-    @staticmethod
-    async def get_pools_usage_percent(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取流量池用量百分比"""
-        base_condition = [TrafficPoolModel.is_deleted == 0]
-        if user_id:
-            base_condition.append(TrafficPoolModel.user_id == user_id)
-
-        result = await db.execute(
-            select(TrafficPoolModel)
-            .where(*base_condition)
-            .order_by(TrafficPoolModel.id.desc())
-            .limit(10)
-        )
-        pools = result.scalars().all()
-        
-        return [
-            {
-                "id": pool.id,
-                "name": pool.name,
-                "carrier": pool.carrier.value if pool.carrier else None,
-                "data_total": pool.data_total,
-                "data_used": pool.data_used,
-                "usage_percent": pool.get_usage_percent(),
-                "card_count": pool.card_count,
-                "is_alert": pool.is_alert()
-            }
-            for pool in pools
-        ]
-
-    @staticmethod
-    async def get_expiring_cards(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取本月到期卡明细"""
-        # 本月底
-        today = datetime.now()
-        # 计算本月最后一天
-        if today.month == 12:
-            next_month = datetime(today.year + 1, 1, 1)
-        else:
-            next_month = datetime(today.year, today.month + 1, 1)
-        month_end = next_month - timedelta(days=1)
-        
-        base_condition = [
-            IotCardModel.is_deleted == 0,
-            IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
-            IotCardModel.silent_expire_date <= month_end.date()
-        ]
-        if user_id:
-            base_condition.append(IotCardModel.user_id == user_id)
-
-        result = await db.execute(
-            select(IotCardModel)
-            .where(*base_condition)
-            .order_by(IotCardModel.silent_expire_date.asc())
-            .limit(50)
-        )
-        cards = result.scalars().all()
-        
-        return [
-            {
-                "id": card.id,
-                "iccid": card.iccid,
-                "msisdn": card.msisdn,
-                "carrier": card.carrier.value if card.carrier else None,
-                "expired_at": card.silent_expire_date.strftime("%Y-%m-%d") if card.silent_expire_date else None,
-                "days_left": (card.silent_expire_date - today.date()).days if card.silent_expire_date else 0,
-                "user_name": "",
-                "package_name": ""
-            }
-            for card in cards
-        ]
-
-    @staticmethod
-    async def get_over_usage_cards(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取超量卡明细"""
-        base_condition = [
-            IotCardModel.is_deleted == 0,
-            IotCardModel.status == CardStatus.activated,
-            IotCardModel.data_total > 0
-        ]
-        if user_id:
-            base_condition.append(IotCardModel.user_id == user_id)
-
-        result = await db.execute(
-            select(IotCardModel)
-            .where(*base_condition)
-        )
-        cards = result.scalars().all()
-        
-        # 筛选超量卡（使用率 > 100%）
-        over_usage_cards = []
-        for card in cards:
-            usage_percent = (card.data_used / card.data_total * 100) if card.data_total > 0 else 0
-            if usage_percent > 100:
-                over_usage_cards.append({
-                    "id": card.id,
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "carrier": card.carrier.value if card.carrier else None,
-                    "data_used": card.data_used,
-                    "data_total": card.data_total,
-                    "usage_percent": round(usage_percent, 2),
-                    "over_usage": card.data_used - card.data_total,
-                    "user_name": ""
-                })
-        
-        # 按超量从大到小排序
-        over_usage_cards.sort(key=lambda x: x["over_usage"], reverse=True)
-        
-        return over_usage_cards[:50]  # 最多返回50条
-
-    @staticmethod
-    async def get_account_balance(
-        db: AsyncSession,
-        user_id: int
-    ) -> Dict[str, Any]:
-        """获取账户余额信息"""
-        # 简化版：返回模拟数据
-        # 实际应该从账户余额表中查询
-        return {
-            "balance": 0,
-            "alert_threshold": 1000,
-            "is_alert": False,
-            "last_recharge_at": None,
-            "last_recharge_amount": 0
-        }
-
-    @staticmethod
-    async def get_pools_usage_percent(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取流量池用量百分比"""
-        base_condition = [TrafficPoolModel.is_deleted == 0]
-        if user_id:
-            base_condition.append(TrafficPoolModel.user_id == user_id)
-
-        result = await db.execute(
-            select(TrafficPoolModel)
-            .where(*base_condition)
-            .order_by(TrafficPoolModel.id.desc())
-            .limit(10)
-        )
-        pools = result.scalars().all()
-        
-        return [
-            {
-                "id": pool.id,
-                "name": pool.name,
-                "carrier": pool.carrier.value if pool.carrier else None,
-                "data_total": pool.data_total,
-                "data_used": pool.data_used,
-                "usage_percent": pool.get_usage_percent(),
-                "card_count": pool.card_count,
-                "is_alert": pool.is_alert()
-            }
-            for pool in pools
-        ]
-
-    @staticmethod
-    async def get_expiring_cards(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取本月到期卡明细"""
-        # 本月底
-        today = datetime.now()
-        # 计算本月最后一天
-        if today.month == 12:
-            next_month = datetime(today.year + 1, 1, 1)
-        else:
-            next_month = datetime(today.year, today.month + 1, 1)
-        month_end = next_month - timedelta(days=1)
-        
-        base_condition = [
-            IotCardModel.is_deleted == 0,
-            IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
-            IotCardModel.silent_expire_date <= month_end.date()
-        ]
-        if user_id:
-            base_condition.append(IotCardModel.user_id == user_id)
-
-        result = await db.execute(
-            select(IotCardModel)
-            .where(*base_condition)
-            .order_by(IotCardModel.silent_expire_date.asc())
-            .limit(50)
-        )
-        cards = result.scalars().all()
-        
-        return [
-            {
-                "id": card.id,
-                "iccid": card.iccid,
-                "msisdn": card.msisdn,
-                "carrier": card.carrier.value if card.carrier else None,
-                "expired_at": card.silent_expire_date.strftime("%Y-%m-%d") if card.silent_expire_date else None,
-                "days_left": (card.silent_expire_date - today.date()).days if card.silent_expire_date else 0,
-                "user_name": "",
-                "package_name": ""
-            }
-            for card in cards
-        ]
-
-    @staticmethod
-    async def get_over_usage_cards(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取超量卡明细"""
-        base_condition = [
-            IotCardModel.is_deleted == 0,
-            IotCardModel.status == CardStatus.activated,
-            IotCardModel.data_total > 0
-        ]
-        if user_id:
-            base_condition.append(IotCardModel.user_id == user_id)
-
-        result = await db.execute(
-            select(IotCardModel)
-            .where(*base_condition)
-        )
-        cards = result.scalars().all()
-        
-        # 筛选超量卡（使用率 > 100%）
-        over_usage_cards = []
-        for card in cards:
-            usage_percent = (card.data_used / card.data_total * 100) if card.data_total > 0 else 0
-            if usage_percent > 100:
-                over_usage_cards.append({
-                    "id": card.id,
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "carrier": card.carrier.value if card.carrier else None,
-                    "data_used": card.data_used,
-                    "data_total": card.data_total,
-                    "usage_percent": round(usage_percent, 2),
-                    "over_usage": card.data_used - card.data_total,
-                    "user_name": ""
-                })
-        
-        # 按超量从大到小排序
-        over_usage_cards.sort(key=lambda x: x["over_usage"], reverse=True)
-        
-        return over_usage_cards[:50]  # 最多返回50条
-
-    @staticmethod
-    async def get_account_balance(
-        db: AsyncSession,
-        user_id: int
-    ) -> Dict[str, Any]:
-        """获取账户余额信息"""
-        # 简化版：返回模拟数据
-        # 实际应该从账户余额表中查询
-        return {
-            "balance": 0,
-            "alert_threshold": 1000,
-            "is_alert": False,
-            "last_recharge_at": None,
-            "last_recharge_amount": 0
-        }
-
-    @staticmethod
-    async def get_pools_usage_percent(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取流量池用量百分比"""
-        base_condition = [TrafficPoolModel.is_deleted == 0]
-        if user_id:
-            base_condition.append(TrafficPoolModel.user_id == user_id)
-
-        result = await db.execute(
-            select(TrafficPoolModel)
-            .where(*base_condition)
-            .order_by(TrafficPoolModel.id.desc())
-            .limit(10)
-        )
-        pools = result.scalars().all()
-        
-        return [
-            {
-                "id": pool.id,
-                "name": pool.name,
-                "carrier": pool.carrier.value if pool.carrier else None,
-                "data_total": pool.data_total,
-                "data_used": pool.data_used,
-                "usage_percent": pool.get_usage_percent(),
-                "card_count": pool.card_count,
-                "is_alert": pool.is_alert()
-            }
-            for pool in pools
-        ]
-
-    @staticmethod
-    async def get_expiring_cards(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取本月到期卡明细"""
-        # 本月底
-        today = datetime.now()
-        # 计算本月最后一天
-        if today.month == 12:
-            next_month = datetime(today.year + 1, 1, 1)
-        else:
-            next_month = datetime(today.year, today.month + 1, 1)
-        month_end = next_month - timedelta(days=1)
-        
-        base_condition = [
-            IotCardModel.is_deleted == 0,
-            IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
-            IotCardModel.silent_expire_date <= month_end.date()
-        ]
-        if user_id:
-            base_condition.append(IotCardModel.user_id == user_id)
-
-        result = await db.execute(
-            select(IotCardModel)
-            .where(*base_condition)
-            .order_by(IotCardModel.silent_expire_date.asc())
-            .limit(50)
-        )
-        cards = result.scalars().all()
-        
-        return [
-            {
-                "id": card.id,
-                "iccid": card.iccid,
-                "msisdn": card.msisdn,
-                "carrier": card.carrier.value if card.carrier else None,
-                "expired_at": card.silent_expire_date.strftime("%Y-%m-%d") if card.silent_expire_date else None,
-                "days_left": (card.silent_expire_date - today.date()).days if card.silent_expire_date else 0,
-                "user_name": "",
-                "package_name": ""
-            }
-            for card in cards
-        ]
-
-    @staticmethod
-    async def get_over_usage_cards(
-        db: AsyncSession,
-        user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """获取超量卡明细"""
-        base_condition = [
-            IotCardModel.is_deleted == 0,
-            IotCardModel.status == CardStatus.activated,
-            IotCardModel.data_total > 0
-        ]
-        if user_id:
-            base_condition.append(IotCardModel.user_id == user_id)
+        if carrier:
+            base_condition.append(IotCardModel.carrier == carrier)
 
         result = await db.execute(
             select(IotCardModel)

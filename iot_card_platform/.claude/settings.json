@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m mypy app --ignore-missing-imports --no-error-summary)",
+      "Bash(/Users/huiren/Documents/goodman/iot_card_platform/frontend/src/types/card.d.ts:*)",
+      "Bash(kill -9 83080)",
+      "Bash(tail -50 /Users/huiren/Documents/goodman/iot_card_platform/logs/*.log)",
+      "Read(//Users/huiren/Documents/goodman/iot_card_platform/**)",
+      "Bash(xargs kill)",
+      "Read(//private/tmp/**)",
+      "Bash(wc -l /Users/huiren/Documents/goodman/iot_card_platform/app/api/v1/*.py)",
+      "Bash(wc -l /Users/huiren/Documents/goodman/iot_card_platform/app/services/*.py)",
+      "Bash(find app -name \"*.py\" -type f -exec wc -l {} +)",
+      "Bash(python -m py_compile app/services/sys_user_service.py)"
+    ],
+    "additionalDirectories": [
+      "/Users/huiren/Documents/goodman/iot_card_platform",
+      "/Users/huiren/Documents/goodman/iot_card_platform/docs",
+      "/Users/huiren/Documents/goodman/iot_card_platform/app/db/migrations"
+    ]
+  }
+}

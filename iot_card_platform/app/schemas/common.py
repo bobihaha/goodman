@@ -30,7 +30,15 @@ class PageResponseModel(BaseModel):
     """分页返回体"""
     code: int = Field(200, description="状态码")
     msg: str = Field("success", description="提示信息")
-    data: Optional[list] = Field(None, description="数据列表")
-    total: int = Field(0, description="总条数")
-    page: int = Field(1, description="当前页码")
-    page_size: int = Field(10, description="每页条数")
+    data: Optional[dict] = Field(None, description="分页数据")
+
+    def __init__(self, data=None, total=0, page=1, page_size=10, **kwargs):
+        if data is not None and not isinstance(data, dict):
+            # 如果 data 是列表，包装成字典格式
+            data = {
+                "items": data,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
+        super().__init__(code=200, msg="success", data=data, **kwargs)

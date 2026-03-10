@@ -115,5 +115,15 @@ export const cardApi = {
   // 批量查询续费价格
   queryRenewPrice(iccids: string[]): Promise<{ found: any[]; not_found: string[] }> {
     return post<{ found: any[]; not_found: string[] }>('/cards/batch/renew-price-query', iccids)
+  },
+
+  // 获取卡片用量历史
+  getUsageHistory(cardId: number, startDate?: string, endDate?: string): Promise<any[]> {
+    return get<any[]>(`/cards/${cardId}/usage-history`, { params: { start_date: startDate, end_date: endDate } })
+  },
+
+  // 导出历史用量
+  exportHistory(cardIds: number[], startDate?: string, endDate?: string): Promise<any[]> {
+    return post<any[]>('/cards/export-history', { card_ids: cardIds, start_date: startDate, end_date: endDate })
   }
 }

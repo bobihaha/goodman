@@ -18,6 +18,8 @@ class CardStats(BaseModel):
     total: int = Field(0, description="总卡片数")
     by_status: List[CardStatsItem] = Field(default_factory=list, description="按状态统计")
     by_carrier: List[dict] = Field(default_factory=list, description="按运营商统计")
+    expiring_count: int = Field(0, description="本月到期卡数")
+    over_usage_count: int = Field(0, description="超量卡数")
 
 
 class UserStats(BaseModel):

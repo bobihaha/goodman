@@ -25,6 +25,7 @@ class IotCardService:
         card_type: Optional[str] = None,
         pool_id: Optional[int] = None,
         is_pool_member: Optional[bool] = None,
+        over_usage: Optional[bool] = None,
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
         batch_id: Optional[int] = None,
@@ -52,6 +53,7 @@ class IotCardService:
             card_type=card_type,
             pool_id=pool_id,
             is_pool_member=is_pool_member,
+            over_usage=over_usage,
             remark=remark,
             customer_id=customer_id,
             batch_id=batch_id,
@@ -114,6 +116,8 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """更新卡片备注"""
+        from app.utils.const import sanitize_text
+        remark = sanitize_text(remark)
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         card = await iot_card_crud.update_remark(db, card_id, remark, user_filter)
         if not card:
@@ -129,6 +133,11 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """批量更新备注"""
+        if len(card_ids) > settings.max_batch_operation_size:
+            raise BusinessException(code=400, msg=f"单次最多操作{settings.max_batch_operation_size}张卡片")
+
+        from app.utils.const import sanitize_text
+        remark = sanitize_text(remark)
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
         count = await iot_card_crud.batch_update_remark(db, card_ids, remark, user_filter)
         return {
@@ -159,6 +168,11 @@ class IotCardService:
         target_user = target_user_result.scalar_one_or_none()
         if not target_user:
             raise BusinessException(code=422, msg="目标用户不存在")
+
+        # 验证目标用户状态
+        from app.db.models.sys_user import UserStatus
+        if target_user.status != UserStatus.enable:
+            raise BusinessException(code=422, msg="目标用户已被禁用")
 
         # 验证目标用户是当前用户的子用户
         if user_level != UserLevel.SUPER_ADMIN.value and target_user.parent_id != current_user_id:
@@ -196,6 +210,9 @@ class IotCardService:
         remark: Optional[str] = None
     ) -> dict:
         """批量划拨"""
+        if len(card_ids) > settings.max_batch_operation_size:
+            raise BusinessException(code=400, msg=f"单次最多操作{settings.max_batch_operation_size}张卡片")
+
         from sqlalchemy import select
         from app.db.models.sys_user import SysUserModel
 
@@ -207,6 +224,11 @@ class IotCardService:
         target_user = target_user_result.scalar_one_or_none()
         if not target_user:
             raise BusinessException(code=422, msg="目标用户不存在")
+
+        # 验证目标用户状态
+        from app.db.models.sys_user import UserStatus
+        if target_user.status != UserStatus.enable:
+            raise BusinessException(code=422, msg="目标用户已被禁用")
 
         # 验证目标用户是当前用户的子用户
         if user_level != UserLevel.SUPER_ADMIN.value and target_user.parent_id != current_user_id:
@@ -252,7 +274,7 @@ class IotCardService:
                 status=status,
                 carrier=carrier,
                 page=1,
-                page_size=10000  # 最多导出1万条
+                page_size=settings.max_export_size
             )
 
         # 转换为导出格式
@@ -1781,6 +1803,96 @@ class IotCardService:
             "success_list": success_list,
             "failed_list": failed_list
         }
+
+    async def get_card_usage_history(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        current_user_id: int,
+        user_level: int,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ):
+        """获取卡片用量历史"""
+        from app.crud.iot_card_crud import card_usage_history_crud
+        from datetime import datetime
+
+        card = await iot_card_crud.get_by_id(db, card_id)
+        if not card:
+            raise BusinessException(code=404, msg="卡片不存在")
+
+        if user_level != UserLevel.SUPER_ADMIN.value:
+            if card.user_id != current_user_id:
+                raise BusinessException(code=403, msg="无权查看此卡片历史")
+
+        start = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
+        end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+
+        history = await card_usage_history_crud.get_card_history(db, card_id, start, end)
+        return [h.to_dict() for h in history]
+
+    async def export_cards_with_history(
+        self,
+        db: AsyncSession,
+        current_user_id: int,
+        user_level: int,
+        card_ids: List[int],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ):
+        """导出卡片历史用量"""
+        from app.crud.iot_card_crud import card_usage_history_crud
+        from datetime import datetime
+
+        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+        cards = await iot_card_crud.get_by_ids(db, card_ids, user_filter)
+        if not cards:
+            return []
+
+        start = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
+        end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+
+        card_ids_list = [c.id for c in cards]
+        history_records = await card_usage_history_crud.get_cards_history(db, card_ids_list, start, end)
+
+        history_map = {}
+        for h in history_records:
+            if h.card_id not in history_map:
+                history_map[h.card_id] = []
+            history_map[h.card_id].append(h)
+
+        export_data = []
+        for card in cards:
+            d = card.to_dict()
+            histories = history_map.get(card.id, [])
+
+            if histories:
+                for h in histories:
+                    export_data.append({
+                        "ICCID": d["iccid"],
+                        "运营商": d["carrier_name"],
+                        "套餐规格": d["spec_name"],
+                        "快照日期": h.snapshot_date.strftime("%Y-%m-%d"),
+                        "快照类型": "月末" if h.snapshot_type == "month_end" else "周期末",
+                        "快照月份": h.snapshot_month or "",
+                        "已用流量(MB)": h.data_used,
+                        "总流量(MB)": h.data_total,
+                        "使用率(%)": round((h.data_used / h.data_total * 100), 2) if h.data_total else 0,
+                    })
+            else:
+                export_data.append({
+                    "ICCID": d["iccid"],
+                    "运营商": d["carrier_name"],
+                    "套餐规格": d["spec_name"],
+                    "快照日期": "当前",
+                    "快照类型": "",
+                    "快照月份": "",
+                    "已用流量(MB)": d["data_used"],
+                    "总流量(MB)": d["data_total"],
+                    "使用率(%)": d["data_usage_percent"],
+                })
+
+        return export_data
 
 
 iot_card_service = IotCardService()

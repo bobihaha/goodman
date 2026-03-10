@@ -101,13 +101,13 @@ export const dashboardApi = {
   },
 
   // 获取本月到期卡
-  getExpiringCards(): Promise<ExpiringCard[]> {
-    return get('/dashboard/cards/expiring')
+  getExpiringCards(carrier?: string): Promise<ExpiringCard[]> {
+    return get('/dashboard/cards/expiring', { params: { carrier } })
   },
 
   // 获取超量卡
-  getOverUsageCards(): Promise<OverUsageCard[]> {
-    return get('/dashboard/cards/over-usage')
+  getOverUsageCards(carrier?: string): Promise<OverUsageCard[]> {
+    return get('/dashboard/cards/over-usage', { params: { carrier } })
   },
 
   // 获取流量池用量百分比

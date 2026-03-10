@@ -415,3 +415,15 @@ async def batch_stock_out_import(
         created_by=current_user.id
     )
     return ResponseModel(data=result, msg="批量出库完成")
+
+
+@router.get("/records/card", summary="按卡号查询出入库记录", response_model=ResponseModel)
+async def get_card_stock_records(
+    iccid: str = Query(..., description="卡号ICCID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """按卡号查询出入库记录"""
+    from app.crud.stock_crud import card_stock_record_crud
+    records = await card_stock_record_crud.get_card_records(db, iccid)
+    return ResponseModel(data={"total": len(records), "records": records}, msg="查询成功")

@@ -19,6 +19,10 @@ class SupplierPackageService:
 
     async def create_package(self, db: AsyncSession, data: SupplierPackageCreate, created_by: int) -> Dict[str, Any]:
         """创建底层套餐"""
+        # 验证价格
+        if data.price_cost is not None and data.price_cost < 0:
+            raise BusinessException(code=400, msg="成本价格不能为负数")
+
         # 检查供应商是否存在
         supplier = await supplier_crud.get_by_id(db, data.supplier_id)
         if not supplier:
@@ -50,13 +54,14 @@ class SupplierPackageService:
         """获取套餐列表"""
         packages, total = await supplier_package_crud.get_list(db, query)
 
-        # 获取供应商名称映射
+        # 批量查询供应商名称
+        from sqlalchemy import select
+        from app.db.models.supplier import SupplierModel
+
         supplier_ids = list(set([p.supplier_id for p in packages]))
-        supplier_map = {}
-        for sid in supplier_ids:
-            supplier = await supplier_crud.get_by_id(db, sid)
-            if supplier:
-                supplier_map[sid] = supplier.name
+        stmt = select(SupplierModel).where(SupplierModel.id.in_(supplier_ids))
+        suppliers = (await db.execute(stmt)).scalars().all()
+        supplier_map = {s.id: s.name for s in suppliers}
 
         result_list = []
         for p in packages:
@@ -78,6 +83,10 @@ class SupplierPackageService:
 
     async def update_package(self, db: AsyncSession, package_id: int, data: SupplierPackageUpdate) -> Dict[str, Any]:
         """更新套餐"""
+        # 验证价格
+        if data.price_cost is not None and data.price_cost < 0:
+            raise BusinessException(code=400, msg="成本价格不能为负数")
+
         package = await supplier_package_crud.get_by_id(db, package_id)
         if not package:
             raise BusinessException(code=404, msg="套餐不存在")
@@ -95,7 +104,20 @@ class SupplierPackageService:
         if not package:
             raise BusinessException(code=404, msg="套餐不存在")
 
-        # TODO: 检查是否有关联的销售套餐或卡片
+        # 检查是否有销售套餐关联
+        from sqlalchemy import select, func
+        from app.db.models.package import SalePackageModel
+        sale_count_stmt = select(func.count(SalePackageModel.id)).where(SalePackageModel.base_package_id == package_id, SalePackageModel.is_deleted == 0)
+        sale_count = (await db.execute(sale_count_stmt)).scalar() or 0
+        if sale_count > 0:
+            raise BusinessException(code=400, msg=f"该套餐被{sale_count}个销售套餐使用，无法删除")
+
+        # 检查是否有卡片使用
+        from app.db.models.iot_card import IotCardModel
+        card_count_stmt = select(func.count(IotCardModel.id)).where(IotCardModel.supplier_package_id == package_id, IotCardModel.is_deleted == 0)
+        card_count = (await db.execute(card_count_stmt)).scalar() or 0
+        if card_count > 0:
+            raise BusinessException(code=400, msg=f"该套餐被{card_count}张卡片使用，无法删除")
 
         return await supplier_package_crud.delete(db, package_id)
 
@@ -105,6 +127,12 @@ class SalePackageService:
 
     async def create_package(self, db: AsyncSession, data: SalePackageCreate, current_user: CurrentUser) -> Dict[str, Any]:
         """创建销售套餐"""
+        # 验证价格
+        if data.price_sale is not None and data.price_sale < 0:
+            raise BusinessException(code=400, msg="销售价格不能为负数")
+        if data.price_cost is not None and data.price_cost < 0:
+            raise BusinessException(code=400, msg="成本价格不能为负数")
+
         # 检查编码是否已存在
         existing = await sale_package_crud.get_by_code(db, data.code)
         if existing:
@@ -153,13 +181,14 @@ class SalePackageService:
 
         packages, total = await sale_package_crud.get_list(db, query, user_id)
 
-        # 获取底层套餐名称映射
+        # 批量查询底层套餐名称
+        from sqlalchemy import select
+        from app.db.models.package import SupplierPackageModel
+
         base_package_ids = list(set([p.base_package_id for p in packages if p.base_package_id]))
-        base_package_map = {}
-        for bid in base_package_ids:
-            base_package = await supplier_package_crud.get_by_id(db, bid)
-            if base_package:
-                base_package_map[bid] = base_package.name
+        stmt = select(SupplierPackageModel).where(SupplierPackageModel.id.in_(base_package_ids))
+        base_packages = (await db.execute(stmt)).scalars().all()
+        base_package_map = {bp.id: bp.name for bp in base_packages}
 
         result_list = []
         for p in packages:
@@ -185,6 +214,12 @@ class SalePackageService:
 
     async def update_package(self, db: AsyncSession, package_id: int, data: SalePackageUpdate, current_user: CurrentUser) -> Dict[str, Any]:
         """更新套餐"""
+        # 验证价格
+        if data.price_sale is not None and data.price_sale < 0:
+            raise BusinessException(code=400, msg="销售价格不能为负数")
+        if data.price_cost is not None and data.price_cost < 0:
+            raise BusinessException(code=400, msg="成本价格不能为负数")
+
         package = await sale_package_crud.get_by_id(db, package_id)
         if not package:
             raise BusinessException(code=404, msg="套餐不存在")
@@ -219,7 +254,13 @@ class SalePackageService:
             if package.user_id != current_user.id:
                 raise BusinessException(code=403, msg="无权删除此套餐")
 
-        # TODO: 检查是否有关联的卡片
+        # 检查是否有卡片使用
+        from sqlalchemy import select, func
+        from app.db.models.iot_card import IotCardModel
+        card_count_stmt = select(func.count(IotCardModel.id)).where(IotCardModel.sale_package_id == package_id, IotCardModel.is_deleted == 0)
+        card_count = (await db.execute(card_count_stmt)).scalar() or 0
+        if card_count > 0:
+            raise BusinessException(code=400, msg=f"该套餐被{card_count}张卡片使用，无法删除")
 
         return await sale_package_crud.delete(db, package_id)
 

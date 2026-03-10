@@ -5,7 +5,7 @@
 from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
-from app.db.models.base import BaseModel
+from app.db.models.base import BaseModel, Base
 from app.db.models.package import CarrierType, PeriodType, CARRIER_NAMES, PERIOD_CONFIG
 
 
@@ -68,6 +68,7 @@ class IotCardModel(BaseModel):
     
     # 卡片标识
     iccid = Column(String(30), nullable=False, unique=True, index=True, comment="ICCID")
+    iccid_suffix = Column(String(6), nullable=True, index=True, comment="ICCID后6位")
     imsi = Column(String(20), nullable=True, comment="IMSI")
     msisdn = Column(String(20), nullable=True, index=True, comment="号码")
     
@@ -232,5 +233,35 @@ class CardTransferModel(BaseModel):
             "to_user_id": self.to_user_id,
             "operator_id": self.operator_id,
             "remark": self.remark,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CardUsageHistoryModel(Base):
+    """卡片用量历史记录"""
+    __tablename__ = "card_usage_history"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    card_id = Column(BigInteger, nullable=False, index=True)
+    iccid = Column(String(30), nullable=False, index=True)
+    data_used = Column(BigInteger, nullable=False, default=0)
+    data_total = Column(BigInteger, nullable=False)
+    period_type = Column(String(20), nullable=False)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    snapshot_type = Column(String(20), nullable=False)
+    snapshot_month = Column(String(7), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "card_id": self.card_id,
+            "iccid": self.iccid,
+            "data_used": self.data_used,
+            "data_total": self.data_total,
+            "period_type": self.period_type,
+            "snapshot_date": self.snapshot_date.isoformat() if self.snapshot_date else None,
+            "snapshot_type": self.snapshot_type,
+            "snapshot_month": self.snapshot_month,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

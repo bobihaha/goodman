@@ -1,64 +1,93 @@
-# 物联网卡管理平台 (IoT SIM Card Management Platform)
+# 物联网卡管理平台
 
-基于 FastAPI 构建的物联网卡管理后端系统，支持卡片管理、套餐管理、流量监控、设备绑定等核心功能。
+## 项目概述
 
-## 项目结构
+基于 **Vue 3 + FastAPI + MySQL** 的物联网卡管理平台，支持三级多租户 SaaS 架构。
 
-```
-app/
-├── api/v1/          # 接口路由层
-│   ├── common.py    # 公共接口
-│   ├── user.py      # 用户模块
-│   ├── iot_card.py  # 物联网卡模块
-│   ├── package.py   # 套餐模块
-│   └── device.py    # 设备模块
-├── schemas/         # 数据校验模型
-├── services/        # 业务逻辑层
-├── crud/            # 数据操作层
-├── db/models/       # ORM 模型
-├── utils/           # 工具类
-├── clients/         # 第三方服务
-├── middleware/      # 中间件
-├── tasks/           # 定时任务
-├── config.py        # 配置管理
-└── main.py          # 应用入口
-```
+**核心功能**：
+- 卡片管理（查询、划拨、备注、续费、停复机）
+- 流量池管理（组池共享、用量统计、加油包充值）
+- 出入库管理（批量导入、Excel模板、回收）
+- 停复机管理（策略、记录、告警）
+- 用户权限管理（三级用户、超级登录、动态菜单）
 
-## 核心功能
+**技术栈**：
+- 前端：Vue 3.4 + TypeScript 5 + Element Plus 2.5 + Pinia 2.1
+- 后端：FastAPI + SQLAlchemy 2.x + MySQL 8.4 + Redis
+- 部署：Docker + Docker Compose
 
-- ✅ 物联网卡管理（ICCID/IMSI/MSISDN）
-- ✅ 套餐管理与订购
-- ✅ 流量用量统计
-- ✅ 设备绑定管理
-- ✅ 卡片状态监控
-- ✅ 批量导入导出
-- ✅ JWT 认证 + 权限控制
-- ✅ Docker 容器化部署
+---
 
-## 快速启动
+## 快速开始
 
-### 1. 安装依赖
+### 前端
 ```bash
-pip install poetry
-poetry install
+cd frontend
+npm install
+npm run dev
 ```
 
-### 2. 配置环境
+### 后端
 ```bash
-cp .env.development .env
+cd app
+pip install -r requirements.txt
+uvicorn main:app --reload
 ```
 
-### 3. 启动服务
+### Docker部署
 ```bash
-poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+docker-compose up -d
 ```
 
-### 4. 访问文档
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-- 健康检查: http://localhost:8000/api/v1/health
+---
 
-### 5. 生产部署
-```bash
-docker-compose up -d --build
+## 文档导航
+
+### 核心文档
+- [前端需求文档](FRONTEND_PRD.md) - 功能需求、字段定义、开发规范
+- [后端模块规划](MODULE_PLAN.md) - 模块职责、API端点、技术架构
+- [API接口文档](API_DOCUMENTATION.md) - 完整的API接口说明
+
+### 设计文档
+- [系统架构](docs/ARCHITECTURE.md) - 系统架构设计
+- [数据库设计](docs/DATABASE_SCHEMA.md) - 数据库表结构
+- [开发指南](docs/DEVELOPMENT_GUIDE.md) - 开发规范和最佳实践
+
+### 历史文档
+- [变更日志](docs/archive/CHANGELOG.md) - 功能修复和更新记录
+- [已完成功能](docs/archive/COMPLETED_FEATURES.md) - 功能开发完成清单
+
+---
+
+## 项目状态
+
+**当前版本**：v2.0
+
+**开发进度**：
+- ✅ 核心模块已完成（17/17）
+- ✅ 前端页面已完成（24个路由）
+- 🔄 联调测试中
+- 📋 待优化：性能优化、体验完善
+
+**最近更新**（2026-03-10）：
+- 修复仪表盘运营商筛选功能
+- 优化到期卡和超量卡列表筛选逻辑
+
+---
+
+## 目录结构
+
+```
+iot_card_platform/
+├── frontend/              # 前端项目（Vue3）
+├── app/                   # 后端项目（FastAPI）
+├── docs/                  # 文档目录
+│   ├── archive/          # 历史文档归档
+│   ├── ARCHITECTURE.md
+│   ├── DATABASE_SCHEMA.md
+│   └── DEVELOPMENT_GUIDE.md
+├── FRONTEND_PRD.md       # 前端需求文档
+├── MODULE_PLAN.md        # 后端模块规划
+├── API_DOCUMENTATION.md  # API文档
+└── README.md             # 本文件
 ```

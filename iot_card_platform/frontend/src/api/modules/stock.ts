@@ -147,5 +147,12 @@ export const stockApi = {
    */
   downloadTemplate() {
     return request.get('/stock/import-template', { responseType: 'blob' })
+  },
+
+  /**
+   * 按卡号查询出入库记录
+   */
+  getCardStockRecords(iccid: string) {
+    return request.get('/stock/records/card', { params: { iccid } })
   }
 }

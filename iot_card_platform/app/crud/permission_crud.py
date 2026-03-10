@@ -260,7 +260,16 @@ class UserPermissionCRUD:
         )
         result = await db.execute(query)
         count = result.scalar()
-        return count > 0
+        return (count or 0) > 0
+
+    async def count_users_with_permission(self, db: AsyncSession, permission_id: int) -> int:
+        """统计使用指定权限的用户数量"""
+        query = select(func.count(func.distinct(UserPermissionModel.user_id))).where(
+            UserPermissionModel.permission_id == permission_id,
+            UserPermissionModel.is_deleted == 0
+        )
+        result = await db.execute(query)
+        return result.scalar() or 0
 
 
 permission_crud = PermissionCRUD()

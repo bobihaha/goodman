@@ -16,18 +16,18 @@ from app.db.models.package import SupplierPackageModel
 
 
 def generate_batch_no() -> str:
-    """生成批次号: B + 日期 + 4位随机"""
-    return f"B{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:4].upper()}"
+    """生成批次号: B + 日期 + 8位随机"""
+    return f"B{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:8].upper()}"
 
 
 def generate_stock_in_no() -> str:
-    """生成入库单号: IN + 日期 + 4位随机"""
-    return f"IN{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:4].upper()}"
+    """生成入库单号: IN + 日期 + 8位随机"""
+    return f"IN{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:8].upper()}"
 
 
 def generate_stock_out_no() -> str:
-    """生成出库单号: OUT + 日期 + 4位随机"""
-    return f"OUT{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:4].upper()}"
+    """生成出库单号: OUT + 日期 + 8位随机"""
+    return f"OUT{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:8].upper()}"
 
 
 class PurchaseBatchCRUD:
@@ -159,23 +159,39 @@ class StockInCRUD:
 
         success_count = 0
         fail_details = []
-        created_card_ids = []  # 记录成功创建的卡片ID
+        created_card_ids = []
 
+        # 预验证所有卡片
+        for card_data in cards:
+            iccid = card_data.get("iccid", "").strip()
+            from app.utils.const import validate_iccid
+            if not validate_iccid(iccid):
+                fail_details.append({"iccid": iccid, "reason": "ICCID格式错误(需19-20位数字)"})
+            else:
+                exist_query = select(IotCardModel).where(IotCardModel.iccid == iccid)
+                exist_result = await db.execute(exist_query)
+                if exist_result.scalar_one_or_none():
+                    fail_details.append({"iccid": iccid, "reason": "ICCID已存在"})
+
+        # 如果有验证失败，记录并返回
+        if fail_details:
+            record.success_count = 0
+            record.fail_count = len(fail_details)
+            record.fail_reason = json.dumps(fail_details, ensure_ascii=False)
+            db.add(record)
+            await db.commit()
+            return record, fail_details
+
+        # 所有验证通过，批量创建
         for card_data in cards:
             iccid = card_data.get("iccid", "").strip()
             imsi = card_data.get("imsi", "").strip() if card_data.get("imsi") else None
             msisdn = card_data.get("msisdn", "").strip() if card_data.get("msisdn") else None
 
-            # 检查ICCID是否已存在
-            exist_query = select(IotCardModel).where(IotCardModel.iccid == iccid)
-            exist_result = await db.execute(exist_query)
-            if exist_result.scalar_one_or_none():
-                fail_details.append({"iccid": iccid, "reason": "ICCID已存在"})
-                continue
-
             # 创建卡片
             card = IotCardModel(
                 iccid=iccid,
+                iccid_suffix=iccid[-6:] if len(iccid) >= 6 else iccid,
                 imsi=imsi,
                 msisdn=msisdn,
                 supplier_id=batch.supplier_id,
@@ -224,21 +240,37 @@ class StockInCRUD:
             "operator_id": created_by
         })
         new_record_id = new_record_result.lastrowid
-        
+
+        # 获取供应商和套餐信息
+        from app.db.models.supplier import SupplierModel
+        supplier_query = select(SupplierModel).where(SupplierModel.id == batch.supplier_id)
+        supplier_result = await db.execute(supplier_query)
+        supplier = supplier_result.scalar_one_or_none()
+
+        package_query = select(SupplierPackageModel).where(SupplierPackageModel.id == batch.package_id)
+        package_result = await db.execute(package_query)
+        package = package_result.scalar_one_or_none()
+
         # 创建卡片关联记录
         for card_info in created_card_ids:
             relation = StockInRecordCardModel(
                 record_id=new_record_id,
                 card_id=card_info["card_id"],
-                iccid=card_info["iccid"]
+                iccid=card_info["iccid"],
+                test_expire_date=batch.test_expire_date,
+                silent_expire_date=batch.silent_expire_date,
+                supplier_id=batch.supplier_id,
+                supplier_name=supplier.name if supplier else None,
+                base_package_id=batch.package_id,
+                base_package_name=package.name if package else None
             )
             db.add(relation)
-        
+
+        # 更新批次计数（在同一事务内）
+        await batch_crud.update_counts(db, batch_id, stocked_delta=success_count)
+
         await db.commit()
         await db.refresh(record)
-
-        # 更新批次计数
-        await batch_crud.update_counts(db, batch_id, stocked_delta=success_count)
 
         return record, fail_details
 
@@ -393,15 +425,63 @@ class StockOutCRUD:
             "operator_id": created_by
         })
         new_record_id = new_record_result.lastrowid
-        
+
+        # 获取用户、销售套餐、供应商、底层套餐信息
+        from app.db.models.sys_user import SysUserModel
+        from app.db.models.package import SalePackageModel
+        from app.db.models.supplier import SupplierModel
+
+        user_query = select(SysUserModel).where(SysUserModel.id == to_user_id)
+        user_result = await db.execute(user_query)
+        user = user_result.scalar_one_or_none()
+
+        sale_pkg_query = select(SalePackageModel).where(SalePackageModel.id == sale_package_id)
+        sale_pkg_result = await db.execute(sale_pkg_query)
+        sale_pkg = sale_pkg_result.scalar_one_or_none()
+
         # 创建卡片关联记录
         for card_info in out_card_infos:
-            relation = StockOutRecordCardModel(
-                record_id=new_record_id,
-                card_id=card_info["card_id"],
-                iccid=card_info["iccid"]
-            )
-            db.add(relation)
+            # 获取卡片详细信息
+            card_query = select(IotCardModel).where(IotCardModel.id == card_info["card_id"])
+            card_result = await db.execute(card_query)
+            card = card_result.scalar_one_or_none()
+
+            if card:
+                # 获取供应商和底层套餐
+                supplier_query = select(SupplierModel).where(SupplierModel.id == card.supplier_id)
+                supplier_result = await db.execute(supplier_query)
+                supplier = supplier_result.scalar_one_or_none()
+
+                base_pkg_query = select(SupplierPackageModel).where(SupplierPackageModel.id == card.batch_id)
+                base_pkg_result = await db.execute(base_pkg_query)
+                base_pkg = base_pkg_result.scalar_one_or_none()
+
+                # 如果找不到底层套餐，尝试从批次获取
+                if not base_pkg and card.batch_id:
+                    batch_query = select(PurchaseBatchModel).where(PurchaseBatchModel.id == card.batch_id)
+                    batch_result = await db.execute(batch_query)
+                    batch = batch_result.scalar_one_or_none()
+                    if batch:
+                        base_pkg_query = select(SupplierPackageModel).where(SupplierPackageModel.id == batch.package_id)
+                        base_pkg_result = await db.execute(base_pkg_query)
+                        base_pkg = base_pkg_result.scalar_one_or_none()
+
+                relation = StockOutRecordCardModel(
+                    record_id=new_record_id,
+                    card_id=card_info["card_id"],
+                    iccid=card_info["iccid"],
+                    test_expire_date=card.test_expire_date,
+                    silent_expire_date=card.silent_expire_date,
+                    supplier_id=card.supplier_id,
+                    supplier_name=supplier.name if supplier else None,
+                    base_package_id=base_pkg.id if base_pkg else None,
+                    base_package_name=base_pkg.name if base_pkg else None,
+                    sale_package_id=sale_package_id,
+                    sale_package_name=sale_pkg.name if sale_pkg else None,
+                    target_user_id=to_user_id,
+                    target_user_name=user.name if user else None
+                )
+                db.add(relation)
         
         await db.commit()
         await db.refresh(record)
@@ -1020,13 +1100,24 @@ class StockRecycleCRUD:
             card = card_result.scalar_one_or_none()
 
             if card:
+                # 保存原始状态
+                original_user_id = card.user_id
+                original_status = card.status.value if hasattr(card.status, 'value') else card.status
+                original_sale_package_id = card.sale_package_id
+
                 # 回收：恢复为库存状态
                 card.user_id = None
                 card.sale_package_id = None
                 card.status = CardStatus.stock
                 card.stock_out_at = None
                 success_count += 1
-                recycled_cards.append({"card_id": card.id, "iccid": card.iccid})
+                recycled_cards.append({
+                    "card_id": card.id,
+                    "iccid": card.iccid,
+                    "original_user_id": original_user_id,
+                    "original_status": original_status,
+                    "original_sale_package_id": original_sale_package_id
+                })
             else:
                 failed_count += 1
 
@@ -1047,7 +1138,10 @@ class StockRecycleCRUD:
             relation = StockRecycleRecordCardModel(
                 record_id=record.id,
                 card_id=card_info["card_id"],
-                iccid=card_info["iccid"]
+                iccid=card_info["iccid"],
+                original_user_id=card_info["original_user_id"],
+                original_status=card_info["original_status"],
+                original_sale_package_id=card_info["original_sale_package_id"]
             )
             db.add(relation)
         
@@ -1200,4 +1294,81 @@ stock_out_crud = StockOutCRUD()
 stock_summary_crud = StockSummaryCRUD()
 stock_in_record_crud = StockInRecordCRUD()
 stock_out_record_crud = StockOutRecordCRUD()
+
+
+class CardStockRecordCRUD:
+    """按卡号查询出入库记录 CRUD"""
+
+    async def get_card_records(self, db: AsyncSession, iccid: str) -> List[dict]:
+        """查询指定卡号的所有出入库记录"""
+        from app.db.models.stock import StockInRecordCardModel, StockOutRecordCardModel
+        from sqlalchemy import text
+
+        # 查询入库记录
+        in_query = text("""
+            SELECT 'in' as record_type, sirc.record_id, sirc.iccid, sirc.created_at,
+                   sirc.test_expire_date, sirc.silent_expire_date,
+                   sirc.supplier_name, sirc.base_package_name,
+                   u.name as operator_name
+            FROM stock_in_record_cards sirc
+            LEFT JOIN stock_in_records sir ON sirc.record_id = sir.id
+            LEFT JOIN sys_users u ON sir.operator_id = u.id
+            WHERE sirc.iccid = :iccid
+        """)
+        in_result = await db.execute(in_query, {"iccid": iccid})
+        in_records = in_result.fetchall()
+
+        # 查询出库记录
+        out_query = text("""
+            SELECT 'out' as record_type, sorc.record_id, sorc.iccid, sorc.created_at,
+                   sorc.test_expire_date, sorc.silent_expire_date,
+                   sorc.supplier_name, sorc.base_package_name,
+                   sorc.sale_package_name, sorc.target_user_name,
+                   u.name as operator_name
+            FROM stock_out_record_cards sorc
+            LEFT JOIN stock_out_records sor ON sorc.record_id = sor.id
+            LEFT JOIN sys_users u ON sor.operator_id = u.id
+            WHERE sorc.iccid = :iccid
+        """)
+        out_result = await db.execute(out_query, {"iccid": iccid})
+        out_records = out_result.fetchall()
+
+        # 合并记录
+        records = []
+        for row in in_records:
+            records.append({
+                "record_type": "in",
+                "record_id": row.record_id,
+                "iccid": row.iccid,
+                "operator": row.operator_name,
+                "created_at": row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row.created_at else None,
+                "test_expire_date": row.test_expire_date.strftime("%Y-%m-%d") if row.test_expire_date else None,
+                "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
+                "supplier_name": row.supplier_name,
+                "base_package_name": row.base_package_name,
+                "sale_package_name": None,
+                "target_user_name": None
+            })
+
+        for row in out_records:
+            records.append({
+                "record_type": "out",
+                "record_id": row.record_id,
+                "iccid": row.iccid,
+                "operator": row.operator_name,
+                "created_at": row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row.created_at else None,
+                "test_expire_date": row.test_expire_date.strftime("%Y-%m-%d") if row.test_expire_date else None,
+                "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
+                "supplier_name": row.supplier_name,
+                "base_package_name": row.base_package_name,
+                "sale_package_name": row.sale_package_name,
+                "target_user_name": row.target_user_name
+            })
+
+        # 按时间倒序排序
+        records.sort(key=lambda x: x["created_at"] or "", reverse=True)
+        return records
+
+
+card_stock_record_crud = CardStockRecordCRUD()
 stock_recycle_crud = StockRecycleCRUD()

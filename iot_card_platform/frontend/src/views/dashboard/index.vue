@@ -68,6 +68,8 @@
         <stat-card label="中国移动" :value="formatNumber(getCarrierCount('cmcc'))" :icon="Phone" icon-color="#1890ff" icon-bg="#e6f7ff" extra="CMCC" clickable @click="router.push('/cards/list?carrier=cmcc')" />
         <stat-card label="中国联通" :value="formatNumber(getCarrierCount('cucc'))" :icon="Phone" icon-color="#ff4d4f" icon-bg="#fff1f0" extra="CUCC" clickable @click="router.push('/cards/list?carrier=cucc')" />
         <stat-card label="中国电信" :value="formatNumber(getCarrierCount('ctcc'))" :icon="Phone" icon-color="#52c41a" icon-bg="#f6ffed" extra="CTCC" clickable @click="router.push('/cards/list?carrier=ctcc')" />
+        <stat-card label="本月到期卡" :value="formatNumber(overview?.cards?.expiring_count || 0)" :icon="Clock" icon-color="#fa8c16" icon-bg="#fff7e6" extra="即将到期" clickable @click="router.push('/cards/list?expiring=true')" />
+        <stat-card label="超量卡" :value="formatNumber(overview?.cards?.over_usage_count || 0)" :icon="WarningFilled" icon-color="#ff4d4f" icon-bg="#fff1f0" extra="超套餐用量" clickable @click="router.push('/cards/list?over_usage=true')" />
       </div>
     </div>
 
@@ -130,6 +132,8 @@ const userInfo = computed(() => authStore.userInfo)
 const overview = ref<{
   cards: {
     total: number
+    expiring_count: number
+    over_usage_count: number
     by_status: Array<{
       status: string
       status_name: string

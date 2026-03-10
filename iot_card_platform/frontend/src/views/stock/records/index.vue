@@ -160,6 +160,45 @@
             />
           </div>
         </el-tab-pane>
+
+        <!-- 按卡号查询 -->
+        <el-tab-pane label="按卡号查询" name="card">
+          <div class="records-section">
+            <el-form :inline="true" class="search-form">
+              <el-form-item label="卡号">
+                <el-input
+                  v-model="cardIccid"
+                  placeholder="输入ICCID查询"
+                  clearable
+                  style="width: 250px"
+                  @keyup.enter="handleQueryCard"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="handleQueryCard">查询</el-button>
+              </el-form-item>
+            </el-form>
+
+            <el-table :data="cardRecords" v-loading="cardLoading" border stripe>
+              <el-table-column prop="record_type" label="类型" width="80">
+                <template #default="{ row }">
+                  <el-tag :type="row.record_type === 'in' ? 'success' : 'warning'">
+                    {{ row.record_type === 'in' ? '入库' : '出库' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="iccid" label="ICCID" width="180" />
+              <el-table-column prop="supplier_name" label="供应商" width="120" />
+              <el-table-column prop="base_package_name" label="底层套餐" width="150" />
+              <el-table-column prop="sale_package_name" label="销售套餐" width="150" />
+              <el-table-column prop="target_user_name" label="目标用户" width="120" />
+              <el-table-column prop="test_expire_date" label="测试期" width="110" />
+              <el-table-column prop="silent_expire_date" label="沉默期" width="110" />
+              <el-table-column prop="operator" label="操作人" width="100" />
+              <el-table-column prop="created_at" label="操作时间" width="160" />
+            </el-table>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
 
@@ -281,6 +320,11 @@ const outRecords = ref([])
 const outTotal = ref(0)
 const outLoading = ref(false)
 
+// 按卡号查询
+const cardIccid = ref('')
+const cardRecords = ref([])
+const cardLoading = ref(false)
+
 // 供应商、用户列表
 const suppliers = ref([])
 const users = ref([])
@@ -394,6 +438,23 @@ const handleResetOut = () => {
   outDateRange.value = []
   outParams.page = 1
   handleQueryOut()
+}
+
+// 按卡号查询
+const handleQueryCard = async () => {
+  if (!cardIccid.value.trim()) {
+    ElMessage.warning('请输入ICCID')
+    return
+  }
+  cardLoading.value = true
+  try {
+    const res = await stockApi.getCardStockRecords(cardIccid.value.trim())
+    cardRecords.value = res.records || []
+  } catch (error: any) {
+    ElMessage.error(error.message || '查询失败')
+  } finally {
+    cardLoading.value = false
+  }
 }
 
 // 导出出库记录

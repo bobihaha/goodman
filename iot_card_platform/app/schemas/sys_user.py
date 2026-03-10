@@ -19,10 +19,15 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=6, max_length=50)
     phone: Optional[str] = Field(None, pattern=r"^1[3-9]\d{9}$")
     email: Optional[str] = Field(None, max_length=100)
-    alert_notify: Optional[Dict[str, Any]] = Field(default={"sms": False, "email": False})
-    quota: Optional[Dict[str, Any]] = Field(default={"max_cards": 100, "max_sub_users": 5})
+    alert_notify: Optional[Dict[str, Any]] = Field(default={"sms": True, "email": True})
+    quota: Optional[Dict[str, Any]] = Field(default={"max_cards": 100, "max_sub_users": 5, "pool_stop_threshold": 100})
     remark: Optional[str] = Field(None, max_length=500)
     status: UserStatus = Field(default=UserStatus.enable)
+
+    @field_validator("phone", "email", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        return None if v == "" else v
 
 
 class UserUpdate(BaseModel):

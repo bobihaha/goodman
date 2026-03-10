@@ -48,12 +48,13 @@ class SysLoginLogModel(BaseModel):
     user_agent = Column(String(500), nullable=True, comment="User-Agent")
 
     def to_dict(self):
+        login_type_value = self.login_type.value if self.login_type else None
         return {
             "id": self.id,
             "user_id": self.user_id,
             "account": self.account,
-            "login_type": self.login_type.value if self.login_type else None,
-            "login_type_name": LOGIN_TYPE_NAMES.get(self.login_type.value, "") if self.login_type else "",
+            "login_type": login_type_value,
+            "login_type_name": LOGIN_TYPE_NAMES.get(login_type_value, "普通登录") if login_type_value else "普通登录",
             "operator_id": self.operator_id,
             "is_success": self.is_success == 1,
             "fail_reason": self.fail_reason,
@@ -69,6 +70,7 @@ class SysOperationLogModel(BaseModel):
 
     user_id = Column(BigInteger, nullable=True, index=True, comment="用户ID")
     user_name = Column(String(50), nullable=True, comment="用户名称")
+    original_user_id = Column(BigInteger, nullable=True, index=True, comment="原始用户ID(超级登录时)")
     module = Column(String(50), nullable=False, comment="操作模块")
     action = Column(String(50), nullable=False, comment="操作动作")
     target_type = Column(String(50), nullable=True, comment="目标类型")
@@ -84,6 +86,7 @@ class SysOperationLogModel(BaseModel):
             "id": self.id,
             "user_id": self.user_id,
             "user_name": self.user_name,
+            "original_user_id": self.original_user_id,
             "module": self.module,
             "action": self.action,
             "target_type": self.target_type,

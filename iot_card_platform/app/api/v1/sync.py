@@ -79,7 +79,8 @@ async def sync_single_card(
     result = await sync_service.sync_single_card(
         db=db,
         iccid=iccid,
-        triggered_by=current_user.id
+        triggered_by=current_user.id,
+        current_user=current_user
     )
     return ResponseModel(data=result, msg="同步成功")
 

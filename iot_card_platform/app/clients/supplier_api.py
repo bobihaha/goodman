@@ -11,11 +11,11 @@ from datetime import datetime
 class SupplierAPIClient(ABC):
     """供应商API客户端抽象基类"""
 
-    def __init__(self, api_url: str, api_key: str, api_secret: str):
+    def __init__(self, api_url: str, api_key: str, api_secret: str, timeout: float = 30.0):
         self.api_url = api_url
         self.api_key = api_key
         self.api_secret = api_secret
-        self.timeout = 30.0
+        self.timeout = timeout
 
     @abstractmethod
     async def get_card_usage(self, iccid: str) -> Dict[str, Any]:

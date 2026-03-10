@@ -170,13 +170,13 @@ const formData = reactive<UserCreateRequest>({
   phone: '',
   email: '',
   alert_notify: {
-    sms: false,
-    email: false
+    sms: true,
+    email: true
   },
   quota: {
     max_cards: 100,
     max_sub_users: 5,
-    pool_stop_threshold: undefined as number | undefined
+    pool_stop_threshold: 100
   },
   remark: '',
   status: 'enable'
@@ -218,8 +218,8 @@ const initFormData = () => {
     formData.account = props.user.account
     formData.phone = props.user.phone || ''
     formData.email = props.user.email || ''
-    formData.alert_notify = props.user.alert_notify || { sms: false, email: false }
-    formData.quota = props.user.quota || { max_cards: 100, max_sub_users: 5, pool_stop_threshold: undefined }
+    formData.alert_notify = props.user.alert_notify || { sms: true, email: true }
+    formData.quota = props.user.quota || { max_cards: 100, max_sub_users: 5, pool_stop_threshold: 100 }
     formData.remark = props.user.remark || ''
     formData.status = props.user.status
   } else {
@@ -229,8 +229,8 @@ const initFormData = () => {
     formData.password = ''
     formData.phone = ''
     formData.email = ''
-    formData.alert_notify = { sms: false, email: false }
-    formData.quota = { max_cards: 100, max_sub_users: 5, pool_stop_threshold: undefined }
+    formData.alert_notify = { sms: true, email: true }
+    formData.quota = { max_cards: 100, max_sub_users: 5, pool_stop_threshold: 100 }
     formData.remark = ''
     formData.status = 'enable'
   }

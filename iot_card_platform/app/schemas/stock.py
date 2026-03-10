@@ -290,4 +290,30 @@ class ExcelStockOutResult(BaseModel):
     total: int
     success: int
     failed: int
+
+
+# ============ 按卡号查询出入库记录 ============
+
+class CardStockRecordItem(BaseModel):
+    """卡片出入库记录项"""
+    record_type: str = Field(..., description="记录类型: in/out")
+    record_id: int = Field(..., description="记录ID")
+    iccid: str = Field(..., description="ICCID")
+    operator: Optional[str] = Field(None, description="操作人")
+    created_at: datetime = Field(..., description="创建时间")
+    test_expire_date: Optional[date] = Field(None, description="测试期到期日")
+    silent_expire_date: Optional[date] = Field(None, description="沉默期到期日")
+    supplier_name: Optional[str] = Field(None, description="供应商")
+    base_package_name: Optional[str] = Field(None, description="底层套餐")
+    sale_package_name: Optional[str] = Field(None, description="销售套餐")
+    target_user_name: Optional[str] = Field(None, description="目标用户")
+    carrier: Optional[str] = Field(None, description="运营商")
+    flow_size: Optional[int] = Field(None, description="流量大小MB")
+    period_type: Optional[str] = Field(None, description="周期类型")
+
+
+class CardStockRecordResponse(BaseModel):
+    """卡片出入库记录响应"""
+    total: int = Field(..., description="总记录数")
+    records: List[CardStockRecordItem] = Field(..., description="记录列表")
     fail_details: Optional[List[dict]] = None

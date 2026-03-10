@@ -39,8 +39,8 @@ class CRUDBaseEnhanced(Generic[ModelType]):
         *, 
         skip: int = 0, 
         limit: int = 100,
-        filters: Optional[List] = None,
-        order_by: Optional = None
+        filters: Optional[List[Any]] = None,
+        order_by: Optional[Any] = None
     ) -> List[ModelType]:
         """获取多条记录"""
         try:
@@ -63,8 +63,8 @@ class CRUDBaseEnhanced(Generic[ModelType]):
         *,
         page: int = 1,
         page_size: int = 20,
-        filters: Optional[List] = None,
-        order_by: Optional = None,
+        filters: Optional[List[Any]] = None,
+        order_by: Optional[Any] = None,
         search_fields: Optional[List[str]] = None,
         search_keyword: Optional[str] = None
     ) -> Tuple[List[ModelType], int]:

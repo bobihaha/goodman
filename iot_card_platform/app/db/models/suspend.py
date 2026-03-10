@@ -166,7 +166,7 @@ class AlertLogModel(BaseModel):
     target_type = Column(Enum(AlertTargetType), nullable=False, comment="目标类型: card/pool")
     target_id = Column(BigInteger, nullable=False, index=True, comment="目标ID(卡片ID或流量池ID)")
     target_name = Column(String(100), nullable=True, comment="目标名称/ICCID")
-    
+
     # 告警信息
     alert_level = Column(Enum(AlertLevel), nullable=False, comment="告警级别")
     usage_percent = Column(Integer, nullable=False, comment="当前用量百分比")

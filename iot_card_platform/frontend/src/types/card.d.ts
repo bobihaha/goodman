@@ -68,6 +68,7 @@ export interface CardListParams {
   user_id?: number
   pool_id?: number
   is_pool_member?: boolean
+  over_usage?: boolean
   keyword?: string
   // 高级搜索
   remark?: string
@@ -136,4 +137,18 @@ export interface CardExportParams {
   carrier?: Carrier
   status?: CardStatus
   user_id?: number
+}
+
+// 用量历史记录
+export interface UsageHistory {
+  id: number
+  card_id: number
+  iccid: string
+  data_used: number
+  data_total: number
+  period_type: string
+  snapshot_date: string
+  snapshot_type: string
+  snapshot_month: string
+  created_at: string
 }

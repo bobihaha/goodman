@@ -1,10 +1,14 @@
 """
 数据库连接配置
 """
+import logging
+from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(
     settings.db_url,
@@ -13,7 +17,7 @@ engine = create_async_engine(
 )
 
 AsyncSessionLocal = sessionmaker(
-    bind=engine,
+    engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
@@ -21,11 +25,12 @@ AsyncSessionLocal = sessionmaker(
 )
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except Exception as e:
+            logger.error(f"Database transaction failed: {str(e)}", exc_info=True)
             await session.rollback()
-            raise e
+            raise

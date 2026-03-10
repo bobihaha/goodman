@@ -74,40 +74,39 @@ class PoolService:
             page=page,
             page_size=page_size
         )
-        
-        # 为每个流量池添加卡片统计信息
-        result = []
-        for pool in items:
-            # 查询该流量池的卡片状态统计
-            from sqlalchemy import func
+
+        # 批量查询所有流量池的卡片统计（避免N+1）
+        from sqlalchemy import func
+        pool_ids = [p.id for p in items]
+        if pool_ids:
             stmt = select(
+                IotCardModel.pool_id,
                 IotCardModel.status,
                 func.count(IotCardModel.id).label('count')
             ).where(
-                IotCardModel.pool_id == pool.id,
+                IotCardModel.pool_id.in_(pool_ids),
                 IotCardModel.is_deleted == 0
-            ).group_by(IotCardModel.status)
-            
+            ).group_by(IotCardModel.pool_id, IotCardModel.status)
+
             card_stats_result = await db.execute(stmt)
-            card_stats_rows = card_stats_result.fetchall()
-            
-            # 构建卡片统计字典
-            card_stats = {
-                "activated": 0,
-                "suspended": 0,
-                "stock": 0,
-                "testing": 0,
-                "cancelled": 0,
-                "silent": 0,
-                "expired": 0
-            }
-            
-            for row in card_stats_rows:
-                status_value = row[0].value if hasattr(row[0], 'value') else row[0]
-                count = row[1]
-                if status_value in card_stats:
-                    card_stats[status_value] = count
-            
+            # 构建统计字典 {pool_id: {status: count}}
+            pool_stats_map = {}
+            for row in card_stats_result.fetchall():
+                pool_id = row[0]
+                status_value = row[1].value if hasattr(row[1], 'value') else row[1]
+                count = row[2]
+                if pool_id not in pool_stats_map:
+                    pool_stats_map[pool_id] = {"activated": 0, "suspended": 0, "stock": 0, "testing": 0, "cancelled": 0, "silent": 0, "expired": 0}
+                if status_value in pool_stats_map[pool_id]:
+                    pool_stats_map[pool_id][status_value] = count
+        else:
+            pool_stats_map = {}
+
+        # 为每个流量池添加卡片统计信息
+        result = []
+        for pool in items:
+            card_stats = pool_stats_map.get(pool.id, {"activated": 0, "suspended": 0, "stock": 0, "testing": 0, "cancelled": 0, "silent": 0, "expired": 0})
+
             # 转换为字典并添加卡片统计
             pool_dict = pool.to_dict(include_card_stats=True, card_stats=card_stats)
             # 添加关联信息
@@ -118,23 +117,29 @@ class PoolService:
 
     async def _enrich_pool_dict(self, db: AsyncSession, pool: TrafficPoolModel, pool_dict: dict) -> None:
         """为流量池字典添加 user_name 和 sale_package_name"""
-        from sqlalchemy import text
+        from sqlalchemy import select
+        from app.db.models.sys_user import SysUserModel
+        from app.db.models.package import SalePackageModel
 
         # 获取 user_name
         if pool.user_id:
-            user_q = text("SELECT name FROM sys_users WHERE id = :uid AND is_deleted = 0")
-            user_r = await db.execute(user_q, {"uid": pool.user_id})
-            row = user_r.fetchone()
-            pool_dict["user_name"] = row.name if row else None
+            user_stmt = select(SysUserModel.name).where(
+                SysUserModel.id == pool.user_id,
+                SysUserModel.is_deleted == 0
+            )
+            user_r = await db.execute(user_stmt)
+            pool_dict["user_name"] = user_r.scalar_one_or_none()
         else:
             pool_dict["user_name"] = None
 
         # 获取 sale_package_name
         if pool.sale_package_id:
-            pkg_q = text("SELECT name FROM sale_packages WHERE id = :pid AND is_deleted = 0")
-            pkg_r = await db.execute(pkg_q, {"pid": pool.sale_package_id})
-            row = pkg_r.fetchone()
-            pool_dict["sale_package_name"] = row.name if row else None
+            pkg_stmt = select(SalePackageModel.name).where(
+                SalePackageModel.id == pool.sale_package_id,
+                SalePackageModel.is_deleted == 0
+            )
+            pkg_r = await db.execute(pkg_stmt)
+            pool_dict["sale_package_name"] = pkg_r.scalar_one_or_none()
         else:
             pool_dict["sale_package_name"] = None
 
@@ -172,6 +177,10 @@ class PoolService:
         remark: Optional[str] = None
     ) -> dict:
         """添加卡片到流量池"""
+        MAX_BATCH_SIZE = 10000
+        if len(card_ids) > MAX_BATCH_SIZE:
+            raise BusinessException(code=400, msg=f"单次最多操作{MAX_BATCH_SIZE}张卡片")
+
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
             raise BusinessException(code=404, msg="流量池不存在")
@@ -203,6 +212,10 @@ class PoolService:
         remark: Optional[str] = None
     ) -> dict:
         """从流量池移除卡片"""
+        MAX_BATCH_SIZE = 10000
+        if len(card_ids) > MAX_BATCH_SIZE:
+            raise BusinessException(code=400, msg=f"单次最多操作{MAX_BATCH_SIZE}张卡片")
+
         pool = await pool_crud.get_by_id(db, pool_id)
         if not pool:
             raise BusinessException(code=404, msg="流量池不存在")

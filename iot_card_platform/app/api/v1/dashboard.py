@@ -151,172 +151,33 @@ async def get_pools_usage_percent(
 
 @router.get("/cards/expiring", summary="本月到期卡")
 async def get_expiring_cards(
+    carrier: Optional[str] = Query(None, description="运营商筛选"),
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     """获取本月到期卡明细"""
+    if carrier and carrier not in ['cmcc', 'cucc', 'ctcc']:
+        raise HTTPException(status_code=400, detail="无效的运营商参数")
+
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_expiring_cards(db, user_id)
+
+    cards = await DashboardService.get_expiring_cards(db, user_id, carrier)
     return ResponseModel(data=cards)
 
 
 @router.get("/cards/over-usage", summary="超量卡")
 async def get_over_usage_cards(
+    carrier: Optional[str] = Query(None, description="运营商筛选"),
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     """获取超量卡明细"""
+    if carrier and carrier not in ['cmcc', 'cucc', 'ctcc']:
+        raise HTTPException(status_code=400, detail="无效的运营商参数")
+
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_over_usage_cards(db, user_id)
-    return ResponseModel(data=cards)
 
-
-@router.get("/account/balance", summary="账户余额")
-async def get_account_balance(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取账户余额信息"""
-    balance = await DashboardService.get_account_balance(db, current_user.id)
-    return ResponseModel(data=balance)
-
-
-@router.get("/pools/usage-percent", summary="流量池用量百分比")
-async def get_pools_usage_percent(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取流量池用量百分比"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    pools = await DashboardService.get_pools_usage_percent(db, user_id)
-    return ResponseModel(data=pools)
-
-
-@router.get("/cards/expiring", summary="本月到期卡")
-async def get_expiring_cards(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取本月到期卡明细"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_expiring_cards(db, user_id)
-    return ResponseModel(data=cards)
-
-
-@router.get("/cards/over-usage", summary="超量卡")
-async def get_over_usage_cards(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取超量卡明细"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_over_usage_cards(db, user_id)
-    return ResponseModel(data=cards)
-
-
-@router.get("/account/balance", summary="账户余额")
-async def get_account_balance(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取账户余额信息"""
-    balance = await DashboardService.get_account_balance(db, current_user.id)
-    return ResponseModel(data=balance)
-
-
-@router.get("/pools/usage-percent", summary="流量池用量百分比")
-async def get_pools_usage_percent(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取流量池用量百分比"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    pools = await DashboardService.get_pools_usage_percent(db, user_id)
-    return ResponseModel(data=pools)
-
-
-@router.get("/cards/expiring", summary="本月到期卡")
-async def get_expiring_cards(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取本月到期卡明细"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_expiring_cards(db, user_id)
-    return ResponseModel(data=cards)
-
-
-@router.get("/cards/over-usage", summary="超量卡")
-async def get_over_usage_cards(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取超量卡明细"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_over_usage_cards(db, user_id)
-    return ResponseModel(data=cards)
-
-
-@router.get("/account/balance", summary="账户余额")
-async def get_account_balance(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取账户余额信息"""
-    balance = await DashboardService.get_account_balance(db, current_user.id)
-    return ResponseModel(data=balance)
-
-
-@router.get("/pools/usage-percent", summary="流量池用量百分比")
-async def get_pools_usage_percent(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取流量池用量百分比"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    pools = await DashboardService.get_pools_usage_percent(db, user_id)
-    return ResponseModel(data=pools)
-
-
-@router.get("/cards/expiring", summary="本月到期卡")
-async def get_expiring_cards(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取本月到期卡明细"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_expiring_cards(db, user_id)
-    return ResponseModel(data=cards)
-
-
-@router.get("/cards/over-usage", summary="超量卡")
-async def get_over_usage_cards(
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """获取超量卡明细"""
-    is_admin = current_user.user_level == 1
-    user_id = None if is_admin else current_user.id
-    
-    cards = await DashboardService.get_over_usage_cards(db, user_id)
+    cards = await DashboardService.get_over_usage_cards(db, user_id, carrier)
     return ResponseModel(data=cards)

@@ -162,16 +162,21 @@ class TrafficPoolCRUD:
             return
 
         # 查询用户的 quota 配置获取 pool_stop_threshold
-        from sqlalchemy import text
-        user_query = text("SELECT quota FROM sys_users WHERE id = :user_id AND is_deleted = 0")
-        user_result = await db.execute(user_query, {"user_id": pool.user_id})
-        user_row = user_result.fetchone()
+        from sqlalchemy import select
+        from app.db.models.sys_user import SysUserModel
 
-        if not user_row or not user_row.quota:
+        user_stmt = select(SysUserModel.quota).where(
+            SysUserModel.id == pool.user_id,
+            SysUserModel.is_deleted == 0
+        )
+        user_result = await db.execute(user_stmt)
+        quota_data = user_result.scalar_one_or_none()
+
+        if not quota_data:
             return
 
         import json
-        quota = user_row.quota if isinstance(user_row.quota, dict) else json.loads(user_row.quota)
+        quota = quota_data if isinstance(quota_data, dict) else json.loads(quota_data)
         pool_stop_threshold = quota.get("pool_stop_threshold")
 
         if pool_stop_threshold is None:

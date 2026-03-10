@@ -29,6 +29,7 @@ async def get_cards(
     card_type: Optional[str] = Query(None, description="卡片类型: single/pool"),
     pool_id: Optional[int] = Query(None, description="流量池ID"),
     is_pool_member: Optional[bool] = Query(None, description="是否加入流量池"),
+    over_usage: Optional[bool] = Query(None, description="是否超量"),
     remark: Optional[str] = Query(None, description="备注关键词"),
     customer_id: Optional[int] = Query(None, description="关联客户ID"),
     batch_id: Optional[int] = Query(None, description="出库单号/批次ID"),
@@ -57,6 +58,7 @@ async def get_cards(
         card_type=card_type,
         pool_id=pool_id,
         is_pool_member=is_pool_member,
+        over_usage=over_usage,
         remark=remark,
         customer_id=customer_id,
         batch_id=batch_id,
@@ -1166,3 +1168,43 @@ async def get_card_transfers(
         page=page, page_size=page_size
     )
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
+
+
+@router.get("/{card_id}/usage-history", summary="获取卡片用量历史")
+async def get_card_usage_history(
+    card_id: int,
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单卡用量历史记录"""
+    data = await iot_card_service.get_card_usage_history(
+        db=db,
+        card_id=card_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        start_date=start_date,
+        end_date=end_date
+    )
+    return ResponseModel(data=data)
+
+
+@router.post("/export-history", summary="导出卡片历史用量")
+async def export_cards_history(
+    card_ids: List[int] = Body(..., description="卡片ID列表"),
+    start_date: Optional[str] = Body(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Body(None, description="结束日期 YYYY-MM-DD"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """导出卡片历史用量数据"""
+    data = await iot_card_service.export_cards_with_history(
+        db=db,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        card_ids=card_ids,
+        start_date=start_date,
+        end_date=end_date
+    )
+    return ResponseModel(data=data)

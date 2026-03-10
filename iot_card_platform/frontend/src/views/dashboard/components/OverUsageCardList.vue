@@ -51,11 +51,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dashboardApi, type OverUsageCard } from '@/api'
 import { formatCarrier, formatFlowSize, formatPercent } from '@/utils/formatter'
+
+const props = defineProps<{
+  carrier?: string
+}>()
 
 const router = useRouter()
 const loading = ref(false)
@@ -65,13 +69,18 @@ const overUsageCards = ref<OverUsageCard[]>([])
 const fetchOverUsageCards = async () => {
   loading.value = true
   try {
-    overUsageCards.value = await dashboardApi.getOverUsageCards()
+    overUsageCards.value = await dashboardApi.getOverUsageCards(props.carrier)
   } catch (error) {
     console.error('获取超量卡明细失败:', error)
   } finally {
     loading.value = false
   }
 }
+
+// 监听 carrier 变化
+watch(() => props.carrier, () => {
+  fetchOverUsageCards()
+})
 
 // 停机
 const handleSuspend = (card: OverUsageCard) => {
@@ -85,7 +94,7 @@ const handleRecharge = (card: OverUsageCard) => {
 
 // 查看全部
 const handleViewAll = () => {
-  router.push('/cards/list')
+  router.push({ path: '/cards/list', query: { over_usage: 'true' } })
 }
 
 onMounted(() => {

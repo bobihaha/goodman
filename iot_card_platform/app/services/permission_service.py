@@ -95,21 +95,27 @@ class PermissionService:
     async def delete_permission(self, db: AsyncSession, permission_id: int) -> bool:
         """删除权限"""
         # 检查是否有用户使用此权限
-        # TODO: 可以添加检查逻辑
-        
+        user_count = await user_permission_crud.count_users_with_permission(db, permission_id)
+        if user_count > 0:
+            raise BusinessException(code=400, msg=f"该权限被{user_count}个用户使用，无法删除")
+
         success = await permission_crud.delete(db, permission_id)
         if not success:
             raise BusinessException(code=404, msg="权限不存在")
         return True
 
-    async def assign_user_permissions(self, db: AsyncSession, user_id: int, 
+    async def assign_user_permissions(self, db: AsyncSession, user_id: int,
                                      permission_ids: List[int]) -> dict:
         """为用户分配权限"""
-        # 验证所有权限ID是否有效
-        for permission_id in permission_ids:
-            permission = await permission_crud.get_by_id(db, permission_id)
-            if not permission:
-                raise BusinessException(code=400, msg=f"权限ID {permission_id} 不存在")
+        # 批量验证所有权限ID是否有效
+        from sqlalchemy import select
+        from app.db.models.permission import PermissionModel
+
+        stmt = select(PermissionModel.id).where(PermissionModel.id.in_(permission_ids))
+        valid_ids = set((await db.execute(stmt)).scalars().all())
+        invalid = set(permission_ids) - valid_ids
+        if invalid:
+            raise BusinessException(code=400, msg=f"权限ID不存在: {invalid}")
 
         count = await user_permission_crud.assign_permissions(db, user_id, permission_ids)
         return {

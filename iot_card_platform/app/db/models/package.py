@@ -2,7 +2,7 @@
 套餐模型
 规格三要素: 运营商 + 流量 + 周期类型
 """
-from sqlalchemy import Column, String, Enum, BigInteger, Integer, DECIMAL
+from sqlalchemy import Column, String, Enum, BigInteger, Integer, DECIMAL, UniqueConstraint
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel
 
@@ -46,12 +46,15 @@ class SupplierPackageModel(BaseModel):
     定义套餐规格：运营商 + 流量 + 周期类型
     """
     __tablename__ = "supplier_packages"
+    __table_args__ = (
+        UniqueConstraint('supplier_id', 'carrier', 'flow_size', 'period_type', name='uq_supplier_spec'),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="套餐ID")
     supplier_id = Column(BigInteger, nullable=False, index=True, comment="供应商ID")
     name = Column(String(100), nullable=False, comment="套餐名称")
     code = Column(String(50), nullable=False, unique=True, comment="套餐编码")
-    
+
     # 规格三要素
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
     flow_size = Column(BigInteger, nullable=False, comment="流量大小(MB)")
@@ -64,7 +67,7 @@ class SupplierPackageModel(BaseModel):
     
     # 价格
     price_cost = Column(DECIMAL(10, 2), nullable=False, comment="成本价(元)")
-    
+
     remark = Column(String(500), nullable=True, comment="备注")
     status = Column(Enum(PackageStatus), default=PackageStatus.enable, comment="状态")
     created_by = Column(BigInteger, nullable=True, comment="创建人ID")
@@ -119,31 +122,34 @@ class SalePackageModel(BaseModel):
     继承底层套餐规格，添加销售价格
     """
     __tablename__ = "sale_packages"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'carrier', 'flow_size', 'period_type', name='uq_sale_spec'),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="套餐ID")
     user_id = Column(BigInteger, nullable=True, index=True, comment="所属用户ID(NULL=平台套餐)")
     base_package_id = Column(BigInteger, nullable=True, index=True, comment="关联底层套餐ID")
     name = Column(String(100), nullable=False, comment="套餐名称")
     code = Column(String(50), nullable=False, unique=True, comment="套餐编码")
-    
+
     # 规格三要素
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
     flow_size = Column(BigInteger, nullable=False, comment="流量大小(MB)")
     period_type = Column(Enum(PeriodType), default=PeriodType.monthly, comment="周期类型")
-    
+
     # 有效期配置
     effective_days = Column(Integer, nullable=True, comment="[已废弃]激活后有效天数")
     period_months = Column(Integer, nullable=True, comment="套餐周期(月) - 月包使用")
     period_days = Column(Integer, nullable=True, comment="套餐周期(天) - 年包使用")
-    
+
     # 价格
     price_cost = Column(DECIMAL(10, 2), nullable=False, comment="成本价(元)")
     price_sale = Column(DECIMAL(10, 2), nullable=False, comment="销售价(元)")
-    
+
     # 展示配置
     is_public = Column(Integer, default=0, comment="是否公开(子用户可见)")
     sort_order = Column(Integer, default=0, comment="排序")
-    
+
     remark = Column(String(500), nullable=True, comment="备注")
     status = Column(Enum(PackageStatus), default=PackageStatus.enable, comment="状态")
     created_by = Column(BigInteger, nullable=True, comment="创建人ID")

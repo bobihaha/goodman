@@ -56,7 +56,7 @@ class UserCrud:
             phone=user_data.phone,
             email=user_data.email,
             password=hashed_password,
-            status=UserStatus.enable,
+            status=UserStatus.ENABLE,
             company=user_data.company
         )
         db.add(user)

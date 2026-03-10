@@ -155,7 +155,12 @@ class SuspendActionService:
                 except Exception as e:
                     logger.error(f"供应商API停机失败: iccid={card.iccid}, error={e}")
 
-            # 执行停卡（即使API失败也更新数据库）
+            # 只有API成功才更新数据库
+            if not api_success:
+                fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "供应商API调用失败"})
+                continue
+
+            # 执行停卡
             await CardSuspendCRUD.suspend_card(
                 db=db,
                 card_id=card_id,
@@ -243,7 +248,12 @@ class SuspendActionService:
                 except Exception as e:
                     logger.error(f"供应商API复机失败: iccid={card.iccid}, error={e}")
 
-            # 执行复机（即使API失败也更新数据库）
+            # 只有API成功才更新数据库
+            if not api_success:
+                fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "供应商API调用失败"})
+                continue
+
+            # 执行复机
             old_suspend_type = card.suspend_type.value if card.suspend_type else "manual"
             await CardSuspendCRUD.resume_card(db=db, card_id=card_id)
 
