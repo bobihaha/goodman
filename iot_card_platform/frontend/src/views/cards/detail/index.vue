@@ -375,10 +375,12 @@ const fetchTransfers = async () => {
       transferPagination.value.page,
       transferPagination.value.page_size
     )
-    transferList.value = response.list
-    transferPagination.value.total = response.total
+    transferList.value = response?.items || response?.list || []
+    transferPagination.value.total = response?.total || 0
   } catch (error) {
     console.error('获取划拨记录失败:', error)
+    transferList.value = []
+    transferPagination.value.total = 0
   } finally {
     transferLoading.value = false
   }
@@ -390,11 +392,13 @@ const fetchUsageHistory = async () => {
   try {
     const startDate = historyDateRange.value?.[0] ? formatDateToString(historyDateRange.value[0]) : undefined
     const endDate = historyDateRange.value?.[1] ? formatDateToString(historyDateRange.value[1]) : undefined
-    historyList.value = await cardApi.getUsageHistory(cardId.value, startDate, endDate)
+    const response = await cardApi.getUsageHistory(cardId.value, startDate, endDate)
+    historyList.value = Array.isArray(response) ? response : []
     await nextTick()
     renderChart()
   } catch (error) {
     console.error('获取历史用量失败:', error)
+    historyList.value = []
   } finally {
     historyLoading.value = false
   }
@@ -609,7 +613,6 @@ onMounted(() => {
   }
 }
 </style>
-
 
 
 

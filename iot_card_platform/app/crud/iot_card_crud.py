@@ -75,6 +75,7 @@ class IotCardCRUD:
                 # 后6位精确查询
                 keyword_filter = or_(
                     IotCardModel.iccid_suffix == keyword,
+                    func.right(IotCardModel.iccid, 6) == keyword,
                     IotCardModel.msisdn.like(f"%{keyword}")
                 )
             else:
@@ -209,6 +210,7 @@ class IotCardCRUD:
             query = query.where(
                 or_(
                     IotCardModel.iccid_suffix == keyword,
+                    func.right(IotCardModel.iccid, 6) == keyword,
                     IotCardModel.msisdn.like(f"%{keyword}")
                 )
             )

@@ -115,7 +115,7 @@
               <el-input v-model="manualForm.imsi" placeholder="请输入IMSI（15位数字）" maxlength="15" />
             </el-form-item>
             <el-form-item label="电话号码" required>
-              <el-input v-model="manualForm.msisdn" placeholder="请输入电话号码（13-15位数字）" maxlength="15" />
+              <el-input v-model="manualForm.msisdn" placeholder="请输入电话号码（1-20位数字）" maxlength="20" />
             </el-form-item>
             <el-form-item>
               <el-button @click="handleAddCard">添加到列表</el-button>
@@ -333,6 +333,11 @@ const prevStep = () => {
   }
 }
 
+const normalizeExcelCell = (value: unknown) => {
+  const text = String(value ?? '').trim()
+  return text.replace(/\.0+$/, '')
+}
+
 // 处理文件变化
 const handleFileChange = (file: any) => {
   const reader = new FileReader()
@@ -341,16 +346,30 @@ const handleFileChange = (file: any) => {
       const data = new Uint8Array(e.target.result)
       const workbook = XLSX.read(data, { type: 'array' })
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-      const jsonData = XLSX.utils.sheet_to_json(firstSheet)
+      const rows = XLSX.utils.sheet_to_json(firstSheet, {
+        header: 1,
+        raw: false,
+        defval: ''
+      }) as any[][]
       
       // 解析数据
       const cards: any[] = []
       const errors: string[] = []
-      
-      jsonData.forEach((row: any, index: number) => {
-        const iccid = String(row.ICCID || row.iccid || '').trim()
-        const imsi = String(row.IMSI || row.imsi || '').trim()
-        const msisdn = String(row.MSISDN || row.msisdn || row['电话号码'] || '').trim()
+
+      if (rows.length <= 1) {
+        ElMessage.warning('未找到有效的卡片数据')
+        return
+      }
+
+      rows.slice(1).forEach((row: any[], index: number) => {
+        const iccid = normalizeExcelCell(row?.[0])
+        const imsi = normalizeExcelCell(row?.[1])
+        const msisdn = normalizeExcelCell(row?.[2])
+
+        // 跳过完全空白行
+        if (!iccid && !imsi && !msisdn) {
+          return
+        }
         
         // 验证必填字段
         if (!iccid) {
@@ -371,9 +390,9 @@ const handleFileChange = (file: any) => {
           errors.push(`第${index + 2}行：ICCID格式错误（应为19-20位字母或数字）`)
           return
         }
-        // 验证格式（电话号码：移动/电信13位，联通15位）
-        if (!/^\d{13,15}$/.test(msisdn)) {
-          errors.push(`第${index + 2}行：电话号码格式错误（应为13-15位数字）`)
+        // 电话号码仅做基础校验，兼容不同供应商的号码长度
+        if (!/^\d{1,20}$/.test(msisdn)) {
+          errors.push(`第${index + 2}行：电话号码格式错误（应为1-20位数字）`)
           return
         }
         
@@ -429,9 +448,9 @@ const handleAddCard = () => {
     ElMessage.warning('ICCID格式错误（应为19-20位字母或数字）')
     return
   }
-  // 验证格式（电话号码：移动/电信13位，联通15位）
-  if (!/^\d{13,15}$/.test(manualForm.msisdn)) {
-    ElMessage.warning('电话号码格式错误（应为13-15位数字）')
+  // 电话号码仅做基础校验，兼容不同供应商的号码长度
+  if (!/^\d{1,20}$/.test(manualForm.msisdn)) {
+    ElMessage.warning('电话号码格式错误（应为1-20位数字）')
     return
   }
   
@@ -582,4 +601,3 @@ onMounted(() => {
   }
 }
 </style>
-

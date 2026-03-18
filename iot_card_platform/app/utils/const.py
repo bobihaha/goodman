@@ -4,8 +4,8 @@
 import re
 from typing import Any
 
-# ICCID格式验证（19-20位数字）
-ICCID_PATTERN = re.compile(r'^\d{19,20}$')
+# ICCID格式验证（19-20位字母或数字）
+ICCID_PATTERN = re.compile(r'^[A-Za-z0-9]{19,20}$')
 
 def validate_iccid(iccid: str) -> bool:
     """验证ICCID格式"""

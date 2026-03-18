@@ -22,7 +22,8 @@ class NotifyType(str, PyEnum):
 
 LOGIN_TYPE_NAMES = {
     "normal": "普通登录",
-    "super_": "超级登录"
+    "super": "超级登录",
+    "super_": "超级登录",
 }
 
 
@@ -40,7 +41,12 @@ class SysLoginLogModel(BaseModel):
 
     user_id = Column(BigInteger, nullable=True, index=True, comment="用户ID")
     account = Column(String(50), nullable=True, index=True, comment="登录账户")
-    login_type = Column(Enum(LoginType), default=LoginType.normal, comment="登录类型")
+    # Persist enum values ("normal"/"super") instead of Python enum member names.
+    login_type = Column(
+        Enum(LoginType, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        default=LoginType.normal,
+        comment="登录类型"
+    )
     operator_id = Column(BigInteger, nullable=True, comment="操作人ID")
     is_success = Column(SmallInteger, default=1, comment="是否成功")
     fail_reason = Column(String(200), nullable=True, comment="失败原因")

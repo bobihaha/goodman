@@ -166,7 +166,7 @@ class StockInCRUD:
             iccid = card_data.get("iccid", "").strip()
             from app.utils.const import validate_iccid
             if not validate_iccid(iccid):
-                fail_details.append({"iccid": iccid, "reason": "ICCID格式错误(需19-20位数字)"})
+                fail_details.append({"iccid": iccid, "reason": "ICCID格式错误(需19-20位字母或数字)"})
             else:
                 exist_query = select(IotCardModel).where(IotCardModel.iccid == iccid)
                 exist_result = await db.execute(exist_query)
@@ -222,17 +222,21 @@ class StockInCRUD:
         # 创建新表记录（stock_in_records）
         new_record_sql = """
             INSERT INTO stock_in_records 
-            (supplier_id, package_id, test_expire_date, silent_expire_date, 
-             card_count, success_count, failed_count, remark, operator_id, created_at, updated_at)
+            (supplier_id, package_id, test_expire_date, silent_expire_date,
+             record_no, batch_id, card_count, success_count, failed_count,
+             remark, operator_id, created_at, updated_at)
             VALUES 
             (:supplier_id, :package_id, :test_expire_date, :silent_expire_date,
-             :card_count, :success_count, :failed_count, :remark, :operator_id, NOW(), NOW())
+             :record_no, :batch_id, :card_count, :success_count, :failed_count,
+             :remark, :operator_id, NOW(), NOW())
         """
         new_record_result = await db.execute(text(new_record_sql), {
             "supplier_id": batch.supplier_id,
             "package_id": batch.package_id,
             "test_expire_date": batch.test_expire_date,
             "silent_expire_date": batch.silent_expire_date,
+            "record_no": record.record_no,
+            "batch_id": batch_id,
             "card_count": len(cards),
             "success_count": success_count,
             "failed_count": len(cards) - success_count,
@@ -319,7 +323,14 @@ class StockOutCRUD:
     ) -> Tuple[StockOutRecordModel, int, int]:
         """创建出库记录"""
         from app.db.models.stock import StockOutRecordCardModel
+        from app.db.models.package import SalePackageModel
         from sqlalchemy import text
+
+        sale_pkg_query = select(SalePackageModel).where(SalePackageModel.id == sale_package_id)
+        sale_pkg_result = await db.execute(sale_pkg_query)
+        sale_pkg = sale_pkg_result.scalar_one_or_none()
+        if not sale_pkg:
+            raise ValueError("销售套餐不存在")
         
         record = StockOutRecordModel(
             record_no=generate_stock_out_no(),
@@ -337,7 +348,11 @@ class StockOutCRUD:
         success_count = 0
         batch_updates = {}
         out_card_infos = []  # 记录成功出库的卡片信息
-        first_card_spec = None  # 保存第一张卡的规格信息，用于预创建流量池
+        first_card_spec = {
+            "carrier": sale_pkg.carrier.value if sale_pkg.carrier else None,
+            "flow_size": sale_pkg.flow_size,
+            "period_type": sale_pkg.period_type.value if sale_pkg.period_type else None,
+        }
 
         for card_id in card_ids:
             # 获取卡片
@@ -351,16 +366,13 @@ class StockOutCRUD:
             card = card_result.scalar_one_or_none()
 
             if card:
-                # 保存第一张卡的规格信息（在 commit 前提取，避免 session expired 问题）
-                if first_card_spec is None:
-                    first_card_spec = {
-                        "carrier": card.carrier.value if card.carrier else None,
-                        "flow_size": card.flow_size,
-                        "period_type": card.period_type.value if card.period_type else None,
-                    }
                 card.user_id = to_user_id
                 card.sale_package_id = sale_package_id
                 card.period_count = period_count
+                # 出库后规格以销售套餐为准，而不是采购入库规格
+                card.flow_size = sale_pkg.flow_size
+                card.period_type = sale_pkg.period_type
+                card.data_total = sale_pkg.flow_size
                 # 设置卡类型（如果提供）
                 if card_type:
                     from app.db.models.iot_card import CardType
@@ -407,14 +419,16 @@ class StockOutCRUD:
         # 创建新表记录（stock_out_records）
         new_record_sql = """
             INSERT INTO stock_out_records 
-            (user_id, sale_package_id, card_count, success_count, failed_count, 
+            (user_id, to_user_id, record_no, sale_package_id, card_count, success_count, failed_count,
              unit_price, total_amount, remark, operator_id, created_at, updated_at)
             VALUES 
-            (:user_id, :sale_package_id, :card_count, :success_count, :failed_count,
+            (:user_id, :to_user_id, :record_no, :sale_package_id, :card_count, :success_count, :failed_count,
              :unit_price, :total_amount, :remark, :operator_id, NOW(), NOW())
         """
         new_record_result = await db.execute(text(new_record_sql), {
             "user_id": to_user_id,
+            "to_user_id": to_user_id,
+            "record_no": record.record_no,
             "sale_package_id": sale_package_id,
             "card_count": len(card_ids),
             "success_count": success_count,
@@ -434,10 +448,6 @@ class StockOutCRUD:
         user_query = select(SysUserModel).where(SysUserModel.id == to_user_id)
         user_result = await db.execute(user_query)
         user = user_result.scalar_one_or_none()
-
-        sale_pkg_query = select(SalePackageModel).where(SalePackageModel.id == sale_package_id)
-        sale_pkg_result = await db.execute(sale_pkg_query)
-        sale_pkg = sale_pkg_result.scalar_one_or_none()
 
         # 创建卡片关联记录
         for card_info in out_card_infos:

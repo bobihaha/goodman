@@ -4,7 +4,7 @@
 from typing import Optional, List, Tuple
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models.sys_user import SysUserModel
+from app.db.models.sys_user import SysUserModel, UserLevel
 from app.schemas.sys_user import UserQuery
 from app.crud.base import CRUDBase
 
@@ -38,7 +38,12 @@ class SysUserCRUD(CRUDBase[SysUserModel]):
         return users, total
 
     async def get_all_users(self, db: AsyncSession, query: UserQuery) -> Tuple[List[SysUserModel], int]:
-        conditions = [SysUserModel.is_deleted == 0]
+        # 超级管理员用户列表只展示其直接创建的二级用户；
+        # 三级子用户应由对应二级用户在自己的列表中管理。
+        conditions = [
+            SysUserModel.is_deleted == 0,
+            SysUserModel.user_level == UserLevel.USER.value,
+        ]
         if query.keyword:
             keyword = f"%{query.keyword}%"
             conditions.append(or_(SysUserModel.name.like(keyword), SysUserModel.account.like(keyword)))
