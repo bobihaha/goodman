@@ -103,6 +103,22 @@ async def search_cards(
     return ResponseModel(data=items)
 
 
+@router.get("/{card_id}/diagnostics", summary="获取卡片诊断状态", response_model=ResponseModel)
+async def get_card_diagnostics(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单卡诊断信息"""
+    result = await iot_card_service.get_card_diagnostics(
+        db=db,
+        card_id=card_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=result)
+
+
 # === 批量操作放在单个操作之前 ===
 
 @router.put("/batch/remark", summary="批量更新备注", response_model=ResponseModel)
@@ -388,8 +404,21 @@ async def export_cards(
     data = await iot_card_service.export_cards(
         db=db, current_user_id=current_user.id, user_level=current_user.user_level,
         card_ids=request.card_ids,
+        keyword=request.keyword,
         status=request.status.value if request.status else None,
-        carrier=request.carrier.value if request.carrier else None
+        carrier=request.carrier.value if request.carrier else None,
+        period_type=request.period_type.value if request.period_type else None,
+        is_pool_member=request.is_pool_member,
+        over_usage=request.over_usage,
+        remark=request.remark,
+        customer_id=request.customer_id,
+        batch_id=request.batch_id,
+        stock_out_start=request.stock_out_start,
+        stock_out_end=request.stock_out_end,
+        activated_start=request.activated_start,
+        activated_end=request.activated_end,
+        expired_start=request.expired_start,
+        expired_end=request.expired_end
     )
     return ResponseModel(data={"count": len(data), "items": data})
 
@@ -1306,9 +1335,7 @@ async def get_card_usage_history(
 
 @router.post("/export-history", summary="导出卡片历史用量")
 async def export_cards_history(
-    card_ids: List[int] = Body(..., description="卡片ID列表"),
-    start_date: Optional[str] = Body(None, description="开始日期 YYYY-MM-DD"),
-    end_date: Optional[str] = Body(None, description="结束日期 YYYY-MM-DD"),
+    payload: dict = Body(..., description="导出参数"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
@@ -1317,8 +1344,23 @@ async def export_cards_history(
         db=db,
         current_user_id=current_user.id,
         user_level=current_user.user_level,
-        card_ids=card_ids,
-        start_date=start_date,
-        end_date=end_date
+        card_ids=payload.get("card_ids"),
+        start_date=payload.get("start_date"),
+        end_date=payload.get("end_date"),
+        keyword=payload.get("keyword"),
+        status=payload.get("status"),
+        carrier=payload.get("carrier"),
+        period_type=payload.get("period_type"),
+        is_pool_member=payload.get("is_pool_member"),
+        over_usage=payload.get("over_usage"),
+        remark=payload.get("remark"),
+        customer_id=payload.get("customer_id"),
+        batch_id=payload.get("batch_id"),
+        stock_out_start=payload.get("stock_out_start"),
+        stock_out_end=payload.get("stock_out_end"),
+        activated_start=payload.get("activated_start"),
+        activated_end=payload.get("activated_end"),
+        expired_start=payload.get("expired_start"),
+        expired_end=payload.get("expired_end")
     )
     return ResponseModel(data=data)

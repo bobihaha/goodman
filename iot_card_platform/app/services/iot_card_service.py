@@ -21,6 +21,7 @@ from app.flow_packages import (
 )
 from app.services.account_balance_service import account_balance_service
 from app.utils.exceptions import BusinessException
+from app.clients.supplier_api import get_supplier_client
 
 
 class IotCardService:
@@ -231,6 +232,48 @@ class IotCardService:
 
         return card_dict
 
+    async def get_card_diagnostics(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """获取单卡诊断信息"""
+        from app.crud.supplier_crud import supplier_crud
+
+        user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
+        card = await iot_card_crud.get_by_id_in_scope(db, card_id, user_ids)
+        if not card:
+            raise BusinessException(code=404, msg="卡片不存在或无权访问")
+
+        if not card.supplier_id:
+            raise BusinessException(code=400, msg="该卡片未绑定供应商，无法诊断")
+
+        supplier = await supplier_crud.get_by_id(db, card.supplier_id)
+        if not supplier:
+            raise BusinessException(code=404, msg="供应商不存在")
+
+        try:
+            client = get_supplier_client(
+                supplier_id=card.supplier_id,
+                api_url=supplier.api_url or "",
+                api_key=supplier.api_key or "",
+                api_secret=supplier.api_secret or ""
+            )
+            result = await client.get_card_diagnostics(card.iccid)
+        except Exception as exc:
+            raise BusinessException(code=500, msg=f"供应商诊断失败: {exc}") from exc
+
+        return {
+            "card_id": card.id,
+            "iccid": card.iccid,
+            "msisdn": card.msisdn,
+            "supplier_id": card.supplier_id,
+            "supplier_name": supplier.name,
+            **result
+        }
+
     async def search_cards(
         self,
         db: AsyncSession,
@@ -406,8 +449,21 @@ class IotCardService:
         current_user_id: int,
         user_level: int,
         card_ids: Optional[List[int]] = None,
+        keyword: Optional[str] = None,
         status: Optional[str] = None,
-        carrier: Optional[str] = None
+        carrier: Optional[str] = None,
+        period_type: Optional[str] = None,
+        is_pool_member: Optional[bool] = None,
+        over_usage: Optional[bool] = None,
+        remark: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        batch_id: Optional[int] = None,
+        stock_out_start: Optional[str] = None,
+        stock_out_end: Optional[str] = None,
+        activated_start: Optional[str] = None,
+        activated_end: Optional[str] = None,
+        expired_start: Optional[str] = None,
+        expired_end: Optional[str] = None
     ) -> List[dict]:
         """导出卡片数据"""
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
@@ -420,8 +476,21 @@ class IotCardService:
             items, _ = await iot_card_crud.get_list(
                 db=db,
                 user_ids=user_ids,
+                keyword=keyword,
                 status=status,
                 carrier=carrier,
+                period_type=period_type,
+                is_pool_member=is_pool_member,
+                over_usage=over_usage,
+                remark=remark,
+                customer_id=customer_id,
+                batch_id=batch_id,
+                stock_out_start=stock_out_start,
+                stock_out_end=stock_out_end,
+                activated_start=activated_start,
+                activated_end=activated_end,
+                expired_start=expired_start,
+                expired_end=expired_end,
                 page=1,
                 page_size=settings.max_export_size
             )
@@ -2286,16 +2355,54 @@ class IotCardService:
         db: AsyncSession,
         current_user_id: int,
         user_level: int,
-        card_ids: List[int],
+        card_ids: Optional[List[int]] = None,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
+        keyword: Optional[str] = None,
+        status: Optional[str] = None,
+        carrier: Optional[str] = None,
+        period_type: Optional[str] = None,
+        is_pool_member: Optional[bool] = None,
+        over_usage: Optional[bool] = None,
+        remark: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        batch_id: Optional[int] = None,
+        stock_out_start: Optional[str] = None,
+        stock_out_end: Optional[str] = None,
+        activated_start: Optional[str] = None,
+        activated_end: Optional[str] = None,
+        expired_start: Optional[str] = None,
+        expired_end: Optional[str] = None
     ):
         """导出卡片历史用量"""
         from app.crud.iot_card_crud import card_usage_history_crud
         from datetime import datetime
 
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
-        cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
+        if card_ids:
+            cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
+        else:
+            cards, _ = await iot_card_crud.get_list(
+                db=db,
+                user_ids=user_ids,
+                keyword=keyword,
+                status=status,
+                carrier=carrier,
+                period_type=period_type,
+                is_pool_member=is_pool_member,
+                over_usage=over_usage,
+                remark=remark,
+                customer_id=customer_id,
+                batch_id=batch_id,
+                stock_out_start=stock_out_start,
+                stock_out_end=stock_out_end,
+                activated_start=activated_start,
+                activated_end=activated_end,
+                expired_start=expired_start,
+                expired_end=expired_end,
+                page=1,
+                page_size=100000
+            )
         if not cards:
             return []
 

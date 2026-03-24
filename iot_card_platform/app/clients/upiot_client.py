@@ -28,6 +28,20 @@ UPIOT_STATUS_MAP = {
     "99": "unknown",        # 未知
 }
 
+UPIOT_POWER_STATUS_MAP = {
+    "0": "开机",
+    "1": "关机",
+    "2": "未知",
+    "3": "未知",
+}
+
+UPIOT_WORK_STATUS_MAP = {
+    "0": "在线",
+    "1": "离线",
+    "2": "未知",
+    "3": "未知",
+}
+
 # 批量接口单次最大卡数
 BATCH_MAX_SIZE = 50
 
@@ -128,6 +142,12 @@ class UpiotSupplierClient(SupplierAPIClient):
         """将upiot卡状态码映射为系统状态"""
         return UPIOT_STATUS_MAP.get(str(account_status), "unknown")
 
+    def _map_power_status_text(self, value: Any) -> str:
+        return UPIOT_POWER_STATUS_MAP.get(str(value), "未知")
+
+    def _map_work_status_text(self, value: Any) -> str:
+        return UPIOT_WORK_STATUS_MAP.get(str(value), "未知")
+
     # ========== 核心接口实现 ==========
 
     async def get_card_usage(self, iccid: str) -> Dict[str, Any]:
@@ -222,3 +242,27 @@ class UpiotSupplierClient(SupplierAPIClient):
         except Exception as e:
             logger.error(f"upiot resume_card failed: iccid={iccid}, error={e}")
             return False
+
+    async def get_card_diagnostics(self, iccid: str) -> Dict[str, Any]:
+        """
+        单卡诊断查询
+        upiot接口: GET /card/{iccid}/status/
+
+        说明:
+        - power_status: 设备开机状态，0=开机 1=关机
+        - gprs_status: 设备工作状态，0=在线 1=离线
+        """
+        data = await self._get(f"card/{iccid}/status")
+        card = data.get("data", {})
+        power_status = card.get("power_status")
+        work_status = card.get("gprs_status")
+        power_status_msg = card.get("power_status_msg") or self._map_power_status_text(power_status)
+        work_status_msg = card.get("gprs_status_msg") or self._map_work_status_text(work_status)
+
+        return {
+            "iccid": iccid,
+            "power_status": str(power_status) if power_status is not None else None,
+            "power_status_msg": power_status_msg,
+            "work_status": str(work_status) if work_status is not None else None,
+            "work_status_msg": work_status_msg,
+        }

@@ -12,9 +12,22 @@ import type {
   CardExportParams,
   CardBatchQueryRequest,
   CardBatchRenewRequest,
-  CardBatchSuspendRequest
+  CardBatchSuspendRequest,
+  CardDiagnostics
 } from '@/types/card'
 import type { PaginationResponse } from '@/types/common'
+
+export interface ExportHistoryParams extends Partial<CardListParams> {
+  card_ids?: number[]
+  start_date?: string
+  end_date?: string
+  stock_out_start?: string
+  stock_out_end?: string
+  activated_start?: string
+  activated_end?: string
+  expired_start?: string
+  expired_end?: string
+}
 
 export const cardApi = {
   // 获取卡片列表
@@ -25,6 +38,11 @@ export const cardApi = {
   // 获取卡片详情
   getDetail(id: number): Promise<Card> {
     return get<Card>(`/cards/${id}`)
+  },
+
+  // 获取卡片诊断状态
+  getDiagnostics(id: number): Promise<CardDiagnostics> {
+    return get<CardDiagnostics>(`/cards/${id}/diagnostics`)
   },
 
   // 快速搜索（后6位）
@@ -149,7 +167,7 @@ export const cardApi = {
   },
 
   // 导出历史用量
-  exportHistory(cardIds: number[], startDate?: string, endDate?: string): Promise<any[]> {
-    return post<any[]>('/cards/export-history', { card_ids: cardIds, start_date: startDate, end_date: endDate })
+  exportHistory(params: ExportHistoryParams): Promise<any[]> {
+    return post<any[]>('/cards/export-history', params)
   }
 }

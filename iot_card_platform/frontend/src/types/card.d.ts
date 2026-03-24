@@ -133,11 +133,24 @@ export interface CardBatchSuspendRequest {
 // 卡片导出参数
 export interface CardExportParams {
   card_ids?: number[]
+  keyword?: string
   iccid?: string
   msisdn?: string
   carrier?: Carrier
   status?: CardStatus
+  period_type?: PeriodType
   user_id?: number
+  is_pool_member?: boolean
+  over_usage?: boolean
+  remark?: string
+  customer_id?: number
+  batch_id?: number
+  stock_out_start?: string
+  stock_out_end?: string
+  activated_start?: string
+  activated_end?: string
+  expired_start?: string
+  expired_end?: string
 }
 
 // 用量历史记录
@@ -153,4 +166,16 @@ export interface UsageHistory {
   snapshot_type: string
   snapshot_month: string
   created_at: string
+}
+
+export interface CardDiagnostics {
+  card_id: number
+  iccid: string
+  msisdn?: string
+  supplier_id?: number
+  supplier_name?: string
+  power_status?: string
+  power_status_msg?: string
+  work_status?: string
+  work_status_msg?: string
 }

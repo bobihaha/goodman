@@ -201,5 +201,18 @@ class CardRenewQuoteRequest(BaseModel):
 class CardExportRequest(BaseModel):
     """卡片导出请求"""
     card_ids: Optional[List[int]] = Field(None, description="指定卡片ID列表 (为空则导出全部)")
+    keyword: Optional[str] = Field(None, description="关键词")
     status: Optional[CardStatus] = Field(None, description="按状态筛选")
     carrier: Optional[CarrierType] = Field(None, description="按运营商筛选")
+    period_type: Optional[PeriodType] = Field(None, description="按周期类型筛选")
+    is_pool_member: Optional[bool] = Field(None, description="是否加入流量池")
+    over_usage: Optional[bool] = Field(None, description="是否超量")
+    remark: Optional[str] = Field(None, description="备注关键词")
+    customer_id: Optional[int] = Field(None, description="客户ID")
+    batch_id: Optional[int] = Field(None, description="批次ID")
+    stock_out_start: Optional[str] = Field(None, description="出库开始日期 YYYY-MM-DD")
+    stock_out_end: Optional[str] = Field(None, description="出库结束日期 YYYY-MM-DD")
+    activated_start: Optional[str] = Field(None, description="激活开始日期 YYYY-MM-DD")
+    activated_end: Optional[str] = Field(None, description="激活结束日期 YYYY-MM-DD")
+    expired_start: Optional[str] = Field(None, description="到期开始日期 YYYY-MM-DD")
+    expired_end: Optional[str] = Field(None, description="到期结束日期 YYYY-MM-DD")

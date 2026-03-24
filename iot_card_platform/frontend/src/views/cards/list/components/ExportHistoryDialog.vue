@@ -16,8 +16,11 @@
           style="width: 100%"
         />
       </el-form-item>
+      <el-form-item label="导出范围">
+        <span>{{ exportScopeLabel }}</span>
+      </el-form-item>
       <el-form-item label="卡片数量">
-        <span>{{ cardIds.length }} 张</span>
+        <span>{{ exportCount }} 张</span>
       </el-form-item>
     </el-form>
 
@@ -35,10 +38,21 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { cardApi } from '@/api'
 import * as XLSX from 'xlsx'
+import type { CardListParams } from '@/types/card'
 
 interface Props {
   modelValue: boolean
   cardIds: number[]
+  exportCount: number
+  exportScopeLabel: string
+  filterParams?: Partial<CardListParams> & {
+    stock_out_start?: string
+    stock_out_end?: string
+    activated_start?: string
+    activated_end?: string
+    expired_start?: string
+    expired_end?: string
+  }
 }
 
 const props = defineProps<Props>()
@@ -80,7 +94,12 @@ const handleExport = async () => {
     const startDate = formatDate(start)
     const endDate = formatDate(end)
 
-    const data = await cardApi.exportHistory(props.cardIds, startDate, endDate)
+    const data = await cardApi.exportHistory({
+      ...props.filterParams,
+      card_ids: props.cardIds.length > 0 ? props.cardIds : undefined,
+      start_date: startDate,
+      end_date: endDate
+    })
 
     if (data.length === 0) {
       ElMessage.warning('没有数据可导出')

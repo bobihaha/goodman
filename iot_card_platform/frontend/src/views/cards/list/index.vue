@@ -283,7 +283,6 @@
             购买记录
           </el-button>
           <el-button
-            :disabled="selectedCards.length === 0"
             @click="showExportHistoryDialog"
           >
             <el-icon><Download /></el-icon>
@@ -334,6 +333,14 @@
         <el-table-column prop="imsi" label="IMSI" width="180" />
 
         <el-table-column prop="msisdn" label="号码" width="130" />
+
+        <el-table-column label="诊断" width="90" align="center">
+          <template #default="{ row }">
+            <el-button type="primary" link @click="showDiagnosticsDialog(row)">
+              诊断
+            </el-button>
+          </template>
+        </el-table-column>
 
         <el-table-column prop="card_type" label="卡片类型" width="110">
           <template #default="{ row }">
@@ -534,7 +541,10 @@
     <!-- 导出历史用量对话框 -->
     <ExportHistoryDialog
       v-model="exportHistoryVisible"
-      :card-ids="selectedCards.map(c => c.id)"
+      :card-ids="exportHistoryCardIds"
+      :export-count="exportHistoryCount"
+      :export-scope-label="exportHistoryScopeLabel"
+      :filter-params="exportHistoryFilterParams"
     />
 
     <!-- 批量续费对话框 -->
@@ -585,6 +595,11 @@
       v-model="singleRenewVisible"
       :card="currentCard"
       @success="handleSingleRenewSuccess"
+    />
+
+    <CardDiagnosticsDialog
+      v-model="diagnosticsVisible"
+      :card="currentCard"
     />
   </div>
 </template>
@@ -637,6 +652,7 @@ import SingleRenewDialog from './components/SingleRenewDialog.vue'
 import TransferDialog from './components/TransferDialog.vue'
 import RemarkDialog from './components/RemarkDialog.vue'
 import ExportHistoryDialog from './components/ExportHistoryDialog.vue'
+import CardDiagnosticsDialog from './components/CardDiagnosticsDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -706,13 +722,49 @@ const remarkVisible = ref(false)
 const singleAddFlowVisible = ref(false)
 const singleRenewVisible = ref(false)
 const exportHistoryVisible = ref(false)
+const diagnosticsVisible = ref(false)
 
 // 计算属性
-const selectedCardIds = computed(() => selectedCards.value.map(card => card.id))
 const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
 const getCarrierLabel = (carrier: any) => CARRIER_MAP[carrier as keyof typeof CARRIER_MAP] || '-'
 const getStatusMeta = (status: any) => CARD_STATUS_MAP[status as keyof typeof CARD_STATUS_MAP] || CARD_STATUS_MAP.stock
 const getPeriodLabel = (periodType: any) => PERIOD_TYPE_MAP[periodType as keyof typeof PERIOD_TYPE_MAP] || '-'
+const exportHistoryCardIds = computed(() => {
+  if (selectedCards.value.length > 0) {
+    return selectedCards.value.map(card => card.id)
+  }
+  if (isBatchQueryMode.value) {
+    return cardList.value.map(card => card.id)
+  }
+  return []
+})
+const exportHistoryCount = computed(() => {
+  if (selectedCards.value.length > 0) {
+    return selectedCards.value.length
+  }
+  if (isBatchQueryMode.value) {
+    return cardList.value.length
+  }
+  return pagination.total
+})
+const exportHistoryScopeLabel = computed(() => {
+  if (selectedCards.value.length > 0) {
+    return '已勾选卡片'
+  }
+  if (isBatchQueryMode.value) {
+    return '当前批量查询结果'
+  }
+  return '当前筛选结果'
+})
+const exportHistoryFilterParams = computed(() => ({
+  ...searchForm,
+  stock_out_start: stockOutRange.value?.[0] || undefined,
+  stock_out_end: stockOutRange.value?.[1] || undefined,
+  activated_start: activatedRange.value?.[0] || undefined,
+  activated_end: activatedRange.value?.[1] || undefined,
+  expired_start: expiredRange.value?.[0] || undefined,
+  expired_end: expiredRange.value?.[1] || undefined
+}))
 
 // 获取卡片列表
 const fetchCardList = async () => {
@@ -835,8 +887,8 @@ const showBatchTransferDialog = () => {
 
 // 显示导出历史用量对话框
 const showExportHistoryDialog = () => {
-  if (selectedCards.value.length === 0) {
-    ElMessage.warning('请先选择卡片')
+  if (exportHistoryCount.value === 0) {
+    ElMessage.warning('当前没有可导出的卡片')
     return
   }
   exportHistoryVisible.value = true
@@ -871,8 +923,8 @@ const showBatchResumeDialog = () => {
 const handleExport = async () => {
   try {
     const params = {
-      ...searchForm,
-      card_ids: selectedCardIds.value.length > 0 ? selectedCardIds.value : undefined
+      ...exportHistoryFilterParams.value,
+      card_ids: exportHistoryCardIds.value.length > 0 ? exportHistoryCardIds.value : undefined
     }
 
     const blob = await cardApi.export(params)
@@ -916,6 +968,11 @@ const handleRowAddFlow = (card: Card) => {
 const handleRowRenew = (card: Card) => {
   currentCard.value = card
   singleRenewVisible.value = true
+}
+
+const showDiagnosticsDialog = (card: Card) => {
+  currentCard.value = card
+  diagnosticsVisible.value = true
 }
 
 const handleRowAction = (command: string, card: Card) => {

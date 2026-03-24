@@ -89,6 +89,22 @@ class SupplierAPIClient(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_card_diagnostics(self, iccid: str) -> Dict[str, Any]:
+        """
+        获取单卡诊断状态
+
+        返回格式:
+        {
+            "iccid": "89860123456789012345",
+            "power_status": "0",
+            "power_status_msg": "开机",
+            "work_status": "1",
+            "work_status_msg": "离线"
+        }
+        """
+        pass
+
     async def _request(
         self,
         method: str,
@@ -198,6 +214,16 @@ class MockSupplierAPIClient(SupplierAPIClient):
         """模拟复机"""
         return True
 
+    async def get_card_diagnostics(self, iccid: str) -> Dict[str, Any]:
+        """模拟诊断状态"""
+        return {
+            "iccid": iccid,
+            "power_status": "0",
+            "power_status_msg": "开机",
+            "work_status": "0",
+            "work_status_msg": "在线"
+        }
+
 
 def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret: str) -> SupplierAPIClient:
     """
@@ -229,7 +255,6 @@ def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret
         f"api_key={'yes' if normalized_key else 'no'}, "
         f"api_secret={'yes' if normalized_secret else 'no'})"
     )
-
 
 
 
