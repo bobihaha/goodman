@@ -138,6 +138,18 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { userApi } from '@/api/modules/user'
 import type { User, UserCreateRequest, UserUpdateRequest } from '@/types/user'
 
+type UserFormModel = UserCreateRequest & {
+  alert_notify: {
+    sms: boolean
+    email: boolean
+  }
+  quota: {
+    max_cards: number
+    max_sub_users: number
+    pool_stop_threshold?: number
+  }
+}
+
 // Props
 const props = defineProps<{
   modelValue: boolean
@@ -163,7 +175,7 @@ const isEdit = computed(() => !!props.user)
 const formRef = ref<FormInstance>()
 
 // 表单数据
-const formData = reactive<UserCreateRequest>({
+const formData = reactive<UserFormModel>({
   name: '',
   account: '',
   password: '',
@@ -176,7 +188,9 @@ const formData = reactive<UserCreateRequest>({
   quota: {
     max_cards: 100,
     max_sub_users: 5,
-    pool_stop_threshold: 100
+    pool_stop_threshold: 100,
+    account_balance: 0,
+    balance_alert_threshold: 1000
   },
   remark: '',
   status: 'enable'
@@ -219,7 +233,7 @@ const initFormData = () => {
     formData.phone = props.user.phone || ''
     formData.email = props.user.email || ''
     formData.alert_notify = props.user.alert_notify || { sms: true, email: true }
-    formData.quota = props.user.quota || { max_cards: 100, max_sub_users: 5, pool_stop_threshold: 100 }
+    formData.quota = props.user.quota || { max_cards: 100, max_sub_users: 5, pool_stop_threshold: 100, account_balance: 0, balance_alert_threshold: 1000 }
     formData.remark = props.user.remark || ''
     formData.status = props.user.status
   } else {
@@ -230,7 +244,7 @@ const initFormData = () => {
     formData.phone = ''
     formData.email = ''
     formData.alert_notify = { sms: true, email: true }
-    formData.quota = { max_cards: 100, max_sub_users: 5, pool_stop_threshold: 100 }
+    formData.quota = { max_cards: 100, max_sub_users: 5, pool_stop_threshold: 100, account_balance: 0, balance_alert_threshold: 1000 }
     formData.remark = ''
     formData.status = 'enable'
   }
@@ -320,8 +334,6 @@ watch(
   margin-top: 4px;
 }
 </style>
-
-
 
 
 

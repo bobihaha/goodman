@@ -13,6 +13,20 @@ export const stockApi = {
     return request.post('/stock/batches', data)
   },
 
+  /**
+   * 获取采购批次列表
+   */
+  getBatches(params: any) {
+    return request.get('/stock/batches', { params })
+  },
+
+  /**
+   * 获取采购批次详情
+   */
+  getBatchDetail(id: number) {
+    return request.get(`/stock/batches/${id}`)
+  },
+
   // ============ 入库 ============
 
   /**

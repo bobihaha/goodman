@@ -44,6 +44,7 @@ class TrafficPoolModel(BaseModel):
     data_used = Column(BigInteger, nullable=False, default=0, comment="已用流量(MB)")
     package_flow = Column(BigInteger, nullable=False, default=0, comment="套餐流量(MB)")
     addon_flow = Column(BigInteger, nullable=False, default=0, comment="叠加流量包(MB)")
+    addon_flow_month = Column(String(7), nullable=True, comment="叠加流量生效月份(YYYY-MM)")
 
     # 阈值设置
     alert_threshold_1 = Column(Integer, nullable=True, comment="告警阈值1百分比")
@@ -131,6 +132,7 @@ class TrafficPoolModel(BaseModel):
             "data_remaining": self.get_data_remain(),
             "package_flow": self.package_flow,
             "addon_flow": self.addon_flow,
+            "addon_flow_month": self.addon_flow_month,
             "usage_percent": self.get_usage_percent(),
             "alert_threshold_1": self.alert_threshold_1,
             "alert_threshold_2": self.alert_threshold_2,

@@ -66,6 +66,11 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column label="账户余额" width="120">
+          <template #default="{ row }">
+            {{ formatMoney(row.quota?.account_balance || 0) }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'enable' ? 'success' : 'danger'">
@@ -96,6 +101,14 @@
               @click="handleAssignPermission(row)"
             >
               分配权限
+            </el-button>
+            <el-button
+              v-if="canGrantBalance(row)"
+              type="success"
+              link
+              @click="handleGrantBalance(row)"
+            >
+              分配余额
             </el-button>
             <el-button
               v-if="canSuperLogin(row)"
@@ -179,6 +192,12 @@
       :user-name="currentUser?.name || ''"
       @success="handlePermissionSuccess"
     />
+
+    <GrantBalanceDialog
+      v-model="grantBalanceDialogVisible"
+      :user="currentUser"
+      @success="handleGrantBalanceSuccess"
+    />
   </div>
 </template>
 
@@ -187,11 +206,12 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock, SwitchButton, Setting } from '@element-plus/icons-vue'
 import { userApi } from '@/api/modules/user'
-import { formatDateTime } from '@/utils/formatter'
+import { formatDateTime, formatMoney } from '@/utils/formatter'
 import type { User, UserListParams } from '@/types/user'
 import UserFormDialog from './components/UserFormDialog.vue'
 import ResetPasswordDialog from './components/ResetPasswordDialog.vue'
 import UserPermissionDialog from './components/UserPermissionDialog.vue'
+import GrantBalanceDialog from './components/GrantBalanceDialog.vue'
 import { useAuthStore } from '@/stores/modules/auth'
 import { useRouter } from 'vue-router'
 
@@ -219,6 +239,7 @@ const loading = ref(false)
 const formDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
 const permissionDialogVisible = ref(false)
+const grantBalanceDialogVisible = ref(false)
 const currentUser = ref<User | null>(null)
 
 /**
@@ -264,6 +285,20 @@ const canAssignPermission = (user: User): boolean => {
     return true
   }
 
+  return false
+}
+
+const canGrantBalance = (user: User): boolean => {
+  const currentUser = authStore.userInfo
+  if (!currentUser) {
+    return false
+  }
+  if (currentUser.user_level === 1) {
+    return user.user_level !== 1
+  }
+  if (currentUser.user_level === 2 && user.user_level === 3 && user.parent_id === currentUser.id) {
+    return true
+  }
   return false
 }
 
@@ -388,6 +423,11 @@ const handleAssignPermission = (user: User) => {
   permissionDialogVisible.value = true
 }
 
+const handleGrantBalance = (user: User) => {
+  currentUser.value = user
+  grantBalanceDialogVisible.value = true
+}
+
 /**
  * 切换状态
  */
@@ -464,6 +504,11 @@ const handlePasswordSuccess = () => {
 const handlePermissionSuccess = () => {
   permissionDialogVisible.value = false
   ElMessage.success('权限分配成功')
+}
+
+const handleGrantBalanceSuccess = () => {
+  grantBalanceDialogVisible.value = false
+  fetchUserList()
 }
 
 // 初始化

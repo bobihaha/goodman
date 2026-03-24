@@ -86,7 +86,7 @@
         </el-table-column>
         <el-table-column label="到期时间" width="120">
           <template #default="{ row }">
-            {{ row.expired_at || '-' }}
+            {{ formatDate(row.expired_at) }}
           </template>
         </el-table-column>
       </el-table>
@@ -98,6 +98,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { cardApi } from '@/api'
+import { formatDate } from '@/utils/formatter'
 import * as XLSX from 'xlsx'
 
 const iccidInput = ref('')
@@ -158,7 +159,7 @@ const handleExport = () => {
     '套餐规格': row.spec_name || '',
     '续费价格(元)': row.price_sale !== null ? row.price_sale : '',
     '状态': row.status_name || '',
-    '到期时间': row.expired_at || ''
+    '到期时间': formatDate(row.expired_at)
   }))
   const ws = XLSX.utils.json_to_sheet(data)
   const wb = XLSX.utils.book_new()

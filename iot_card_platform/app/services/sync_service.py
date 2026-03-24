@@ -2,7 +2,7 @@
 数据同步服务层
 """
 from typing import Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 import asyncio
@@ -11,6 +11,7 @@ from app.db.models.sync import SyncType, SyncStatus
 from app.db.models.iot_card import IotCardModel, CardStatus
 from app.db.models.supplier import SupplierModel
 from app.clients.supplier_api import get_supplier_client
+from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 from app.utils.exceptions import BusinessException
 
 
@@ -24,7 +25,6 @@ class SyncService:
     async def _record_usage_snapshot(self, db: AsyncSession, card, snapshot_type: str):
         """记录用量快照"""
         from app.crud.iot_card_crud import card_usage_history_crud
-        from datetime import date
         import logging
         logger = logging.getLogger(__name__)
         try:
@@ -144,14 +144,32 @@ class SyncService:
                         if card.iccid in usage_map:
                             data = usage_map[card.iccid]
                             card.data_used = data.get("data_used", 0)
-                            card.data_total = data.get("data_total", card.data_total)
+                            supplier_total = data.get("data_total")
+                            if supplier_total is not None:
+                                supplier_total = int(supplier_total)
+                                if card.addon_flow and not card.addon_flow_month:
+                                    card.addon_flow_month = get_current_flow_cycle_month()
+                                effective_addon = int(card.addon_flow or 0) if is_flow_cycle_active(card.addon_flow_month) else 0
+                                if not effective_addon and card.addon_flow:
+                                    card.addon_flow = 0
+                                    card.addon_flow_month = None
+                                if card.period_type.value == "monthly" and card.flow_size:
+                                    base_total = max(card.flow_size, supplier_total)
+                                else:
+                                    base_total = supplier_total
+                                card.data_total = base_total + effective_addon
+                            if card.period_type.value == "monthly":
+                                card.data_used_month = card.data_used
                             card.data_sync_at = datetime.now()
 
                             # 检查并更新卡片状态
                             from app.services.card_status_service import check_and_update_card_status
                             await check_and_update_card_status(db, card)
 
-                            # 月包：月末记录快照
+                            # 每次同步都记录当日日快照，供详情页日用量图使用
+                            await self._record_usage_snapshot(db, card, "daily")
+
+                            # 月包：月末额外记录月末快照
                             if card.period_type.value == "monthly":
                                 from datetime import date
                                 import calendar
@@ -195,6 +213,15 @@ class SyncService:
                 from app.crud.pool_crud import pool_crud
                 for pool_id in pool_ids:
                     await pool_crud.update_stats(db, pool_id)
+
+            # 日快照只保留最近180天，避免历史表无限增长
+            from app.crud.iot_card_crud import card_usage_history_crud
+            retention_cutoff = date.today() - timedelta(days=180)
+            await card_usage_history_crud.prune_old_snapshots(
+                db=db,
+                snapshot_type="daily",
+                before_date=retention_cutoff
+            )
 
 
             # 更新同步日志

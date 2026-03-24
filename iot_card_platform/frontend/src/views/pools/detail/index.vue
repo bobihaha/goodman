@@ -6,13 +6,13 @@
         <span class="page-title">{{ poolDetail.name }}</span>
       </template>
       <template #extra>
-        <span class="sync-time">最近同步时间：{{ poolDetail.last_sync_at || '-' }}</span>
+        <span class="sync-time">最近同步时间：{{ formatDateTime(poolDetail.last_sync_at) }}</span>
       </template>
     </el-page-header>
 
     <!-- 操作按钮 -->
     <div class="action-buttons">
-      <el-button type="primary" @click="handleRecharge">续费</el-button>
+      <el-button type="primary" @click="handleRecharge">后台补量</el-button>
       <el-button type="success" @click="handleAutoPool">自动续池</el-button>
       <el-button @click="handleEdit">告警设置</el-button>
     </div>
@@ -39,11 +39,11 @@
           <div class="chart-info">
             <div class="info-item">
               <span class="dot" style="background: #409eff"></span>
-              <span>已用流量：{{ formatFlow(poolDetail.data_used) }}</span>
+              <span>已用流量：{{ formatFlowValue(poolDetail.data_used) }}</span>
             </div>
             <div class="info-item">
               <span class="dot" style="background: #67c23a"></span>
-              <span>剩余流量：{{ formatFlow(poolDetail.data_remaining) }}</span>
+              <span>剩余流量：{{ formatFlowValue(poolDetail.data_remaining) }}</span>
             </div>
           </div>
         </el-card>
@@ -57,7 +57,7 @@
           <div class="chart-info">
             <div class="info-item">
               <span class="dot" style="background: #409eff"></span>
-              <span>套餐流量：{{ formatFlow(poolDetail.package_flow || 0) }}</span>
+              <span>套餐流量：{{ formatFlow(poolDetail.package_flow || poolDetail.data_total || 0) }}</span>
             </div>
             <div class="info-item">
               <span class="dot" style="background: #ffa500"></span>
@@ -115,19 +115,52 @@
         </el-table-column>
         <el-table-column prop="status" label="卡状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="CARD_STATUS_MAP[row.status]?.type">
-              {{ CARD_STATUS_MAP[row.status]?.label }}
+            <el-tag :type="getStatusMeta(row.status).type">
+              {{ getStatusMeta(row.status).label }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="package_name" label="套餐总量" width="100" />
-        <el-table-column prop="data_used" label="本月已用" width="120">
+        <el-table-column label="套餐总量" width="100">
           <template #default="{ row }">
-            {{ formatFlow(row.data_used) }}
+            {{ formatFlow(row.data_total) }}
           </template>
         </el-table-column>
-        <el-table-column prop="last_sync_at" label="最近同步时间" width="180" />
-        <el-table-column prop="expired_at" label="过期时间" width="180" />
+        <el-table-column prop="data_used" label="本月已用" width="120">
+          <template #default="{ row }">
+            {{ formatFlowValue(row.data_used) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="data_sync_at" label="最近同步时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.data_sync_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="expired_at" label="过期时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.expired_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              type="text"
+              size="small"
+              :disabled="row.status !== 'suspended'"
+              @click="handleRowResume(row)"
+            >
+              复机
+            </el-button>
+            <el-button
+              v-if="isSuperAdmin"
+              type="text"
+              size="small"
+              :disabled="row.status !== 'suspended'"
+              @click="handleRowForceResume(row)"
+            >
+              强制复机
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <!-- 分页 -->
@@ -140,6 +173,35 @@
         @size-change="fetchCards"
         @current-change="fetchCards"
       />
+    </el-card>
+
+    <!-- 补量日志 -->
+    <el-card class="table-card" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>补量日志</span>
+          <el-button type="text" size="small" @click="fetchFlowLogs">
+            刷新
+          </el-button>
+        </div>
+      </template>
+
+      <el-table v-loading="flowLogLoading" :data="flowLogs" stripe>
+        <el-table-column prop="user_name" label="操作人" width="140" />
+        <el-table-column prop="detail" label="操作详情" min-width="360" show-overflow-tooltip />
+        <el-table-column label="结果" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.is_success ? 'success' : 'danger'">
+              {{ row.is_success ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <!-- 流量池表单对话框 -->
@@ -159,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
@@ -169,14 +231,19 @@ import {
   getPoolDetail,
   getPoolCards
 } from '@/api/modules/pool'
-import { formatFlow } from '@/utils/formatter'
+import { cardApi } from '@/api'
+import { systemApi } from '@/api/modules/system'
+import { useAuthStore } from '@/stores/modules/auth'
+import { formatDate, formatDateTime, formatFlow, formatFlowValue } from '@/utils/formatter'
 import { CARD_STATUS_MAP } from '@/constants/card'
 import type { PoolDetail } from '@/types/pool'
+import type { OperationLog } from '@/types/system'
 import PoolFormDialog from '../list/components/PoolFormDialog.vue'
 import RechargeDialog from '../list/components/RechargeDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const poolId = Number(route.params.id)
 
@@ -188,6 +255,8 @@ const cardList = ref<any[]>([])
 const cardsLoading = ref(false)
 const selectedCardIds = ref<number[]>([])
 const iccidKeyword = ref('')
+const flowLogLoading = ref(false)
+const flowLogs = ref<OperationLog[]>([])
 
 // 分页
 const pagination = reactive({
@@ -207,13 +276,15 @@ let compositionChart: ECharts | null = null
 // 对话框
 const formDialogVisible = ref(false)
 const rechargeDialogVisible = ref(false)
+const getStatusMeta = (status: any) => CARD_STATUS_MAP[status as keyof typeof CARD_STATUS_MAP] || CARD_STATUS_MAP.stock
+const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
 
 /**
  * 获取流量池详情
  */
 const fetchDetail = async () => {
   try {
-    const data = await getPoolDetail(poolId)
+    const data: any = await getPoolDetail(poolId)
     poolDetail.value = data
     await nextTick()
     renderCharts()
@@ -236,7 +307,7 @@ const fetchCards = async () => {
     if (iccidKeyword.value) {
       params.iccid = iccidKeyword.value
     }
-    const response = await getPoolCards(poolId, params)
+    const response: any = await getPoolCards(poolId, params)
     cardList.value = response.items || response.list || []
     pagination.total = response.total || 0
   } catch (error) {
@@ -244,6 +315,29 @@ const fetchCards = async () => {
     ElMessage.error('获取卡片列表失败')
   } finally {
     cardsLoading.value = false
+  }
+}
+
+/**
+ * 获取补量日志
+ */
+const fetchFlowLogs = async () => {
+  flowLogLoading.value = true
+  try {
+    const res: any = await systemApi.getOperationLogs({
+      module: 'pools',
+      action: 'add_flow',
+      target_type: 'pool',
+      target_id: poolId,
+      page: 1,
+      page_size: 10
+    })
+    flowLogs.value = res.items || []
+  } catch (error) {
+    console.error('获取流量池补量日志失败:', error)
+    flowLogs.value = []
+  } finally {
+    flowLogLoading.value = false
   }
 }
 
@@ -403,7 +497,7 @@ const handleEdit = () => {
 }
 
 /**
- * 充值
+ * 后台补量
  */
 const handleRecharge = () => {
   rechargeDialogVisible.value = true
@@ -429,6 +523,70 @@ const handleSearchIccid = () => {
  */
 const handleSelectionChange = (selection: any[]) => {
   selectedCardIds.value = selection.map(c => c.id)
+}
+
+/**
+ * 单行复机
+ */
+const handleRowResume = async (row: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要复机卡片 ${row.iccid} 吗？`,
+      '复机确认',
+      {
+        confirmButtonText: '确定复机',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.batchResumeByIccids({
+      iccids: [row.iccid]
+    })
+
+    if (result.success > 0) {
+      ElMessage.success('复机成功')
+      handleRefresh()
+    } else {
+      ElMessage.error(result.failed_list?.[0]?.error || '复机失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('池内单卡复机失败:', error)
+    }
+  }
+}
+
+/**
+ * 单行强制复机
+ */
+const handleRowForceResume = async (row: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要强制复机卡片 ${row.iccid} 吗？该操作会绕过人工停卡与超限限制。`,
+      '强制复机确认',
+      {
+        confirmButtonText: '确认强制复机',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.batchForceResumeByIccids({
+      iccids: [row.iccid]
+    })
+
+    if (result.success > 0) {
+      ElMessage.success('强制复机成功')
+      handleRefresh()
+    } else {
+      ElMessage.error(result.failed_list?.[0]?.error || '强制复机失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('池内单卡强制复机失败:', error)
+    }
+  }
 }
 
 /**
@@ -485,11 +643,13 @@ const handleBatchOpenNetwork = async () => {
 const handleRefresh = () => {
   fetchDetail()
   fetchCards()
+  fetchFlowLogs()
 }
 
 onMounted(() => {
   fetchDetail()
   fetchCards()
+  fetchFlowLogs()
 })
 </script>
 

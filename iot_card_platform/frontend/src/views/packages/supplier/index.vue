@@ -122,7 +122,7 @@
         <el-table-column prop="carrier" label="运营商" width="100">
           <template #default="{ row }">
             <el-tag :type="getCarrierType(row.carrier)">
-              {{ CARRIER_MAP[row.carrier] }}
+              {{ getCarrierLabel(row.carrier as Carrier) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -133,7 +133,7 @@
         </el-table-column>
         <el-table-column prop="period_type" label="周期类型" width="100">
           <template #default="{ row }">
-            {{ PERIOD_TYPE_MAP[row.period_type] }}
+            {{ getPeriodTypeLabel(row.period_type as PeriodType) }}
           </template>
         </el-table-column>
         <el-table-column prop="effective_days" label="有效天数" width="100">
@@ -149,8 +149,8 @@
         <el-table-column prop="supplier_name" label="供应商" width="150" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="STATUS_MAP[row.status].type">
-              {{ STATUS_MAP[row.status].label }}
+            <el-tag :type="getStatusMeta(row.status).type">
+              {{ getStatusMeta(row.status).label }}
             </el-tag>
           </template>
         </el-table-column>
@@ -209,7 +209,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { supplierPackageApi, supplierApi } from '@/api/modules/package'
-import type { SupplierPackage, Supplier } from '@/types/package'
+import type { SupplierPackage, Supplier, SupplierPackageListParams } from '@/types/package'
+import type { Carrier, PeriodType } from '@/types/common'
 import { formatFlowSize, formatMoney, formatDateShort } from '@/utils/formatter'
 import {
   CARRIER_OPTIONS,
@@ -221,13 +222,15 @@ import {
 } from '@/constants/package'
 import PackageFormDialog from './components/PackageFormDialog.vue'
 
+type SupplierPackageSearchForm = Omit<SupplierPackageListParams, 'page' | 'page_size'>
+
 // 搜索表单
-const searchForm = reactive({
+const searchForm = reactive<SupplierPackageSearchForm>({
   keyword: '',
-  carrier: '',
-  period_type: '',
+  carrier: undefined,
+  period_type: undefined,
   supplier_id: undefined as number | undefined,
-  status: ''
+  status: undefined
 })
 
 // 表格数据
@@ -258,22 +261,25 @@ const getCarrierType = (carrier: string) => {
   return typeMap[carrier] || ''
 }
 
+const getCarrierLabel = (carrier: Carrier) => CARRIER_MAP[carrier] || carrier
+const getPeriodTypeLabel = (periodType: PeriodType) => PERIOD_TYPE_MAP[periodType] || periodType
+const getStatusMeta = (status: 'enable' | 'disable') => STATUS_MAP[status]
+
 // 获取套餐列表
 const fetchList = async () => {
   loading.value = true
   try {
-    const params = {
+    const params: SupplierPackageListParams = {
+      ...searchForm,
       page: pagination.page,
-      page_size: pagination.page_size,
-      ...searchForm
+      page_size: pagination.page_size
     }
-    
-    // 过滤空值
-    Object.keys(params).forEach(key => {
-      if (params[key] === '' || params[key] === undefined) {
-        delete params[key]
-      }
-    })
+
+    if (!params.keyword) delete params.keyword
+    if (!params.carrier) delete params.carrier
+    if (!params.period_type) delete params.period_type
+    if (!params.supplier_id) delete params.supplier_id
+    if (!params.status) delete params.status
     
     console.log('正在请求套餐列表，参数:', params)
     const response = await supplierPackageApi.getList(params)
@@ -320,10 +326,10 @@ const handleSearch = () => {
 const handleReset = () => {
   Object.assign(searchForm, {
     keyword: '',
-    carrier: '',
-    period_type: '',
+    carrier: undefined,
+    period_type: undefined,
     supplier_id: undefined,
-    status: ''
+    status: undefined
   })
   pagination.page = 1
   fetchList()
@@ -473,4 +479,3 @@ onMounted(() => {
   }
 }
 </style>
-

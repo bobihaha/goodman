@@ -220,7 +220,7 @@
                 {{ outForm.period_count }} {{ selectedPackagePeriodType === 'yearly' ? '年' : '个月' }}
               </el-tag>
               <span v-if="selectedPackagePeriodType === 'yearly'" style="color: #909399; font-size: 12px; margin-left: 10px">
-                (有效期: {{ outForm.period_count * 360 }} 天)
+                (有效期: {{ (outForm.period_count || 0) * 360 }} 天)
               </span>
             </el-descriptions-item>
             <el-descriptions-item label="卡类型" v-if="selectedPackagePeriodType === 'monthly'">
@@ -380,7 +380,7 @@ const queryParams = reactive({
 })
 
 // 表格数据
-const tableData = ref([])
+const tableData = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
 
@@ -388,9 +388,9 @@ const loading = ref(false)
 const selectedCards = ref<any[]>([])
 
 // 供应商、用户、套餐列表
-const suppliers = ref([])
-const users = ref([])
-const salePackages = ref([])
+const suppliers = ref<any[]>([])
+const users = ref<any[]>([])
+const salePackages = ref<any[]>([])
 
 // 出库表单
 const outForm = reactive({
@@ -463,7 +463,7 @@ const fetchInventory = async () => {
   loading.value = true
   try {
     const res = await stockApi.getInventory(queryParams)
-    tableData.value = res.items || []  // 库存API返回 items
+    tableData.value = res.items || res.list || []
     total.value = res.total || 0
   } catch (error) {
     ElMessage.error('获取库存卡片失败')
@@ -476,7 +476,7 @@ const fetchInventory = async () => {
 const fetchSuppliers = async () => {
   try {
     const res = await supplierApi.getList({ page: 1, page_size: 100 })
-    suppliers.value = res.list || res.data?.items || res.data?.list || []
+    suppliers.value = res.list || []
   } catch (error) {
     console.error('获取供应商列表失败', error)
   }
@@ -486,7 +486,7 @@ const fetchSuppliers = async () => {
 const fetchUsers = async () => {
   try {
     const res = await userApi.getList({ page: 1, page_size: 100 })
-    users.value = (res.list || res.data?.items || res.data?.list || []).filter((u: any) => u.user_level === 2) // 只显示普通用户
+    users.value = (res.list || []).filter((u: any) => u.user_level === 2)
   } catch (error) {
     console.error('获取用户列表失败', error)
   }
@@ -670,7 +670,12 @@ const handleBatchImport = async () => {
     // 读取Excel文件
     const data = await selectedFile.value.arrayBuffer()
     const workbook = XLSX.read(data)
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName) {
+      ElMessage.warning('Excel文件中未找到工作表')
+      return
+    }
+    const worksheet: any = workbook.Sheets[sheetName]
     const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
 
     // 跳过表头，转换数据

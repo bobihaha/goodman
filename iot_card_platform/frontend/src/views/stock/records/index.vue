@@ -304,8 +304,8 @@ const inParams = reactive({
   page: 1,
   page_size: 20
 })
-const inDateRange = ref([])
-const inRecords = ref([])
+const inDateRange = ref<any[]>([])
+const inRecords = ref<any[]>([])
 const inTotal = ref(0)
 const inLoading = ref(false)
 
@@ -315,19 +315,19 @@ const outParams = reactive({
   page: 1,
   page_size: 20
 })
-const outDateRange = ref([])
-const outRecords = ref([])
+const outDateRange = ref<any[]>([])
+const outRecords = ref<any[]>([])
 const outTotal = ref(0)
 const outLoading = ref(false)
 
 // 按卡号查询
 const cardIccid = ref('')
-const cardRecords = ref([])
+const cardRecords = ref<any[]>([])
 const cardLoading = ref(false)
 
 // 供应商、用户列表
-const suppliers = ref([])
-const users = ref([])
+const suppliers = ref<any[]>([])
+const users = ref<any[]>([])
 
 // 详情对话框
 const showInDetailDialog = ref(false)
@@ -340,7 +340,7 @@ const fetchSuppliers = async () => {
   try {
     const res = await supplierApi.getList({ page: 1, page_size: 100 })
     // 兼容不同的响应格式
-    suppliers.value = res.list || res.data?.items || res.data?.list || []
+    suppliers.value = res.list || []
   } catch (error) {
     console.error('获取供应商列表失败', error)
   }
@@ -351,7 +351,7 @@ const fetchUsers = async () => {
   try {
     const res = await userApi.getList({ page: 1, page_size: 100 })
     // 兼容不同的响应格式
-    users.value = res.list || res.data?.items || res.data?.list || []
+    users.value = res.list || []
   } catch (error) {
     console.error('获取用户列表失败', error)
   }

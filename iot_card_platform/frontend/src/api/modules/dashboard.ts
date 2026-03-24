@@ -2,7 +2,7 @@
  * 仪表盘相关 API
  */
 
-import { get, post } from '@/utils/request'
+import { get } from '@/utils/request'
 
 // 账户余额信息
 export interface AccountBalance {
@@ -125,7 +125,6 @@ export const dashboardApi = {
     return get('/dashboard/alerts', { params: { limit } })
   }
 }
-
 
 
 

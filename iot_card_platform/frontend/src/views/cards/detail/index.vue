@@ -21,6 +21,32 @@
                 <el-icon><Edit /></el-icon>
                 备注
               </el-button>
+              <el-tooltip
+                :disabled="!card || card.card_type === 'single'"
+                content="流量池卡请在流量池维度补量"
+                placement="top"
+              >
+                <span>
+                  <el-button
+                    type="warning"
+                    size="small"
+                    :disabled="!card || card.card_type !== 'single'"
+                    @click="handleAddFlow"
+                  >
+                    <el-icon><Plus /></el-icon>
+                    补量
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                type="primary"
+                size="small"
+                :disabled="!card"
+                @click="handleRenew"
+              >
+                <el-icon><Refresh /></el-icon>
+                续费
+              </el-button>
               <el-button
                 v-if="card?.status === 'activated'"
                 type="danger"
@@ -31,13 +57,23 @@
                 停机
               </el-button>
               <el-button
-                v-if="card?.status === 'suspended'"
                 type="success"
                 size="small"
+                :disabled="!card || card.status !== 'suspended'"
                 @click="handleResume"
               >
                 <el-icon><CircleCheck /></el-icon>
                 复机
+              </el-button>
+              <el-button
+                v-if="isSuperAdmin"
+                type="warning"
+                size="small"
+                :disabled="!card || card.status !== 'suspended'"
+                @click="handleForceResume"
+              >
+                <el-icon><CircleCheck /></el-icon>
+                强制复机
               </el-button>
             </div>
           </div>
@@ -65,7 +101,7 @@
             {{ card ? `${formatFlow(card.flow_size)}/${PERIOD_TYPE_MAP[card.period_type]}` : '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="激活时间">
-            {{ formatDateTime(card?.activated_at) }}
+            {{ formatDate(card?.activated_at) }}
           </el-descriptions-item>
           <el-descriptions-item label="沉默期到期">
             <span :class="{ 'text-danger': isExpired(card?.silent_expire_date) }">
@@ -74,7 +110,7 @@
           </el-descriptions-item>
           <el-descriptions-item label="到期时间">
             <span :class="{ 'text-danger': isExpired(card?.expired_at) }">
-              {{ formatDateTime(card?.expired_at) }}
+              {{ formatDate(card?.expired_at) }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="出库时间">
@@ -120,13 +156,13 @@
           <div class="flow-chart">
             <el-progress
               type="dashboard"
-              :percentage="usagePercent"
+              :percentage="Math.min(usagePercent, 100)"
               :color="getProgressColor(usagePercent)"
               :width="200"
             >
               <template #default>
                 <div class="progress-content">
-                  <div class="percentage">{{ usagePercent.toFixed(0) }}%</div>
+                  <div class="percentage">{{ usagePercent.toFixed(2) }}%</div>
                   <div class="usage-text">已使用</div>
                 </div>
               </template>
@@ -136,19 +172,19 @@
           <div class="flow-details">
             <el-descriptions :column="2" border>
               <el-descriptions-item label="已用流量">
-                <span class="flow-value">{{ formatFlow(card?.data_used) }}</span>
+                <span class="flow-value">{{ formatFlowValue(card?.data_used) }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="总流量">
-                <span class="flow-value">{{ formatFlow(card?.data_total) }}</span>
+                <span class="flow-value">{{ formatFlowValue(card?.data_total) }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="剩余流量">
                 <span class="flow-value remaining">
-                  {{ formatFlow(Math.max((card?.data_total || 0) - (card?.data_used || 0), 0)) }}
+                  {{ formatFlowValue(Math.max((card?.data_total || 0) - (card?.data_used || 0), 0)) }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="使用率">
                 <span class="flow-value" :class="{ 'text-danger': usagePercent >= 90 }">
-                  {{ usagePercent.toFixed(0) }}%
+                  {{ usagePercent.toFixed(2) }}%
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="数据同步时间" :span="2">
@@ -187,6 +223,36 @@
         </div>
       </el-card>
 
+      <!-- 补量日志 -->
+      <el-card class="info-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span>补量日志</span>
+            <el-button type="text" size="small" @click="fetchFlowLogs">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
+        </template>
+
+        <el-table v-loading="flowLogLoading" :data="flowLogs" stripe>
+          <el-table-column prop="user_name" label="操作人" width="140" />
+          <el-table-column prop="detail" label="操作详情" min-width="320" show-overflow-tooltip />
+          <el-table-column label="结果" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.is_success ? 'success' : 'danger'">
+                {{ row.is_success ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="时间" width="180">
+            <template #default="{ row }">
+              {{ formatDateTime(row.created_at) }}
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+
       <!-- 划拨记录 -->
       <el-card class="info-card" shadow="never">
         <template #header>
@@ -204,8 +270,16 @@
           :data="transferList"
           stripe
         >
-          <el-table-column prop="from_user_id" label="原用户ID" width="120" />
-          <el-table-column prop="to_user_id" label="目标用户ID" width="120" />
+          <el-table-column label="原用户" min-width="160">
+            <template #default="{ row }">
+              {{ row.from_user_name || row.from_user_id || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="目标用户" min-width="160">
+            <template #default="{ row }">
+              {{ row.to_user_name || row.to_user_id || '-' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip />
           <el-table-column prop="created_at" label="划拨时间" width="180">
             <template #default="{ row }">
@@ -257,14 +331,13 @@
             <div ref="chartRef" style="width: 100%; height: 300px; margin-bottom: 20px"></div>
 
             <el-table :data="historyList" stripe>
-            <el-table-column prop="snapshot_date" label="快照日期" width="120" />
-            <el-table-column prop="snapshot_type" label="类型" width="100">
+            <el-table-column prop="snapshot_date" label="日期" width="120">
               <template #default="{ row }">
-                {{ row.snapshot_type === 'month_end' ? '月末' : '周期末' }}
+                {{ formatDate(row.snapshot_date) }}
               </template>
             </el-table-column>
-            <el-table-column prop="snapshot_month" label="月份" width="100" />
-            <el-table-column prop="data_used" label="已用流量(MB)" width="140" />
+            <el-table-column prop="daily_used" label="日用量(MB)" width="140" />
+            <el-table-column prop="data_used" label="累计已用(MB)" width="140" />
             <el-table-column prop="data_total" label="总流量(MB)" width="140" />
             <el-table-column label="使用率" width="120">
               <template #default="{ row }">
@@ -290,6 +363,18 @@
       :card="card"
       @success="handleRemarkSuccess"
     />
+
+    <SingleAddFlowDialog
+      v-model="singleAddFlowVisible"
+      :card="card"
+      @success="handleAddFlowSuccess"
+    />
+
+    <SingleRenewDialog
+      v-model="singleRenewVisible"
+      :card="card"
+      @success="handleRenewSuccess"
+    />
   </div>
 </template>
 
@@ -300,25 +385,32 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Connection,
   Edit,
+  Plus,
   CircleClose,
   CircleCheck,
   Refresh
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { cardApi } from '@/api'
+import { systemApi } from '@/api/modules/system'
+import { useAuthStore } from '@/stores/modules/auth'
 import type { Card, UsageHistory } from '@/types/card'
+import type { OperationLog } from '@/types/system'
 import {
   CARRIER_MAP,
   CARD_STATUS_MAP,
   PERIOD_TYPE_MAP,
   SUSPEND_TYPE_MAP
 } from '@/constants/card'
-import { formatFlow, formatDate, formatDateTime, isExpired } from '@/utils/formatter'
+import { formatFlow, formatFlowValue, formatDate, formatDateTime, isExpired } from '@/utils/formatter'
 import TransferDialog from '../list/components/TransferDialog.vue'
 import RemarkDialog from '../list/components/RemarkDialog.vue'
+import SingleAddFlowDialog from '../list/components/SingleAddFlowDialog.vue'
+import SingleRenewDialog from '../list/components/SingleRenewDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
 // 数据
 const loading = ref(false)
@@ -329,10 +421,14 @@ const transferList = ref<any[]>([])
 // 对话框显示状态
 const transferVisible = ref(false)
 const remarkVisible = ref(false)
+const singleAddFlowVisible = ref(false)
+const singleRenewVisible = ref(false)
 
 // 历史用量
 const historyLoading = ref(false)
 const historyList = ref<UsageHistory[]>([])
+const flowLogLoading = ref(false)
+const flowLogs = ref<OperationLog[]>([])
 const historyDateRange = ref<[Date, Date]>()
 const chartRef = ref<HTMLElement>()
 let chartInstance: echarts.ECharts | null = null
@@ -346,11 +442,12 @@ const transferPagination = ref({
 
 // 计算属性
 const cardId = computed(() => Number(route.params.id))
+const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
 
 const usagePercent = computed(() => {
   if (!card.value || !card.value.data_total) return 0
   const percent = (card.value.data_used / card.value.data_total) * 100
-  return Math.min(Math.max(percent, 0), 100)
+  return Math.max(percent, 0)
 })
 
 // 获取卡片详情
@@ -370,7 +467,7 @@ const fetchCardDetail = async () => {
 const fetchTransfers = async () => {
   transferLoading.value = true
   try {
-    const response = await cardApi.getTransfers(
+    const response: any = await cardApi.getTransfers(
       cardId.value,
       transferPagination.value.page,
       transferPagination.value.page_size
@@ -404,19 +501,56 @@ const fetchUsageHistory = async () => {
   }
 }
 
+// 获取补量日志
+const fetchFlowLogs = async () => {
+  flowLogLoading.value = true
+  try {
+    const res: any = await systemApi.getOperationLogs({
+      module: 'cards',
+      action: 'add_flow',
+      target_type: 'card',
+      target_id: cardId.value,
+      page: 1,
+      page_size: 10
+    })
+    flowLogs.value = res.items || []
+  } catch (error) {
+    console.error('获取补量日志失败:', error)
+    flowLogs.value = []
+  } finally {
+    flowLogLoading.value = false
+  }
+}
+
 // 渲染图表
 const renderChart = () => {
-  if (!chartRef.value || historyList.value.length === 0) return
+  if (!chartRef.value) return
+
+  if (historyList.value.length === 0) {
+    chartInstance?.clear()
+    return
+  }
+
   if (!chartInstance) {
     chartInstance = echarts.init(chartRef.value)
   }
-  const dates = historyList.value.map(h => h.snapshot_date).reverse()
-  const usages = historyList.value.map(h => h.data_used).reverse()
+
+  const dates = historyList.value.map(h => formatDate(h.snapshot_date))
+  const usages = historyList.value.map(h => h.daily_used || 0)
+
   chartInstance.setOption({
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' }
+    },
     xAxis: { type: 'category', data: dates },
-    yAxis: { type: 'value', name: '流量(MB)' },
-    series: [{ data: usages, type: 'line', smooth: true }]
+    yAxis: { type: 'value', name: '日用量(MB)' },
+    series: [{
+      data: usages,
+      type: 'bar',
+      barMaxWidth: 28,
+      itemStyle: { color: '#409EFF' }
+    }]
   })
 }
 
@@ -470,6 +604,7 @@ const handleSuspend = async () => {
 
 // 复机
 const handleResume = async () => {
+  if (!card.value?.iccid) return
   try {
     await ElMessageBox.confirm(
       '确定要复机该卡片吗？',
@@ -481,15 +616,63 @@ const handleResume = async () => {
       }
     )
 
-    await cardApi.batchResume([cardId.value])
+    const result = await cardApi.batchResumeByIccids({
+      iccids: [card.value.iccid]
+    })
 
-    ElMessage.success('复机成功')
+    if (result.success > 0) {
+      ElMessage.success('复机成功')
+    } else {
+      const firstError = result.failed_list?.[0]?.error || '当前不允许复机'
+      ElMessage.error(firstError)
+    }
     fetchCardDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('复机失败:', error)
     }
   }
+}
+
+const handleForceResume = async () => {
+  if (!card.value?.iccid) return
+
+  try {
+    await ElMessageBox.confirm(
+      '确定要强制复机该卡片吗？该操作会绕过人工停卡与超限限制。',
+      '强制复机确认',
+      {
+        confirmButtonText: '确认强制复机',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.batchForceResumeByIccids({
+      iccids: [card.value.iccid]
+    })
+
+    if (result.success > 0) {
+      ElMessage.success('强制复机成功')
+    } else {
+      const firstError = result.failed_list?.[0]?.error || '强制复机失败'
+      ElMessage.error(firstError)
+    }
+    fetchCardDetail()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('强制复机失败:', error)
+    }
+  }
+}
+
+// 单卡补量
+const handleAddFlow = () => {
+  singleAddFlowVisible.value = true
+}
+
+const handleRenew = () => {
+  singleRenewVisible.value = true
 }
 
 // 划拨成功回调
@@ -500,6 +683,15 @@ const handleTransferSuccess = () => {
 
 // 备注成功回调
 const handleRemarkSuccess = () => {
+  fetchCardDetail()
+}
+
+const handleAddFlowSuccess = () => {
+  fetchCardDetail()
+  fetchFlowLogs()
+}
+
+const handleRenewSuccess = () => {
   fetchCardDetail()
 }
 
@@ -514,6 +706,7 @@ const getProgressColor = (percent: number) => {
 onMounted(() => {
   fetchCardDetail()
   fetchTransfers()
+  fetchFlowLogs()
   // 默认显示最近30天
   const end = new Date()
   const start = new Date()
@@ -613,9 +806,3 @@ onMounted(() => {
   }
 }
 </style>
-
-
-
-
-
-

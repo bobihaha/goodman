@@ -7,6 +7,8 @@ from datetime import datetime
 
 from app.crud.system_crud import SysConfigCRUD, SysLoginLogCRUD, SysOperationLogCRUD, SysNotifyTemplateCRUD
 from app.db.models.sys_log import SysConfigModel, SysNotifyTemplateModel
+from app.db.models.sys_user import UserLevel
+from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.schemas.system import ConfigCreate, ConfigUpdate, NotifyTemplateCreate, NotifyTemplateUpdate, AlertRules
 
 
@@ -312,10 +314,13 @@ class OperationLogService:
     @staticmethod
     async def get_logs(
         db: AsyncSession,
+        current_user_id: int,
+        current_user_level: int,
         user_id: Optional[int] = None,
         module: Optional[str] = None,
         action: Optional[str] = None,
         target_type: Optional[str] = None,
+        target_id: Optional[int] = None,
         is_success: Optional[bool] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -323,12 +328,26 @@ class OperationLogService:
         page_size: int = 20
     ) -> Tuple[List[dict], int]:
         """获取操作日志列表"""
+        scoped_user_ids: Optional[List[int]] = None
+        if current_user_level != UserLevel.SUPER_ADMIN.value:
+            if current_user_level == UserLevel.SUB_USER.value:
+                scoped_user_ids = [current_user_id]
+            else:
+                sys_user_crud = SysUserCRUDEnhanced()
+                child_ids = await sys_user_crud.get_children_ids(db, current_user_id)
+                scoped_user_ids = [current_user_id, *child_ids]
+
+            if user_id is not None and user_id not in scoped_user_ids:
+                return [], 0
+
         logs, total = await SysOperationLogCRUD.get_list(
             db=db,
             user_id=user_id,
+            user_ids=scoped_user_ids,
             module=module,
             action=action,
             target_type=target_type,
+            target_id=target_id,
             is_success=is_success,
             start_time=start_time,
             end_time=end_time,

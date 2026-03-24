@@ -102,6 +102,32 @@ export const cardApi = {
     return post('/cards/batch/resume-by-iccids', data.iccids)
   },
 
+  // 通过ICCID批量强制复机
+  batchForceResumeByIccids(data: { iccids: string[] }): Promise<any> {
+    return post('/cards/batch/force-resume-by-iccids', data.iccids)
+  },
+
+  // 通过ICCID批量增加单卡流量
+  batchAddFlowByIccids(data: { iccids: string[]; added_flow_mb: number; remark?: string }): Promise<any> {
+    return post('/cards/batch/add-flow-by-iccids', data)
+  },
+
+  quoteTopup(cardId: number, packageMb: number): Promise<any> {
+    return post(`/cards/${cardId}/topup/quote`, { package_mb: packageMb })
+  },
+
+  purchaseTopup(cardId: number, packageMb: number): Promise<any> {
+    return post(`/cards/${cardId}/topup`, { package_mb: packageMb })
+  },
+
+  quoteRenew(cardId: number, renewMonths: number): Promise<any> {
+    return post(`/cards/${cardId}/renew/quote`, { renew_months: renewMonths })
+  },
+
+  purchaseRenew(cardId: number, renewMonths: number): Promise<any> {
+    return post(`/cards/${cardId}/renew`, { renew_months: renewMonths })
+  },
+
   // 获取划拨记录
   getTransfers(cardId: number, page = 1, pageSize = 20): Promise<PaginationResponse<any>> {
     return get<PaginationResponse<any>>(`/cards/${cardId}/transfers`, { params: { page, page_size: pageSize } })

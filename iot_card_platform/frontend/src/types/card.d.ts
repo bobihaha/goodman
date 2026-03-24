@@ -49,6 +49,7 @@ export interface Card {
   remark?: string
   stock_in_at?: string            // 入库时间（ISO格式）
   stock_out_at?: string           // 出库时间（ISO格式）
+  stock_out_date?: string         // 出库日期
   created_at: string
   updated_at?: string
   // 前端计算字段
@@ -145,6 +146,7 @@ export interface UsageHistory {
   card_id: number
   iccid: string
   data_used: number
+  daily_used?: number
   data_total: number
   period_type: string
   snapshot_date: string

@@ -3,8 +3,9 @@
 """
 from typing import Optional, List
 from datetime import datetime, date
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
+from app.flow_packages import FLOW_PACKAGE_LABELS, is_valid_flow_package_size
 
 
 class CardStatus(str, Enum):
@@ -162,6 +163,37 @@ class BatchRemarkRequest(BaseModel):
     """批量备注请求"""
     card_ids: List[int] = Field(..., min_length=1, description="卡片ID列表")
     remark: str = Field(..., max_length=500, description="备注内容")
+
+
+class BatchAddFlowByIccidsRequest(BaseModel):
+    """通过ICCID批量增加单卡流量"""
+    iccids: List[str] = Field(..., min_length=1, description="ICCID列表")
+    added_flow_mb: int = Field(..., gt=0, description="增加流量(MB)")
+    remark: Optional[str] = Field(None, max_length=200, description="备注")
+
+    @field_validator("added_flow_mb")
+    @classmethod
+    def validate_added_flow_mb(cls, value: int) -> int:
+        if not is_valid_flow_package_size(value):
+            supported = " / ".join(FLOW_PACKAGE_LABELS[size] for size in FLOW_PACKAGE_LABELS)
+            raise ValueError(f"仅支持固定补量规格: {supported}")
+        return value
+
+
+class CardTopupQuoteRequest(BaseModel):
+    package_mb: int = Field(..., gt=0, description="加油包规格(MB)")
+
+    @field_validator("package_mb")
+    @classmethod
+    def validate_package_mb(cls, value: int) -> int:
+        if not is_valid_flow_package_size(value):
+            supported = " / ".join(FLOW_PACKAGE_LABELS[size] for size in FLOW_PACKAGE_LABELS)
+            raise ValueError(f"仅支持固定补量规格: {supported}")
+        return value
+
+
+class CardRenewQuoteRequest(BaseModel):
+    renew_months: int = Field(..., gt=0, description="续费月数")
 
 
 # ============ 导出相关 ============

@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List
 from abc import ABC, abstractmethod
 import httpx
 from datetime import datetime
+from app.config import settings
 
 
 class SupplierAPIClient(ABC):
@@ -208,15 +209,26 @@ def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret
       - 其他 -> MockSupplierAPIClient (后续可扩展)
     """
     from app.clients.upiot_client import UpiotSupplierClient
+    from app.utils.const import decrypt_secret
+
+    normalized_url = (api_url or "").strip()
+    normalized_key = decrypt_secret((api_key or "").strip())
+    normalized_secret = decrypt_secret((api_secret or "").strip())
 
     # 根据 api_url 判断供应商平台类型
-    if api_url and "upiot" in api_url.lower():
-        return UpiotSupplierClient(api_url, api_key, api_secret)
+    if normalized_url and "upiot" in normalized_url.lower():
+        return UpiotSupplierClient(normalized_url, normalized_key, normalized_secret)
 
-    # 默认返回模拟客户端
-    return MockSupplierAPIClient(api_url, api_key, api_secret)
+    # 仅开发环境允许兜底 mock，避免生产环境生成随机脏数据
+    if settings.app_env != "production":
+        return MockSupplierAPIClient(normalized_url, normalized_key, normalized_secret)
 
-
+    raise ValueError(
+        f"供应商 {supplier_id} API 未配置完整，生产环境禁止使用 Mock 客户端 "
+        f"(api_url={'yes' if normalized_url else 'no'}, "
+        f"api_key={'yes' if normalized_key else 'no'}, "
+        f"api_secret={'yes' if normalized_secret else 'no'})"
+    )
 
 
 

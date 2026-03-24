@@ -99,6 +99,8 @@ class IotCardModel(BaseModel):
     data_used = Column(BigInteger, nullable=False, default=0, comment="已用流量(MB)")
     data_total = Column(BigInteger, nullable=False, comment="总流量(MB)")
     data_used_month = Column(BigInteger, nullable=False, default=0, comment="本月已用流量(MB)")
+    addon_flow = Column(BigInteger, nullable=False, default=0, comment="当月补量(MB)")
+    addon_flow_month = Column(String(7), nullable=True, comment="补量生效月份(YYYY-MM)")
     data_sync_at = Column(DateTime, nullable=True, comment="流量同步时间")
     
     # 状态
@@ -187,6 +189,8 @@ class IotCardModel(BaseModel):
             "data_used": self.data_used,
             "data_total": self.data_total,
             "data_used_month": self.data_used_month,
+            "addon_flow": self.addon_flow,
+            "addon_flow_month": self.addon_flow_month,
             "data_remain": self.data_total - self.data_used if self.data_total else 0,
             "data_usage_percent": self.get_data_usage_percent(),
             "data_sync_at": self.data_sync_at.isoformat() if self.data_sync_at else None,

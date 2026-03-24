@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, Query, Body, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.services.pool_service import pool_service
-from app.utils.auth import get_current_user, require_super_admin
+from app.utils.auth import get_current_user, require_super_admin, require_any_level
 from app.utils.exceptions import BusinessException
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
-from app.schemas.pool import PoolCreate, PoolUpdate, PoolAddCards, PoolRemoveCards
+from app.schemas.pool import PoolCreate, PoolUpdate, PoolAddCards, PoolRemoveCards, PoolRechargeRequest, PoolTopupPurchaseRequest
+from app.flow_packages import FLOW_PACKAGE_LABELS, FLOW_PACKAGE_SIZES_MB
 
 router = APIRouter(tags=["流量池管理"])
 
@@ -33,11 +34,10 @@ async def get_pools(
     - 超级管理员: 可查看所有流量池
     - 普通用户: 只能查看自己的流量池
     """
-    user_id = None if current_user.user_level == 1 else current_user.id
-
     items, total = await pool_service.get_pools(
         db=db,
-        user_id=user_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
         name=name,
         carrier=carrier,
         status=status,
@@ -58,8 +58,11 @@ async def get_pool_stats(
     - 总流量、已用流量
     - 告警流量池数、按运营商分类
     """
-    user_id = None if current_user.user_level == 1 else current_user.id
-    stats = await pool_service.get_pool_stats(db, user_id)
+    stats = await pool_service.get_pool_stats(
+        db,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
     return ResponseModel(data=stats)
 
 
@@ -69,8 +72,11 @@ async def get_pool_packages(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """获取可用的加油包列表（暂未实现）"""
-    return ResponseModel(data=[])
+    """获取可用的固定规格加油包列表"""
+    return ResponseModel(data=[
+        {"label": FLOW_PACKAGE_LABELS[size], "flow_mb": size}
+        for size in FLOW_PACKAGE_SIZES_MB
+    ])
 
 
 @router.post("/export", summary="导出流量池数据", response_model=ResponseModel)
@@ -118,7 +124,12 @@ async def get_pool(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """获取流量池详情"""
-    pool = await pool_service.get_pool(db, pool_id)
+    pool = await pool_service.get_pool(
+        db,
+        pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
     return ResponseModel(data=pool)
 
 
@@ -135,7 +146,13 @@ async def update_pool(
     - 规格信息创建后不可修改
     """
     update_data = request.model_dump(exclude_unset=True)
-    pool = await pool_service.update_pool(db, pool_id, **update_data)
+    pool = await pool_service.update_pool(
+        db,
+        pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        **update_data
+    )
     return ResponseModel(data=pool, msg="更新成功")
 
 
@@ -149,7 +166,13 @@ async def toggle_pool_status(
     """启用/禁用流量池"""
     if status not in ("enable", "disable"):
         raise BusinessException(code=400, msg="状态值无效，必须为 enable 或 disable")
-    pool = await pool_service.update_pool(db, pool_id, status=status)
+    pool = await pool_service.update_pool(
+        db,
+        pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        status=status
+    )
     return ResponseModel(data=pool, msg="状态更新成功")
 
 
@@ -163,7 +186,12 @@ async def delete_pool(
     删除流量池
     - 池内有卡片时不允许删除
     """
-    await pool_service.delete_pool(db, pool_id)
+    await pool_service.delete_pool(
+        db,
+        pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
     return ResponseModel(msg="删除成功")
 
 
@@ -179,7 +207,12 @@ async def get_pool_cards(
 ):
     """获取流量池内卡片列表"""
     items, total = await pool_service.get_pool_cards(
-        db=db, pool_id=pool_id, page=page, page_size=page_size
+        db=db,
+        pool_id=pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        page=page,
+        page_size=page_size
     )
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})
 
@@ -201,6 +234,8 @@ async def add_cards_to_pool(
         db=db,
         pool_id=pool_id,
         card_ids=request.card_ids,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
         operator_id=current_user.id,
         remark=request.remark
     )
@@ -219,6 +254,8 @@ async def remove_cards_from_pool(
         db=db,
         pool_id=pool_id,
         card_ids=request.card_ids,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
         operator_id=current_user.id,
         remark=request.remark
     )
@@ -238,7 +275,12 @@ async def get_pool_usage(
     - 返回总用量、各卡片用量明细
     - 告警状态、是否超限
     """
-    usage = await pool_service.get_pool_usage(db, pool_id)
+    usage = await pool_service.get_pool_usage(
+        db,
+        pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
     return ResponseModel(data=usage)
 
 
@@ -256,12 +298,60 @@ async def get_pool_usage_trend(
 @router.post("/{pool_id}/recharge", summary="充值加油包", response_model=ResponseModel)
 async def recharge_pool(
     pool_id: int = Path(..., description="流量池ID"),
-    package_id: int = Body(..., embed=True, description="加油包ID"),
+    request: PoolRechargeRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """充值加油包到流量池（暂未实现）"""
-    raise BusinessException(code=501, msg="充值功能暂未开放")
+    """后台给流量池增加流量，并自动重检池超限停卡"""
+    result = await pool_service.recharge_pool(
+        db=db,
+        pool_id=pool_id,
+        added_flow_mb=request.added_flow_mb,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(
+        data=result,
+        msg=f"补量成功，自动复机 {result['auto_resumed']} 张卡片"
+    )
+
+
+@router.post("/{pool_id}/topup/quote", summary="流量池加油包试算", response_model=ResponseModel)
+async def quote_pool_topup(
+    pool_id: int = Path(..., description="流量池ID"),
+    request: PoolTopupPurchaseRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_level)
+):
+    quote = await pool_service.quote_pool_topup(
+        db=db,
+        pool_id=pool_id,
+        current_user_id=current_user.id
+    )
+    return ResponseModel(data={
+        **quote,
+        "quantity": request.quantity,
+        "added_flow_mb": quote["unit_flow_mb"] * request.quantity,
+        "total_price": round(quote["unit_price"] * request.quantity, 2)
+    })
+
+
+@router.post("/{pool_id}/topup", summary="购买流量池加油包", response_model=ResponseModel)
+async def purchase_pool_topup(
+    pool_id: int = Path(..., description="流量池ID"),
+    request: PoolTopupPurchaseRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_level)
+):
+    result = await pool_service.purchase_pool_topup(
+        db=db,
+        pool_id=pool_id,
+        quantity=request.quantity,
+        current_user_id=current_user.id,
+        remark=request.remark
+    )
+    return ResponseModel(data=result, msg="流量池加油包购买成功")
 
 
 @router.get("/{pool_id}/recharge-logs", summary="获取充值记录", response_model=ResponseModel)
@@ -287,6 +377,12 @@ async def get_pool_logs(
 ):
     """获取流量池卡片变动日志"""
     items, total = await pool_service.get_pool_logs(
-        db=db, pool_id=pool_id, action=action, page=page, page_size=page_size
+        db=db,
+        pool_id=pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        action=action,
+        page=page,
+        page_size=page_size
     )
     return ResponseModel(data={"total": total, "page": page, "page_size": page_size, "items": items})

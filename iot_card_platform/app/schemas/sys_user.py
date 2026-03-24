@@ -20,7 +20,13 @@ class UserCreate(BaseModel):
     phone: Optional[str] = Field(None, pattern=r"^1[3-9]\d{9}$")
     email: Optional[str] = Field(None, max_length=100)
     alert_notify: Optional[Dict[str, Any]] = Field(default={"sms": True, "email": True})
-    quota: Optional[Dict[str, Any]] = Field(default={"max_cards": 100, "max_sub_users": 5, "pool_stop_threshold": 100})
+    quota: Optional[Dict[str, Any]] = Field(default={
+        "max_cards": 100,
+        "max_sub_users": 5,
+        "pool_stop_threshold": 100,
+        "account_balance": 0,
+        "balance_alert_threshold": 1000
+    })
     remark: Optional[str] = Field(None, max_length=500)
     status: UserStatus = Field(default=UserStatus.enable)
 
@@ -81,3 +87,9 @@ class UserPasswordUpdate(BaseModel):
 
 class UserPasswordReset(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=50)
+
+
+class UserBalanceGrantRequest(BaseModel):
+    amount: float = Field(..., gt=0, description="分配金额")
+    remark: Optional[str] = Field(None, max_length=200, description="备注")
+    request_id: Optional[str] = Field(None, max_length=64, description="幂等请求ID")

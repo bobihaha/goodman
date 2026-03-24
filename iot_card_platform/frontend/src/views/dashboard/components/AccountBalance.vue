@@ -3,10 +3,13 @@
     <template #header>
       <div class="card-header">
         <span>账户余额</span>
-        <el-button type="primary" size="small" @click="handleRecharge">
-          <el-icon><CreditCard /></el-icon>
-          充值
-        </el-button>
+        <div class="header-actions">
+          <el-button size="small" @click="handleViewLogs">余额记录</el-button>
+          <el-button type="primary" size="small" @click="handleRecharge">
+            <el-icon><CreditCard /></el-icon>
+            充值
+          </el-button>
+        </div>
       </div>
     </template>
 
@@ -47,9 +50,11 @@ import { ElMessage } from 'element-plus'
 import { CreditCard, Warning } from '@element-plus/icons-vue'
 import { dashboardApi, type AccountBalance } from '@/api'
 import { formatMoney, formatRelativeTime } from '@/utils/formatter'
+import { useRouter } from 'vue-router'
 
 const loading = ref(false)
 const balanceData = ref<AccountBalance | null>(null)
+const router = useRouter()
 
 // 获取余额数据
 const fetchBalance = async () => {
@@ -66,6 +71,10 @@ const fetchBalance = async () => {
 // 充值
 const handleRecharge = () => {
   ElMessage.info('充值功能开发中...')
+}
+
+const handleViewLogs = () => {
+  router.push('/records/balance')
 }
 
 onMounted(() => {
@@ -87,6 +96,11 @@ onMounted(() => {
   justify-content: space-between;
   font-weight: 600;
   font-size: 14px;
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+  }
 }
 
 .balance-content {
@@ -149,7 +163,6 @@ onMounted(() => {
   }
 }
 </style>
-
 
 
 

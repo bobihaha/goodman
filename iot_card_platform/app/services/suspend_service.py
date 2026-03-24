@@ -3,7 +3,7 @@
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 import logging
 
 from app.crud.suspend_crud import (
@@ -98,11 +98,137 @@ class SuspendActionService:
     """停卡/复机操作服务"""
 
     @staticmethod
+    async def _load_supplier_map(
+        db: AsyncSession,
+        cards: List[IotCardModel]
+    ) -> Dict[int, SupplierModel]:
+        supplier_ids = {c.supplier_id for c in cards if c.supplier_id}
+        if not supplier_ids:
+            return {}
+        supplier_result = await db.execute(
+            select(SupplierModel).where(
+                SupplierModel.id.in_(supplier_ids),
+                SupplierModel.is_deleted == 0
+            )
+        )
+        return {item.id: item for item in supplier_result.scalars().all()}
+
+    @staticmethod
+    async def _call_supplier_suspend(card: IotCardModel, supplier: Optional[SupplierModel], reason: Optional[str]) -> bool:
+        if not supplier:
+            return False
+        try:
+            supplier_client = get_supplier_client(
+                supplier_id=card.supplier_id,
+                api_url=supplier.api_url or "",
+                api_key=supplier.api_key or "",
+                api_secret=supplier.api_secret or ""
+            )
+            return await supplier_client.suspend_card(card.iccid, reason)
+        except Exception as exc:
+            logger.error(f"供应商API停机失败: iccid={card.iccid}, error={exc}")
+            return False
+
+    @staticmethod
+    async def _call_supplier_resume(card: IotCardModel, supplier: Optional[SupplierModel]) -> bool:
+        if not supplier:
+            return False
+        try:
+            supplier_client = get_supplier_client(
+                supplier_id=card.supplier_id,
+                api_url=supplier.api_url or "",
+                api_key=supplier.api_key or "",
+                api_secret=supplier.api_secret or ""
+            )
+            return await supplier_client.resume_card(card.iccid)
+        except Exception as exc:
+            logger.error(f"供应商API复机失败: iccid={card.iccid}, error={exc}")
+            return False
+
+    @staticmethod
+    async def _check_resume_eligibility(
+        db: AsyncSession,
+        card: IotCardModel,
+        force: bool = False
+    ) -> Tuple[bool, Optional[str]]:
+        """检查卡片是否满足复机条件"""
+        if force:
+            return True, None
+
+        suspend_type = card.suspend_type or SuspendType.none
+
+        if suspend_type == SuspendType.expired:
+            if card.expired_at and card.expired_at >= date.today():
+                return True, None
+            return False, "到期停卡，请先续费"
+
+        if suspend_type == SuspendType.manual:
+            return False, "人工停卡需管理员强制复机"
+
+        if suspend_type == SuspendType.card_exceed:
+            if card.data_used > card.data_total:
+                return False, "单卡流量仍超限，请先补量"
+            return True, None
+
+        if suspend_type == SuspendType.pool_exceed:
+            if not card.pool_id:
+                return False, "流量池信息缺失，暂不可复机"
+
+            from app.crud.pool_crud import pool_crud
+            from app.db.models.sys_user import SysUserModel
+            import json
+
+            pool = await pool_crud.update_stats(db, card.pool_id)
+            if not pool:
+                return False, "流量池不存在，暂不可复机"
+
+            threshold = 100
+            if pool.user_id:
+                quota_result = await db.execute(
+                    select(SysUserModel.quota).where(
+                        SysUserModel.id == pool.user_id,
+                        SysUserModel.is_deleted == 0
+                    )
+                )
+                quota_data = quota_result.scalar_one_or_none()
+                if quota_data:
+                    quota = quota_data if isinstance(quota_data, dict) else json.loads(quota_data)
+                    threshold = quota.get("pool_stop_threshold", 100)
+
+            if pool.get_usage_percent() >= threshold:
+                return False, "流量池仍超限，请先补量"
+            return True, None
+
+        return True, None
+
+    @staticmethod
+    async def _resume_card_with_logging(
+        db: AsyncSession,
+        card: IotCardModel,
+        operator_id: Optional[int] = None,
+        reason: Optional[str] = None
+    ) -> None:
+        """执行复机并记录日志"""
+        old_suspend_type = card.suspend_type.value if card.suspend_type else "manual"
+        await CardSuspendCRUD.resume_card(db=db, card_id=card.id)
+
+        await SuspendLogCRUD.create(
+            db=db,
+            card_id=card.id,
+            iccid=card.iccid,
+            action=SuspendActionType.resume,
+            suspend_type=old_suspend_type,
+            reason=reason,
+            operator_id=operator_id
+        )
+
+    @staticmethod
     async def manual_suspend(
         db: AsyncSession,
         data: ManualSuspend,
         operator_id: int,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         is_admin: bool = False
     ) -> SuspendResult:
         """手动停卡"""
@@ -112,18 +238,12 @@ class SuspendActionService:
         # 获取卡片
         cards = await CardSuspendCRUD.get_cards_by_ids(
             db, data.card_ids,
-            user_id=None if is_admin else user_id
+            user_id=None if is_admin else user_id,
+            user_ids=None if is_admin else user_ids
         )
         card_map = {c.id: c for c in cards}
 
-        # 预加载供应商信息（避免N+1查询）
-        supplier_ids = {c.supplier_id for c in cards if c.supplier_id}
-        supplier_query = select(SupplierModel).where(
-            SupplierModel.id.in_(supplier_ids),
-            SupplierModel.is_deleted == 0
-        )
-        supplier_result = await db.execute(supplier_query)
-        supplier_map = {s.id: s for s in supplier_result.scalars().all()}
+        supplier_map = await SuspendActionService._load_supplier_map(db, cards)
 
         for card_id in data.card_ids:
             card = card_map.get(card_id)
@@ -141,19 +261,8 @@ class SuspendActionService:
                 continue
 
             # 调用供应商API停机
-            api_success = False
             supplier = supplier_map.get(card.supplier_id)
-            if supplier:
-                try:
-                    supplier_client = get_supplier_client(
-                        supplier_id=card.supplier_id,
-                        api_url=supplier.api_url or "",
-                        api_key=supplier.api_key or "",
-                        api_secret=supplier.api_secret or ""
-                    )
-                    api_success = await supplier_client.suspend_card(card.iccid, data.reason)
-                except Exception as e:
-                    logger.error(f"供应商API停机失败: iccid={card.iccid}, error={e}")
+            api_success = await SuspendActionService._call_supplier_suspend(card, supplier, data.reason)
 
             # 只有API成功才更新数据库
             if not api_success:
@@ -194,7 +303,9 @@ class SuspendActionService:
         data: ManualResume,
         operator_id: int,
         user_id: Optional[int] = None,
-        is_admin: bool = False
+        user_ids: Optional[List[int]] = None,
+        is_admin: bool = False,
+        force: bool = False
     ) -> SuspendResult:
         """手动复机"""
         success_cards = []
@@ -203,18 +314,12 @@ class SuspendActionService:
         # 获取卡片
         cards = await CardSuspendCRUD.get_cards_by_ids(
             db, data.card_ids,
-            user_id=None if is_admin else user_id
+            user_id=None if is_admin else user_id,
+            user_ids=None if is_admin else user_ids
         )
         card_map = {c.id: c for c in cards}
 
-        # 预加载供应商信息（避免N+1查询）
-        supplier_ids = {c.supplier_id for c in cards if c.supplier_id}
-        supplier_query = select(SupplierModel).where(
-            SupplierModel.id.in_(supplier_ids),
-            SupplierModel.is_deleted == 0
-        )
-        supplier_result = await db.execute(supplier_query)
-        supplier_map = {s.id: s for s in supplier_result.scalars().all()}
+        supplier_map = await SuspendActionService._load_supplier_map(db, cards)
 
         for card_id in data.card_ids:
             card = card_map.get(card_id)
@@ -227,45 +332,29 @@ class SuspendActionService:
                 fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "卡片未处于停机状态"})
                 continue
 
-            # 检查是否可以复机
-            if card.suspend_type == SuspendType.expired:
-                # 到期停卡需要续费才能复机
-                fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "到期停卡，请先续费"})
+            can_resume, fail_reason = await SuspendActionService._check_resume_eligibility(
+                db=db,
+                card=card,
+                force=force
+            )
+            if not can_resume:
+                fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": fail_reason or "当前不允许复机"})
                 continue
 
             # 调用供应商API复机
-            api_success = False
             supplier = supplier_map.get(card.supplier_id)
-            if supplier:
-                try:
-                    supplier_client = get_supplier_client(
-                        supplier_id=card.supplier_id,
-                        api_url=supplier.api_url or "",
-                        api_key=supplier.api_key or "",
-                        api_secret=supplier.api_secret or ""
-                    )
-                    api_success = await supplier_client.resume_card(card.iccid)
-                except Exception as e:
-                    logger.error(f"供应商API复机失败: iccid={card.iccid}, error={e}")
+            api_success = await SuspendActionService._call_supplier_resume(card, supplier)
 
             # 只有API成功才更新数据库
             if not api_success:
                 fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "供应商API调用失败"})
                 continue
 
-            # 执行复机
-            old_suspend_type = card.suspend_type.value if card.suspend_type else "manual"
-            await CardSuspendCRUD.resume_card(db=db, card_id=card_id)
-
-            # 记录日志
-            await SuspendLogCRUD.create(
+            await SuspendActionService._resume_card_with_logging(
                 db=db,
-                card_id=card_id,
-                iccid=card.iccid,
-                action=SuspendActionType.resume,
-                suspend_type=old_suspend_type,
-                reason=data.reason,
-                operator_id=operator_id
+                card=card,
+                operator_id=operator_id,
+                reason=data.reason
             )
 
             success_cards.append(card.iccid)
@@ -399,23 +488,28 @@ class SuspendActionService:
             elif usage_percent >= policy.stop_threshold:
                 # 超限 - 执行停卡
                 if policy.auto_suspend == 1:
-                    await CardSuspendCRUD.suspend_card(
-                        db=db,
-                        card_id=card.id,
-                        suspend_type=SuspendType.card_exceed,
-                        reason=f"单卡流量超限({usage_percent}%)"
-                    )
+                    supplier_map = await SuspendActionService._load_supplier_map(db, [card])
+                    supplier = supplier_map.get(card.supplier_id)
+                    reason = f"单卡流量超限自动停卡({usage_percent}%)"
+                    api_success = await SuspendActionService._call_supplier_suspend(card, supplier, reason)
+                    if api_success:
+                        await CardSuspendCRUD.suspend_card(
+                            db=db,
+                            card_id=card.id,
+                            suspend_type=SuspendType.card_exceed,
+                            reason=f"单卡流量超限({usage_percent}%)"
+                        )
 
-                    await SuspendLogCRUD.create(
-                        db=db,
-                        card_id=card.id,
-                        iccid=card.iccid,
-                        action=SuspendActionType.suspend,
-                        suspend_type="card_exceed",
-                        policy_id=policy.id,
-                        reason=f"单卡流量超限自动停卡({usage_percent}%)"
-                    )
-                    suspended_count += 1
+                        await SuspendLogCRUD.create(
+                            db=db,
+                            card_id=card.id,
+                            iccid=card.iccid,
+                            action=SuspendActionType.suspend,
+                            suspend_type="card_exceed",
+                            policy_id=policy.id,
+                            reason=reason
+                        )
+                        suspended_count += 1
 
                 # 记录超限告警
                 exists = await AlertLogCRUD.check_exists(
@@ -436,6 +530,40 @@ class SuspendActionService:
                     alerts_created += 1
 
         return {"suspended_count": suspended_count, "alerts_created": alerts_created}
+
+    @staticmethod
+    async def auto_resume_cards_after_flow_adjustment(
+        db: AsyncSession,
+        cards: List[IotCardModel],
+        operator_id: Optional[int] = None,
+        reason: Optional[str] = None
+    ) -> Dict[str, int]:
+        """补量后自动重检并复机"""
+        resumed_count = 0
+        supplier_map = await SuspendActionService._load_supplier_map(db, cards)
+
+        for card in cards:
+            if card.status != CardStatus.suspended:
+                continue
+
+            can_resume, _ = await SuspendActionService._check_resume_eligibility(db, card)
+            if not can_resume:
+                continue
+
+            supplier = supplier_map.get(card.supplier_id)
+            api_success = await SuspendActionService._call_supplier_resume(card, supplier)
+            if not api_success:
+                continue
+
+            await SuspendActionService._resume_card_with_logging(
+                db=db,
+                card=card,
+                operator_id=operator_id,
+                reason=reason or "补量后自动复机"
+            )
+            resumed_count += 1
+
+        return {"resumed_count": resumed_count}
 
 
 class SuspendLogService:

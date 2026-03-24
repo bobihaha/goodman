@@ -5,11 +5,32 @@
 
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import type { ApiResponse } from '@/types/common'
 import { storage } from './storage'
 
+let isRedirectingToLogin = false
+
+const redirectToLogin = () => {
+  if (isRedirectingToLogin) {
+    return
+  }
+
+  isRedirectingToLogin = true
+  storage.remove('access_token')
+  storage.remove('refresh_token')
+  storage.remove('original_user_info')
+  storage.remove('original_access_token')
+  storage.remove('original_refresh_token')
+
+  const currentPath = window.location.pathname + window.location.search
+  const loginUrl = currentPath && currentPath !== '/login'
+    ? `/login?redirect=${encodeURIComponent(currentPath)}`
+    : '/login'
+
+  window.location.replace(loginUrl)
+}
+
 // 创建 axios 实例
-const request: AxiosInstance = axios.create({
+const axiosInstance: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 60000, // 增加到60秒，避免入库操作超时
   headers: {
@@ -18,7 +39,7 @@ const request: AxiosInstance = axios.create({
 })
 
 // 请求拦截器
-request.interceptors.request.use(
+axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     // 使用 storage 工具获取 token（会自动添加前缀）
     const token = storage.get<string>('access_token')
@@ -34,7 +55,7 @@ request.interceptors.request.use(
 )
 
 // 响应拦截器
-request.interceptors.response.use(
+axiosInstance.interceptors.response.use(
   (response: AxiosResponse) => {
     const { data } = response
 
@@ -43,6 +64,10 @@ request.interceptors.response.use(
       // 业务成功
       if (data.code === 200 || data.code === 0) {
         return data.data
+      }
+      if (data.code === 401) {
+        redirectToLogin()
+        return Promise.reject(new Error('登录已失效'))
       }
       // 业务失败（后端返回的是 msg 字段，不是 message）
       const errorMsg = data.msg || data.message || '操作失败'
@@ -70,12 +95,7 @@ request.interceptors.response.use(
         ElMessage.error(errorMsg || '请求参数错误')
         break
       case 401:
-        ElMessage.error(errorMsg || '登录已过期，请重新登录')
-        // 清除 token（使用 storage 工具）
-        storage.remove('access_token')
-        storage.remove('refresh_token')
-        // 跳转到登录页
-        window.location.href = '/login'
+        redirectToLogin()
         break
       case 403:
         ElMessage.error(errorMsg || '没有权限访问')
@@ -101,23 +121,30 @@ request.interceptors.response.use(
 )
 
 // 导出请求方法
+type RequestInstance = Omit<AxiosInstance, 'get' | 'post' | 'put' | 'delete'> & {
+  get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+}
+
+const request = axiosInstance as RequestInstance
+
 export default request
 
 // 导出类型化的请求方法
 export const get = <T = any>(url: string, config?: AxiosRequestConfig): Promise<T> => {
-  return request.get(url, config)
+  return request.get<T>(url, config)
 }
 
 export const post = <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
-  return request.post(url, data, config)
+  return request.post<T>(url, data, config)
 }
 
 export const put = <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
-  return request.put(url, data, config)
+  return request.put<T>(url, data, config)
 }
 
 export const del = <T = any>(url: string, config?: AxiosRequestConfig): Promise<T> => {
-  return request.delete(url, config)
+  return request.delete<T>(url, config)
 }
-
-

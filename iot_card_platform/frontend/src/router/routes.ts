@@ -168,6 +168,24 @@ export const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
+      {
+        path: 'records/purchases',
+        name: 'PurchaseRecords',
+        component: () => import('@/views/records/purchases/index.vue'),
+        meta: {
+          title: '购买记录',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'records/balance',
+        name: 'BalanceRecords',
+        component: () => import('@/views/records/balance/index.vue'),
+        meta: {
+          title: '余额记录',
+          requiresAuth: true
+        }
+      },
       // 停卡管理
       {
         path: 'suspend/policy',
@@ -209,5 +227,4 @@ export const routes: RouteRecordRaw[] = [
     ]
   }
 ]
-
 

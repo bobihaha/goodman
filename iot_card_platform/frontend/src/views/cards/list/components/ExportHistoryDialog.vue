@@ -71,8 +71,14 @@ const handleExport = async () => {
 
   loading.value = true
   try {
-    const startDate = formatDate(form.value.dateRange[0])
-    const endDate = formatDate(form.value.dateRange[1])
+    const [start, end] = form.value.dateRange
+    if (!start || !end) {
+      ElMessage.warning('请选择完整日期范围')
+      return
+    }
+
+    const startDate = formatDate(start)
+    const endDate = formatDate(end)
 
     const data = await cardApi.exportHistory(props.cardIds, startDate, endDate)
 

@@ -255,8 +255,7 @@ const searchUsers = async (query: string) => {
       page: 1,
       page_size: 20
     })
-    // 后端返回格式: { list: [], total: 0, page: 1, page_size: 20 }
-    userList.value = response.list || response.items || response.data || []
+    userList.value = response.list || []
   } catch (error: any) {
     console.error('搜索用户失败:', error)
     if (error.response?.status === 403) {
@@ -279,8 +278,7 @@ const loadInitialUsers = async () => {
       page: 1,
       page_size: 50
     })
-    // 后端返回格式: { list: [], total: 0, page: 1, page_size: 50 }
-    userList.value = response.list || response.items || response.data || []
+    userList.value = response.list || []
     
     if (userList.value.length === 0) {
       ElMessage.warning('暂无可选用户，请先创建子用户')

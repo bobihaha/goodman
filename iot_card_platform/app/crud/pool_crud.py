@@ -2,14 +2,42 @@
 流量池 CRUD 操作
 """
 from typing import Optional, List, Tuple
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, or_
 from app.db.models.pool import TrafficPoolModel, PoolCardLogModel, PoolStatus
 from app.db.models.iot_card import IotCardModel, CardStatus
+from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 
 
 class TrafficPoolCRUD:
     """流量池 CRUD"""
+
+    def _apply_user_scope(self, query, user_ids: Optional[List[int]] = None):
+        """按用户可见范围过滤流量池。
+
+        可见流量池包括：
+        1. 流量池归属在当前可见用户范围内
+        2. 当前可见用户名下有卡片加入的共享流量池
+        """
+        if user_ids is None:
+            return query
+
+        visible_pool_ids = (
+            select(IotCardModel.pool_id)
+            .where(
+                IotCardModel.user_id.in_(user_ids),
+                IotCardModel.pool_id.is_not(None),
+                IotCardModel.is_deleted == 0
+            )
+            .distinct()
+        )
+        return query.where(
+            or_(
+                TrafficPoolModel.user_id.in_(user_ids),
+                TrafficPoolModel.id.in_(visible_pool_ids)
+            )
+        )
 
     async def create(
         self,
@@ -54,10 +82,26 @@ class TrafficPoolCRUD:
         result = await db.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_id_in_scope(
+        self,
+        db: AsyncSession,
+        pool_id: int,
+        user_ids: Optional[List[int]] = None
+    ) -> Optional[TrafficPoolModel]:
+        """根据可见范围获取流量池"""
+        query = select(TrafficPoolModel).where(
+            TrafficPoolModel.id == pool_id,
+            TrafficPoolModel.is_deleted == 0
+        )
+        query = self._apply_user_scope(query, user_ids)
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_list(
         self,
         db: AsyncSession,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         name: Optional[str] = None,
         carrier: Optional[str] = None,
         status: Optional[str] = None,
@@ -68,7 +112,10 @@ class TrafficPoolCRUD:
         query = select(TrafficPoolModel).where(TrafficPoolModel.is_deleted == 0)
         count_query = select(func.count(TrafficPoolModel.id)).where(TrafficPoolModel.is_deleted == 0)
 
-        if user_id is not None:
+        if user_ids is not None:
+            query = self._apply_user_scope(query, user_ids)
+            count_query = self._apply_user_scope(count_query, user_ids)
+        elif user_id is not None:
             query = query.where(TrafficPoolModel.user_id == user_id)
             count_query = count_query.where(TrafficPoolModel.user_id == user_id)
         if name:
@@ -140,9 +187,17 @@ class TrafficPoolCRUD:
         result = await db.execute(query)
         row = result.one()
 
-        pool.card_count = row.card_count or 0
-        pool.data_total = row.data_total or 0
-        pool.data_used = row.data_used or 0
+        package_flow = int(row.data_total or 0)
+        if pool.addon_flow and not pool.addon_flow_month:
+            pool.addon_flow_month = get_current_flow_cycle_month()
+        effective_addon = int(pool.addon_flow or 0) if is_flow_cycle_active(pool.addon_flow_month) else 0
+        if not effective_addon and pool.addon_flow:
+            pool.addon_flow = 0
+            pool.addon_flow_month = None
+        pool.card_count = int(row.card_count or 0)
+        pool.package_flow = package_flow
+        pool.data_total = package_flow + effective_addon
+        pool.data_used = int(row.data_used or 0)
 
         await db.commit()
         await db.refresh(pool)
@@ -185,36 +240,86 @@ class TrafficPoolCRUD:
         if usage_percent >= pool_stop_threshold:
             # 超过阈值，将池内所有已激活卡片停卡
             from app.db.models.iot_card import SuspendType
-            suspend_stmt = (
-                update(IotCardModel)
-                .where(
+            from app.db.models.suspend import SuspendActionType, SuspendLogModel
+            from app.db.models.supplier import SupplierModel
+            from app.clients.supplier_api import get_supplier_client
+            import logging
+
+            reason = f"流量池用量超限停卡(用量{usage_percent}%，阈值{pool_stop_threshold}%)"
+            suspend_time = datetime.now()
+            logger = logging.getLogger(__name__)
+
+            cards_result = await db.execute(
+                select(IotCardModel).where(
                     IotCardModel.pool_id == pool.id,
                     IotCardModel.status == CardStatus.activated,
                     IotCardModel.is_deleted == 0
                 )
-                .values(
-                    status=CardStatus.suspended,
-                    suspend_type=SuspendType.pool_exceed,
-                    suspend_reason=f"流量池用量超限停卡(用量{usage_percent}%，阈值{pool_stop_threshold}%)"
-                )
             )
-            await db.execute(suspend_stmt)
+            cards = list(cards_result.scalars().all())
+
+            supplier_ids = {card.supplier_id for card in cards if card.supplier_id}
+            supplier_map = {}
+            if supplier_ids:
+                supplier_result = await db.execute(
+                    select(SupplierModel).where(
+                        SupplierModel.id.in_(supplier_ids),
+                        SupplierModel.is_deleted == 0
+                    )
+                )
+                supplier_map = {item.id: item for item in supplier_result.scalars().all()}
+
+            for card in cards:
+                supplier = supplier_map.get(card.supplier_id)
+                if not supplier:
+                    continue
+                try:
+                    supplier_client = get_supplier_client(
+                        supplier_id=card.supplier_id,
+                        api_url=supplier.api_url or "",
+                        api_key=supplier.api_key or "",
+                        api_secret=supplier.api_secret or ""
+                    )
+                    api_success = await supplier_client.suspend_card(card.iccid, reason)
+                except Exception as exc:
+                    logger.error(f"流量池超限供应商停卡失败: iccid={card.iccid}, error={exc}")
+                    api_success = False
+
+                if not api_success:
+                    continue
+
+                card.status = CardStatus.suspended
+                card.suspend_type = SuspendType.pool_exceed
+                card.suspend_at = suspend_time
+                card.suspend_reason = reason
+                db.add(SuspendLogModel(
+                    card_id=card.id,
+                    iccid=card.iccid,
+                    action=SuspendActionType.suspend,
+                    suspend_type="pool_exceed",
+                    pool_id=pool.id,
+                    reason=reason
+                ))
+
             await db.commit()
 
     async def get_stats(
         self,
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> dict:
         """获取流量池总体统计"""
         query = select(TrafficPoolModel).where(TrafficPoolModel.is_deleted == 0)
-        
-        if user_id is not None:
+
+        if user_ids is not None:
+            query = self._apply_user_scope(query, user_ids)
+        elif user_id is not None:
             query = query.where(TrafficPoolModel.user_id == user_id)
-        
+
         result = await db.execute(query)
         pools = result.scalars().all()
-        
+
         total_pools = len(pools)
         total_cards = sum(pool.card_count for pool in pools)
         total_flow = sum(pool.data_total for pool in pools)
@@ -304,6 +409,7 @@ class PoolCardCRUD:
         pool: TrafficPoolModel,
         card_ids: List[int],
         operator_id: int,
+        user_ids: Optional[List[int]] = None,
         remark: Optional[str] = None
     ) -> Tuple[int, int, List[dict]]:
         """添加卡片到流量池"""
@@ -319,12 +425,14 @@ class PoolCardCRUD:
                 IotCardModel.id == card_id,
                 IotCardModel.is_deleted == 0
             )
+            if user_ids is not None:
+                query = query.where(IotCardModel.user_id.in_(user_ids))
             result = await db.execute(query)
             card = result.scalar_one_or_none()
 
             if not card:
                 failed += 1
-                fail_details.append({"card_id": card_id, "reason": "卡片不存在"})
+                fail_details.append({"card_id": card_id, "reason": "卡片不存在或无权访问"})
                 continue
 
             # 检查卡片类型：只有流量池卡才能加入流量池
@@ -390,6 +498,7 @@ class PoolCardCRUD:
         pool: TrafficPoolModel,
         card_ids: List[int],
         operator_id: int,
+        user_ids: Optional[List[int]] = None,
         remark: Optional[str] = None
     ) -> Tuple[int, int, List[dict]]:
         """从流量池移除卡片"""
@@ -403,12 +512,14 @@ class PoolCardCRUD:
                 IotCardModel.id == card_id,
                 IotCardModel.is_deleted == 0
             )
+            if user_ids is not None:
+                query = query.where(IotCardModel.user_id.in_(user_ids))
             result = await db.execute(query)
             card = result.scalar_one_or_none()
 
             if not card:
                 failed += 1
-                fail_details.append({"card_id": card_id, "reason": "卡片不存在"})
+                fail_details.append({"card_id": card_id, "reason": "卡片不存在或无权访问"})
                 continue
 
             # 检查卡片是否在此流量池中
@@ -444,6 +555,7 @@ class PoolCardCRUD:
         self,
         db: AsyncSession,
         pool_id: int,
+        user_ids: Optional[List[int]] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[IotCardModel], int]:
@@ -456,6 +568,9 @@ class PoolCardCRUD:
             IotCardModel.pool_id == pool_id,
             IotCardModel.is_deleted == 0
         )
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+            count_query = count_query.where(IotCardModel.user_id.in_(user_ids))
 
         # 总数
         total_result = await db.execute(count_query)

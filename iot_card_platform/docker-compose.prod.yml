@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: nginx:1.27-alpine
+    image: docker.m.daocloud.io/library/nginx:1.27-alpine
     container_name: iot_nginx
     restart: always
     depends_on:
@@ -43,7 +43,7 @@ services:
       - iot_net
 
   redis:
-    image: redis:7.4-alpine
+    image: docker.m.daocloud.io/library/redis:7.4-alpine
     container_name: iot_redis
     restart: always
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
@@ -55,13 +55,12 @@ services:
       - iot_net
 
   mysql:
-    image: mysql:8.4
+    image: docker.m.daocloud.io/library/mysql:8.4
     container_name: iot_mysql
     restart: always
     env_file:
       - .env.production
     command:
-      - --default-authentication-plugin=mysql_native_password
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --max_connections=150

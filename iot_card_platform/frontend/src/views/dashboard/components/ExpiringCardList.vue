@@ -26,7 +26,7 @@
         <el-table-column prop="user_name" label="客户" min-width="80" show-overflow-tooltip />
         <el-table-column prop="expired_at" label="到期日期" width="90">
           <template #default="{ row }">
-            {{ formatDateShort(row.expired_at) }}
+            {{ formatDate(row.expired_at) }}
           </template>
         </el-table-column>
         <el-table-column prop="days_left" label="剩余" width="60">
@@ -46,9 +46,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { dashboardApi, type ExpiringCard } from '@/api'
-import { formatCarrier, formatDateShort } from '@/utils/formatter'
+import { formatCarrier, formatDate } from '@/utils/formatter'
 
 const props = defineProps<{
   carrier?: string
@@ -82,14 +81,9 @@ const getDaysLeftType = (days: number): string => {
   return 'success'
 }
 
-// 续费
-const handleRenew = (card: ExpiringCard) => {
-  ElMessage.info(`续费卡片: ${card.iccid}`)
-}
-
 // 查看全部
 const handleViewAll = () => {
-  router.push('/cards/list')
+  router.push({ path: '/cards/list', query: { expiring: 'true' } })
 }
 
 onMounted(() => {

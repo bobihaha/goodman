@@ -2,7 +2,7 @@
 仪表盘服务层
 """
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -12,6 +12,7 @@ from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
 from app.db.models.package import SupplierPackageModel, SalePackageModel
 from app.db.models.pool import TrafficPoolModel
 from app.db.models.suspend import AlertLogModel, SuspendLogModel, AlertLevel, ALERT_LEVEL_NAMES
+from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.schemas.dashboard import (
     CardStats, CardStatsItem, UserStats, PackageStats, PoolStats, AlertStats,
     DashboardOverview, UsageTrend, UsageTrendItem
@@ -23,15 +24,67 @@ class DashboardService:
     """仪表盘服务"""
 
     @staticmethod
+    def _build_pool_scope_conditions(
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
+    ) -> List[Any]:
+        """构建流量池可见范围条件。
+
+        和流量池列表保持一致：
+        1. 自己名下的流量池
+        2. 自己名下卡片所在的共享流量池
+        """
+        base_condition = [TrafficPoolModel.is_deleted == 0]
+        if user_ids is not None:
+            visible_pool_ids = (
+                select(IotCardModel.pool_id)
+                .where(
+                    IotCardModel.user_id.in_(user_ids),
+                    IotCardModel.pool_id.is_not(None),
+                    IotCardModel.is_deleted == 0
+                )
+                .distinct()
+            )
+            base_condition.append(
+                or_(
+                    TrafficPoolModel.user_id.in_(user_ids),
+                    TrafficPoolModel.id.in_(visible_pool_ids)
+                )
+            )
+        elif user_id:
+            base_condition.append(TrafficPoolModel.user_id == user_id)
+        return base_condition
+
+    @staticmethod
+    async def get_accessible_user_ids(
+        db: AsyncSession,
+        user_id: Optional[int],
+        user_level: Optional[int]
+    ) -> Optional[List[int]]:
+        """获取当前用户可见的用户范围"""
+        if not user_id or user_level == UserLevel.SUPER_ADMIN.value:
+            return None
+
+        if user_level == UserLevel.SUB_USER.value:
+            return [user_id]
+
+        sys_user_crud = SysUserCRUDEnhanced()
+        child_ids = await sys_user_crud.get_children_ids(db, user_id)
+        return [user_id, *child_ids]
+
+    @staticmethod
     @cache_result(ttl_seconds=300)
     async def get_card_stats(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> CardStats:
         """获取卡片统计（缓存5分钟）"""
         # 基础查询条件
         base_condition = [IotCardModel.is_deleted == 0]
-        if user_id:
+        if user_ids is not None:
+            base_condition.append(IotCardModel.user_id.in_(user_ids))
+        elif user_id:
             base_condition.append(IotCardModel.user_id == user_id)
 
         # 总数
@@ -83,8 +136,8 @@ class DashboardService:
 
         expiring_condition = base_condition + [
             IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
-            IotCardModel.silent_expire_date >= month_start,
-            IotCardModel.silent_expire_date <= month_end
+            IotCardModel.expired_at >= month_start,
+            IotCardModel.expired_at <= month_end
         ]
         expiring_result = await db.execute(
             select(func.count(IotCardModel.id)).where(*expiring_condition)
@@ -93,7 +146,7 @@ class DashboardService:
 
         # 超量卡数
         over_usage_condition = base_condition + [
-            IotCardModel.status == CardStatus.activated,
+            IotCardModel.status.in_([CardStatus.activated, CardStatus.suspended]),
             IotCardModel.data_total > 0,
             IotCardModel.data_used > IotCardModel.data_total
         ]
@@ -111,8 +164,42 @@ class DashboardService:
         )
 
     @staticmethod
-    async def get_user_stats(db: AsyncSession) -> UserStats:
+    async def get_user_stats(
+        db: AsyncSession,
+        user_id: Optional[int] = None,
+        user_level: Optional[int] = None
+    ) -> UserStats:
         """获取用户统计"""
+        if user_level == UserLevel.SUB_USER.value:
+            return UserStats()
+
+        if user_level == UserLevel.USER.value and user_id:
+            sub_users_result = await db.execute(
+                select(func.count(SysUserModel.id)).where(
+                    SysUserModel.is_deleted == 0,
+                    SysUserModel.parent_id == user_id,
+                    SysUserModel.user_level == UserLevel.SUB_USER.value
+                )
+            )
+            total_sub_users = sub_users_result.scalar() or 0
+
+            seven_days_ago = datetime.now() - timedelta(days=7)
+            active_result = await db.execute(
+                select(func.count(SysUserModel.id)).where(
+                    SysUserModel.is_deleted == 0,
+                    SysUserModel.parent_id == user_id,
+                    SysUserModel.user_level == UserLevel.SUB_USER.value,
+                    SysUserModel.last_login_at >= seven_days_ago
+                )
+            )
+            active_users = active_result.scalar() or 0
+
+            return UserStats(
+                total_users=total_sub_users,
+                total_sub_users=total_sub_users,
+                active_users=active_users
+            )
+
         # 用户总数 (user_level=2)
         users_result = await db.execute(
             select(func.count(SysUserModel.id)).where(
@@ -175,12 +262,11 @@ class DashboardService:
     @staticmethod
     async def get_pool_stats(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> PoolStats:
         """获取流量池统计"""
-        base_condition = [TrafficPoolModel.is_deleted == 0]
-        if user_id:
-            base_condition.append(TrafficPoolModel.user_id == user_id)
+        base_condition = DashboardService._build_pool_scope_conditions(user_id, user_ids)
 
         result = await db.execute(
             select(
@@ -206,14 +292,17 @@ class DashboardService:
     @staticmethod
     async def get_alert_stats(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> AlertStats:
         """获取告警统计"""
         base_condition = [
             AlertLogModel.is_deleted == 0,
             AlertLogModel.handled == 0
         ]
-        if user_id:
+        if user_ids is not None:
+            base_condition.append(AlertLogModel.user_id.in_(user_ids))
+        elif user_id:
             base_condition.append(AlertLogModel.user_id == user_id)
 
         result = await db.execute(
@@ -243,17 +332,19 @@ class DashboardService:
     async def get_overview(
         db: AsyncSession,
         user_id: Optional[int] = None,
-        is_admin: bool = False
+        is_admin: bool = False,
+        user_level: Optional[int] = None
     ) -> DashboardOverview:
         """获取仪表盘总览"""
         # 管理员看全部，普通用户只看自己的
         card_user_id = None if is_admin else user_id
-        
-        cards = await DashboardService.get_card_stats(db, card_user_id)
-        users = await DashboardService.get_user_stats(db) if is_admin else UserStats()
+        user_ids = await DashboardService.get_accessible_user_ids(db, user_id, user_level)
+
+        cards = await DashboardService.get_card_stats(db, card_user_id, user_ids)
+        users = await DashboardService.get_user_stats(db, user_id, user_level)
         packages = await DashboardService.get_package_stats(db)
-        pools = await DashboardService.get_pool_stats(db, card_user_id)
-        alerts = await DashboardService.get_alert_stats(db, card_user_id)
+        pools = await DashboardService.get_pool_stats(db, card_user_id, user_ids)
+        alerts = await DashboardService.get_alert_stats(db, card_user_id, user_ids)
 
         return DashboardOverview(
             cards=cards,
@@ -268,7 +359,8 @@ class DashboardService:
         db: AsyncSession,
         period: str = "daily",
         days: int = 7,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> UsageTrend:
         """获取流量趋势 (简化版 - 基于当前数据)"""
         # 注意：真实场景需要有流量历史记录表
@@ -278,7 +370,9 @@ class DashboardService:
             IotCardModel.is_deleted == 0,
             IotCardModel.status == CardStatus.activated
         ]
-        if user_id:
+        if user_ids is not None:
+            base_condition.append(IotCardModel.user_id.in_(user_ids))
+        elif user_id:
             base_condition.append(IotCardModel.user_id == user_id)
 
         result = await db.execute(
@@ -311,11 +405,14 @@ class DashboardService:
     async def get_recent_alerts(
         db: AsyncSession,
         limit: int = 10,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> List[Dict[str, Any]]:
         """获取最近告警"""
         base_condition = [AlertLogModel.is_deleted == 0]
-        if user_id:
+        if user_ids is not None:
+            base_condition.append(AlertLogModel.user_id.in_(user_ids))
+        elif user_id:
             base_condition.append(AlertLogModel.user_id == user_id)
 
         result = await db.execute(
@@ -380,25 +477,18 @@ class DashboardService:
         user_id: int
     ) -> Dict[str, Any]:
         """获取账户余额信息"""
-        # 简化版：返回模拟数据
-        # 实际应该从账户余额表中查询
-        return {
-            "balance": 0,
-            "alert_threshold": 1000,
-            "is_alert": False,
-            "last_recharge_at": None,
-            "last_recharge_amount": 0
-        }
+        from app.services.account_balance_service import account_balance_service
+
+        return await account_balance_service.get_balance_info(db, user_id)
 
     @staticmethod
     async def get_pools_usage_percent(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> List[Dict[str, Any]]:
         """获取流量池用量百分比"""
-        base_condition = [TrafficPoolModel.is_deleted == 0]
-        if user_id:
-            base_condition.append(TrafficPoolModel.user_id == user_id)
+        base_condition = DashboardService._build_pool_scope_conditions(user_id, user_ids)
 
         result = await db.execute(
             select(TrafficPoolModel)
@@ -423,10 +513,10 @@ class DashboardService:
         ]
 
     @staticmethod
-    @staticmethod
     async def get_expiring_cards(
         db: AsyncSession,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         carrier: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """获取本月到期卡明细"""
@@ -442,10 +532,12 @@ class DashboardService:
         base_condition = [
             IotCardModel.is_deleted == 0,
             IotCardModel.status.in_([CardStatus.activated, CardStatus.testing, CardStatus.silent]),
-            IotCardModel.silent_expire_date >= month_start,
-            IotCardModel.silent_expire_date <= month_end
+            IotCardModel.expired_at >= month_start,
+            IotCardModel.expired_at <= month_end
         ]
-        if user_id:
+        if user_ids is not None:
+            base_condition.append(IotCardModel.user_id.in_(user_ids))
+        elif user_id:
             base_condition.append(IotCardModel.user_id == user_id)
         if carrier:
             base_condition.append(IotCardModel.carrier == carrier)
@@ -453,7 +545,7 @@ class DashboardService:
         result = await db.execute(
             select(IotCardModel)
             .where(*base_condition)
-            .order_by(IotCardModel.silent_expire_date.asc())
+            .order_by(IotCardModel.expired_at.asc())
             .limit(50)
         )
         cards = result.scalars().all()
@@ -464,8 +556,8 @@ class DashboardService:
                 "iccid": card.iccid,
                 "msisdn": card.msisdn,
                 "carrier": card.carrier.value if card.carrier else None,
-                "expired_at": card.silent_expire_date.strftime("%Y-%m-%d") if card.silent_expire_date else None,
-                "days_left": (card.silent_expire_date - today.date()).days if card.silent_expire_date else 0,
+                "expired_at": card.expired_at.strftime("%Y-%m-%d") if card.expired_at else None,
+                "days_left": (card.expired_at - today.date()).days if card.expired_at else 0,
                 "user_name": "",
                 "package_name": ""
             }
@@ -476,15 +568,18 @@ class DashboardService:
     async def get_over_usage_cards(
         db: AsyncSession,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         carrier: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """获取超量卡明细"""
         base_condition = [
             IotCardModel.is_deleted == 0,
-            IotCardModel.status == CardStatus.activated,
+            IotCardModel.status.in_([CardStatus.activated, CardStatus.suspended]),
             IotCardModel.data_total > 0
         ]
-        if user_id:
+        if user_ids is not None:
+            base_condition.append(IotCardModel.user_id.in_(user_ids))
+        elif user_id:
             base_condition.append(IotCardModel.user_id == user_id)
         if carrier:
             base_condition.append(IotCardModel.carrier == carrier)

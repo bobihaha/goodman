@@ -2,7 +2,7 @@
 物联网卡 CRUD 操作
 """
 from typing import Optional, List, Tuple
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.iot_card import IotCardModel, CardTransferModel, CardStatus
 from app.db.models.package import CarrierType, PeriodType
@@ -22,6 +22,22 @@ class IotCardCRUD:
         result = await db.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_id_in_scope(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        user_ids: Optional[List[int]] = None
+    ) -> Optional[IotCardModel]:
+        """根据ID获取卡片（支持用户可见范围）"""
+        query = select(IotCardModel).where(
+            IotCardModel.id == card_id,
+            IotCardModel.is_deleted == 0
+        )
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_by_iccid(self, db: AsyncSession, iccid: str, user_id: Optional[int] = None) -> Optional[IotCardModel]:
         """根据ICCID获取卡片"""
         query = select(IotCardModel).where(
@@ -37,6 +53,7 @@ class IotCardCRUD:
         self,
         db: AsyncSession,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         keyword: Optional[str] = None,
         status: Optional[str] = None,
         carrier: Optional[str] = None,
@@ -64,7 +81,10 @@ class IotCardCRUD:
         count_query = select(func.count(IotCardModel.id)).where(IotCardModel.is_deleted == 0)
 
         # 用户过滤 (数据隔离)
-        if user_id is not None:
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+            count_query = count_query.where(IotCardModel.user_id.in_(user_ids))
+        elif user_id is not None:
             query = query.where(IotCardModel.user_id == user_id)
             count_query = count_query.where(IotCardModel.user_id == user_id)
 
@@ -127,7 +147,7 @@ class IotCardCRUD:
         # 超量卡过滤
         if over_usage is not None and over_usage:
             over_usage_filter = and_(
-                IotCardModel.status == CardStatus.activated,
+                IotCardModel.status.in_([CardStatus.activated, CardStatus.suspended]),
                 IotCardModel.data_total > 0,
                 IotCardModel.data_used > IotCardModel.data_total
             )
@@ -173,6 +193,13 @@ class IotCardCRUD:
 
         # 到期时间范围
         if expired_start:
+            expiring_status_filter = IotCardModel.status.in_([
+                CardStatus.activated,
+                CardStatus.testing,
+                CardStatus.silent,
+            ])
+            query = query.where(expiring_status_filter)
+            count_query = count_query.where(expiring_status_filter)
             query = query.where(IotCardModel.expired_at >= expired_start)
             count_query = count_query.where(IotCardModel.expired_at >= expired_start)
         if expired_end:
@@ -197,13 +224,16 @@ class IotCardCRUD:
         db: AsyncSession,
         keyword: str,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         limit: int = 10
     ) -> List[IotCardModel]:
         """快速搜索 (支持后6位)"""
         keyword = keyword.strip()
         query = select(IotCardModel).where(IotCardModel.is_deleted == 0)
 
-        if user_id is not None:
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+        elif user_id is not None:
             query = query.where(IotCardModel.user_id == user_id)
 
         if len(keyword) <= 6:
@@ -260,15 +290,50 @@ class IotCardCRUD:
 
         return stats
 
+    async def get_stats_in_scope(self, db: AsyncSession, user_ids: Optional[List[int]] = None) -> dict:
+        """获取卡片统计（支持用户可见范围）"""
+        query = select(
+            IotCardModel.status,
+            func.count(IotCardModel.id).label("count")
+        ).where(IotCardModel.is_deleted == 0)
+
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+
+        query = query.group_by(IotCardModel.status)
+        result = await db.execute(query)
+        rows = result.all()
+
+        stats = {
+            "total": 0,
+            "stock": 0,
+            "testing": 0,
+            "silent": 0,
+            "activated": 0,
+            "expired": 0,
+            "suspended": 0,
+            "cancelled": 0
+        }
+
+        for row in rows:
+            status_value = row[0].value if hasattr(row[0], 'value') else row[0]
+            count = row[1]
+            if status_value in stats:
+                stats[status_value] = count
+            stats["total"] += count
+
+        return stats
+
     async def update_remark(
         self,
         db: AsyncSession,
         card_id: int,
         remark: str,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> Optional[IotCardModel]:
         """更新卡片备注"""
-        card = await self.get_by_id(db, card_id, user_id)
+        card = await self.get_by_id_in_scope(db, card_id, user_ids) if user_ids is not None else await self.get_by_id(db, card_id, user_id)
         if not card:
             return None
         card.remark = remark
@@ -281,12 +346,13 @@ class IotCardCRUD:
         db: AsyncSession,
         card_ids: List[int],
         remark: str,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> int:
         """批量更新备注"""
         count = 0
         for card_id in card_ids:
-            card = await self.get_by_id(db, card_id, user_id)
+            card = await self.get_by_id_in_scope(db, card_id, user_ids) if user_ids is not None else await self.get_by_id(db, card_id, user_id)
             if card:
                 card.remark = remark
                 count += 1
@@ -363,14 +429,17 @@ class IotCardCRUD:
         self,
         db: AsyncSession,
         card_ids: List[int],
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> List[IotCardModel]:
         """根据ID列表获取卡片"""
         query = select(IotCardModel).where(
             IotCardModel.id.in_(card_ids),
             IotCardModel.is_deleted == 0
         )
-        if user_id is not None:
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+        elif user_id is not None:
             query = query.where(IotCardModel.user_id == user_id)
         result = await db.execute(query)
         return list(result.scalars().all())
@@ -384,6 +453,7 @@ class CardTransferCRUD:
         db: AsyncSession,
         card_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        from_user_ids: Optional[List[int]] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[CardTransferModel], int]:
@@ -408,6 +478,10 @@ class CardTransferCRUD:
                     CardTransferModel.to_user_id == user_id
                 )
             )
+
+        if from_user_ids is not None:
+            query = query.where(CardTransferModel.from_user_id.in_(from_user_ids))
+            count_query = count_query.where(CardTransferModel.from_user_id.in_(from_user_ids))
 
         total_result = await db.execute(count_query)
         total = total_result.scalar() or 0
@@ -436,19 +510,35 @@ class CardUsageHistoryCRUD:
         snapshot_type: str,
         snapshot_month: Optional[str] = None
     ):
-        """创建用量快照"""
+        """创建或更新用量快照"""
         from app.db.models.iot_card import CardUsageHistoryModel
-        snapshot = CardUsageHistoryModel(
-            card_id=card_id,
-            iccid=iccid,
-            data_used=data_used,
-            data_total=data_total,
-            period_type=period_type,
-            snapshot_date=snapshot_date,
-            snapshot_type=snapshot_type,
-            snapshot_month=snapshot_month
+        existing_query = select(CardUsageHistoryModel).where(
+            CardUsageHistoryModel.card_id == card_id,
+            CardUsageHistoryModel.snapshot_type == snapshot_type,
+            CardUsageHistoryModel.snapshot_date == snapshot_date
         )
-        db.add(snapshot)
+        existing_result = await db.execute(existing_query)
+        snapshot = existing_result.scalar_one_or_none()
+
+        if snapshot:
+            snapshot.iccid = iccid
+            snapshot.data_used = data_used
+            snapshot.data_total = data_total
+            snapshot.period_type = period_type
+            snapshot.snapshot_month = snapshot_month
+        else:
+            snapshot = CardUsageHistoryModel(
+                card_id=card_id,
+                iccid=iccid,
+                data_used=data_used,
+                data_total=data_total,
+                period_type=period_type,
+                snapshot_date=snapshot_date,
+                snapshot_type=snapshot_type,
+                snapshot_month=snapshot_month
+            )
+            db.add(snapshot)
+
         await db.flush()
         return snapshot
 
@@ -487,6 +577,24 @@ class CardUsageHistoryCRUD:
         query = query.order_by(CardUsageHistoryModel.card_id, CardUsageHistoryModel.snapshot_date.desc())
         result = await db.execute(query)
         return list(result.scalars().all())
+
+    async def prune_old_snapshots(
+        self,
+        db: AsyncSession,
+        *,
+        snapshot_type: str,
+        before_date
+    ) -> int:
+        """删除指定日期之前的历史快照"""
+        from app.db.models.iot_card import CardUsageHistoryModel
+
+        result = await db.execute(
+            delete(CardUsageHistoryModel).where(
+                CardUsageHistoryModel.snapshot_type == snapshot_type,
+                CardUsageHistoryModel.snapshot_date < before_date
+            )
+        )
+        return result.rowcount or 0
 
 
 iot_card_crud = IotCardCRUD()

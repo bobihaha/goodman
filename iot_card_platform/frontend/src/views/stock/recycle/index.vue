@@ -328,7 +328,7 @@ const searchParams = reactive({
 })
 
 // 已出库卡片
-const outCards = ref([])
+const outCards = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
 
@@ -363,7 +363,7 @@ const recordParams = reactive({
   page_size: 20
 })
 const recordDateRange = ref([])
-const recycleRecords = ref([])
+const recycleRecords = ref<any[]>([])
 const recordTotal = ref(0)
 const recordsLoading = ref(false)
 
@@ -379,7 +379,7 @@ const handleSearch = async () => {
     if (searchParams.status) params.status = searchParams.status
     if (searchParams.carrier) params.carrier = searchParams.carrier
 
-    const res = await cardApi.getList(params)
+    const res: any = await cardApi.getList(params)
     outCards.value = res.items || res.list || []
     total.value = res.total || 0
   } catch (error: any) {
@@ -540,7 +540,12 @@ const handleFileChange = (file: any) => {
     try {
       const data = new Uint8Array(e.target?.result as ArrayBuffer)
       const workbook = XLSX.read(data, { type: 'array' })
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const sheetName = workbook.SheetNames[0]
+      if (!sheetName) {
+        ElMessage.warning('Excel文件中未找到工作表')
+        return
+      }
+      const sheet: any = workbook.Sheets[sheetName]
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
 
       // 提取第一列的ICCID，跳过表头
@@ -639,4 +644,3 @@ onMounted(() => {
   }
 }
 </style>
-

@@ -46,8 +46,8 @@
       <el-table-column prop="msisdn" label="号码" width="130" />
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="CARD_STATUS_MAP[row.status].type">
-            {{ CARD_STATUS_MAP[row.status].label }}
+          <el-tag :type="getStatusMeta(row.status as CardStatus).type">
+            {{ getStatusMeta(row.status as CardStatus).label }}
           </el-tag>
         </template>
       </el-table-column>
@@ -96,6 +96,7 @@ import { formatFlow } from '@/utils/formatter'
 import { CARRIER_MAP, PERIOD_TYPE_MAP, CARD_STATUS_MAP } from '@/constants/card'
 import type { Pool } from '@/types/pool'
 import type { Card } from '@/types/card'
+import type { CardStatus, CardType } from '@/types/common'
 
 interface Props {
   modelValue: boolean
@@ -118,6 +119,8 @@ const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
+
+const getStatusMeta = (status: CardStatus) => CARD_STATUS_MAP[status]
 
 // 搜索表单
 const searchForm = reactive({
@@ -154,9 +157,9 @@ const fetchCardList = async () => {
       carrier: props.pool.carrier,
       flow_size: props.pool.flow_size,
       period_type: props.pool.period_type,
-      status: 'activated',
+      status: 'activated' as CardStatus,
       is_pool_member: false,
-      card_type: 'pool',  // 只查询流量池卡
+      card_type: 'pool' as CardType,  // 只查询流量池卡
       keyword: searchForm.keyword || undefined
     }
 

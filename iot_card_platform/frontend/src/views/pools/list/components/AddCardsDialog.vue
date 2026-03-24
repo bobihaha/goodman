@@ -144,7 +144,7 @@ const iccidCount = computed(() => {
 const rules: FormRules = {
   iccids: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, _value, callback) => {
         if (inputMode.value === 'iccid') {
           if (!iccidText.value.trim()) {
             callback(new Error('请输入ICCID'))
@@ -162,7 +162,7 @@ const rules: FormRules = {
   ],
   card_ids: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, _value, callback) => {
         if (inputMode.value === 'select' && selectedCards.value.length === 0) {
           callback(new Error('请选择卡片'))
         } else {
@@ -276,7 +276,6 @@ watch(
   gap: 8px;
 }
 </style>
-
 
 
 

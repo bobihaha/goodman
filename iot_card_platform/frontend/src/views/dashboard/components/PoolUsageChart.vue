@@ -32,7 +32,7 @@
 
           <div class="pool-progress">
             <el-progress
-              :percentage="pool.usage_percent"
+              :percentage="Math.min(pool.usage_percent, 100)"
               :color="getProgressColor(pool.usage_percent)"
               :show-text="false"
               :stroke-width="6"
@@ -41,10 +41,10 @@
 
           <div class="pool-footer">
             <span class="pool-usage">
-              已用: {{ formatFlowSize(pool.data_used) }}
+              已用: {{ formatFlowValue(pool.data_used) }}
             </span>
             <span class="pool-total">
-              总量: {{ formatFlowSize(pool.data_total) }}
+              总量: {{ formatFlowValue(pool.data_total) }}
             </span>
           </div>
         </div>
@@ -60,7 +60,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { dashboardApi, type PoolUsage } from '@/api'
-import { formatCarrier, formatFlowSize, formatPercent } from '@/utils/formatter'
+import { formatCarrier, formatFlowValue, formatPercent } from '@/utils/formatter'
 
 const loading = ref(false)
 const poolUsageList = ref<PoolUsage[]>([])
@@ -195,8 +195,6 @@ onMounted(() => {
   }
 }
 </style>
-
-
 
 
 

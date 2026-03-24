@@ -50,19 +50,37 @@ def encrypt_secret(text: str) -> str:
     """加密敏感信息"""
     from cryptography.fernet import Fernet
     import os
-    key = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    from app.config import settings
+
+    key = os.getenv("ENCRYPTION_KEY", "").strip()
+    if not key:
+        if settings.app_env == "production":
+            raise ValueError("生产环境未配置 ENCRYPTION_KEY，无法加密供应商密钥")
+        return text
     f = Fernet(key.encode())
     return f.encrypt(text.encode()).decode()
 
 def decrypt_secret(encrypted: str) -> str:
     """解密敏感信息"""
     from cryptography.fernet import Fernet
+    from cryptography.fernet import InvalidToken
     import os
-    key = os.getenv("ENCRYPTION_KEY", "")
-    if not key:
+    if not encrypted:
         return encrypted
+
+    # 仅对 Fernet token 做解密，兼容历史明文数据
+    if not encrypted.startswith("gAAAAA"):
+        return encrypted
+
+    key = os.getenv("ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise ValueError("检测到已加密的供应商密钥，但当前环境未配置 ENCRYPTION_KEY")
+
     f = Fernet(key.encode())
-    return f.decrypt(encrypted.encode()).decode()
+    try:
+        return f.decrypt(encrypted.encode()).decode()
+    except InvalidToken as exc:
+        raise ValueError("供应商密钥解密失败，ENCRYPTION_KEY 缺失或与入库时不一致") from exc
 
 # 简单缓存
 _cache: dict[str, Any] = {}

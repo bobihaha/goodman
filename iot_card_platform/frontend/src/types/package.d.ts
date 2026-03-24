@@ -62,6 +62,8 @@ export interface SupplierPackageListParams extends PageParams {
 // 销售套餐列表查询参数
 export interface SalePackageListParams extends PageParams {
   supplier_package_id?: number    // 底层套餐筛选
+  base_package_id?: number        // 兼容当前页面命名
+  user_id?: number                // 专属客户筛选
   status?: 'enable' | 'disable'   // 状态筛选
   keyword?: string                // 关键词搜索
 }
@@ -126,4 +128,3 @@ export interface SupplierListParams extends PageParams {
   status?: 'enable' | 'disable'
   keyword?: string
 }
-

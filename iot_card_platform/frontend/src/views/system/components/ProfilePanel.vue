@@ -56,15 +56,6 @@ import { userApi } from '@/api/modules/user'
 const authStore = useAuthStore()
 const userInfo = computed(() => authStore.userInfo)
 
-const levelTag = computed(() => {
-  switch (userInfo.value?.user_level) {
-    case 1: return { label: '超级管理员', type: 'danger' as const }
-    case 2: return { label: '二级用户', type: 'warning' as const }
-    case 3: return { label: '三级用户', type: 'info' as const }
-    default: return { label: '未知', type: 'info' as const }
-  }
-})
-
 const showPasswordDialog = ref(false)
 const showEmailDialog = ref(false)
 const submitting = ref(false)

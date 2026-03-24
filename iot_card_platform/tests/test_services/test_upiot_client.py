@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
 from app.clients.upiot_client import UpiotSupplierClient, UPIOT_STATUS_MAP
+from app.utils.const import encrypt_secret
 
 
 # ========== Fixtures ==========
@@ -397,3 +398,31 @@ class TestGetSupplierClient:
         from app.clients.supplier_api import get_supplier_client
         c = get_supplier_client(1, "http://EC.UPIOT.NET", "K", "S")
         assert isinstance(c, UpiotSupplierClient)
+
+    def test_encrypted_credentials_are_decrypted(self, monkeypatch):
+        from cryptography.fernet import Fernet
+        from app.clients.supplier_api import get_supplier_client
+
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv("ENCRYPTION_KEY", key)
+        encrypted_key = encrypt_secret("REAL_KEY")
+        encrypted_secret = encrypt_secret("REAL_SECRET")
+
+        client = get_supplier_client(1, "http://ec.upiot.net", encrypted_key, encrypted_secret)
+
+        assert isinstance(client, UpiotSupplierClient)
+        assert client.api_key == "REAL_KEY"
+        assert client.api_secret == "REAL_SECRET"
+
+    def test_missing_encryption_key_for_encrypted_credentials_raises(self, monkeypatch):
+        from cryptography.fernet import Fernet
+        from app.clients.supplier_api import get_supplier_client
+
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv("ENCRYPTION_KEY", key)
+        encrypted_key = encrypt_secret("REAL_KEY")
+        encrypted_secret = encrypt_secret("REAL_SECRET")
+        monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
+
+        with pytest.raises(ValueError, match="ENCRYPTION_KEY"):
+            get_supplier_client(1, "http://ec.upiot.net", encrypted_key, encrypted_secret)

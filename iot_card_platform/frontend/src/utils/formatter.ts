@@ -3,6 +3,49 @@
  */
 
 import dayjs from 'dayjs'
+import customParseFormat from 'dayjs/plugin/customParseFormat'
+
+dayjs.extend(customParseFormat)
+
+function parseDateValue(date: string | Date | null | undefined) {
+  if (!date) return null
+
+  if (date instanceof Date) {
+    const parsed = dayjs(date)
+    return parsed.isValid() ? parsed : null
+  }
+
+  const parsed = dayjs(date)
+  if (parsed.isValid()) return parsed
+
+  const fallbackFormats = [
+    'YY/M/D',
+    'YY/MM/DD',
+    'YYYY/M/D',
+    'YYYY/MM/DD',
+    'YYYY-M-D',
+    'YYYY-MM-DD',
+    'YYYY/M/D HH:mm:ss',
+    'YYYY/MM/DD HH:mm:ss',
+    'YY/M/D HH:mm:ss',
+    'YY/MM/DD HH:mm:ss'
+  ]
+
+  for (const format of fallbackFormats) {
+    const fallbackParsed = dayjs(date, format, true)
+    if (fallbackParsed.isValid()) {
+      return fallbackParsed
+    }
+  }
+
+  return null
+}
+
+function hasExplicitTime(date: string | Date | null | undefined): boolean {
+  if (date instanceof Date) return true
+  if (typeof date !== 'string') return false
+  return /[T\s]\d{1,2}:\d{2}/.test(date)
+}
 
 /**
  * 格式化日期为 YY/M/D 格式
@@ -10,8 +53,8 @@ import dayjs from 'dayjs'
 export function formatDateShort(date: string | null | undefined): string {
   if (!date) return '-'
   
-  const parsed = dayjs(date)
-  if (!parsed.isValid()) return '-'
+  const parsed = parseDateValue(date)
+  if (!parsed) return '-'
   
   return parsed.format('YY/M/D')
 }
@@ -22,8 +65,8 @@ export function formatDateShort(date: string | null | undefined): string {
 export function formatDate(date: string | null | undefined): string {
   if (!date) return '-'
   
-  const parsed = dayjs(date)
-  if (!parsed.isValid()) return '-'
+  const parsed = parseDateValue(date)
+  if (!parsed) return '-'
   
   return parsed.format('YYYY-MM-DD')
 }
@@ -34,8 +77,12 @@ export function formatDate(date: string | null | undefined): string {
 export function formatDateTime(date: string | null | undefined): string {
   if (!date) return '-'
   
-  const parsed = dayjs(date)
-  if (!parsed.isValid()) return '-'
+  const parsed = parseDateValue(date)
+  if (!parsed) return '-'
+
+  if (!hasExplicitTime(date)) {
+    return parsed.format('YYYY-MM-DD')
+  }
   
   return parsed.format('YYYY-MM-DD HH:mm:ss')
 }
@@ -55,13 +102,26 @@ export function formatFlow(mb: number | null | undefined): string {
 }
 
 /**
+ * 格式化流量用量（保留2位小数）
+ */
+export function formatFlowValue(mb: number | null | undefined): string {
+  if (mb === null || mb === undefined || isNaN(mb)) return '-'
+
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(2)}G`
+  }
+
+  return `${mb.toFixed(2)}M`
+}
+
+/**
  * 格式化流量使用百分比
  */
 export function formatUsagePercent(used: number, total: number): number {
   if (!total || total <= 0) return 0
 
   const percent = (used / total) * 100
-  return Math.round(Math.min(Math.max(percent, 0), 100))
+  return Number(Math.max(percent, 0).toFixed(2))
 }
 
 /**
@@ -92,8 +152,8 @@ export function formatICCID(iccid: string | null | undefined): string {
 export function isExpired(date: string | null | undefined): boolean {
   if (!date) return false
   
-  const parsed = dayjs(date)
-  if (!parsed.isValid()) return false
+  const parsed = parseDateValue(date)
+  if (!parsed) return false
   
   return parsed.isBefore(dayjs(), 'day')
 }

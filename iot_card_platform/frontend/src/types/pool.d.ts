@@ -20,6 +20,8 @@ export interface Pool {
   data_total: number             // 总流量(MB)
   data_used: number              // 已用流量(MB)
   data_remaining: number         // 剩余流量(MB)
+  package_flow?: number          // 套餐流量(MB)
+  addon_flow?: number            // 叠加流量(MB)
   usage_percent: number          // 使用率(%)
   alert_threshold_1?: number     // 第一次告警阈值(%)
   alert_threshold_2?: number     // 第二次告警阈值(%)
@@ -33,12 +35,15 @@ export interface Pool {
   // 关联信息
   user_name?: string
   sale_package_name?: string     // 销售套餐名称
+  can_self_topup?: boolean
   // 卡片统计
   card_stats?: {
     activated: number            // 已激活
     suspended: number            // 已停卡
     stock: number                // 库存
     testing: number              // 测试期
+    silent: number               // 沉默期
+    expired?: number             // 已到期
     cancelled: number            // 已销卡
   }
 }
@@ -116,7 +121,8 @@ export interface PoolPackage {
 // 充值加油包请求
 export interface PoolRechargeRequest {
   pool_id: number
-  package_id: number             // 加油包ID
+  added_flow_mb: number          // 增加流量(MB)
+  remark?: string
 }
 
 // 充值记录

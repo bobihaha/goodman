@@ -134,7 +134,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
 
@@ -160,7 +160,6 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 // 数据
-const formRef = ref<FormInstance>()
 const loading = ref(false)
 const iccidText = ref('')
 const operationResult = ref<OperationResult | null>(null)

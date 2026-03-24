@@ -252,9 +252,9 @@ CREATE TABLE `sale_packages` (
     KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='销售套餐表';
 
--- 初始化超级管理员 (密码: admin123)
+-- 初始化超级管理员 (账号: 13701835741, 密码: admin123)
 INSERT INTO `sys_users` (`id`, `parent_id`, `user_level`, `name`, `account`, `password`, `phone`, `status`, `quota`, `remark`)
-VALUES (1, NULL, 1, '超级管理员', 'admin', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13800138000', 'enable', '{"max_cards": -1, "max_sub_users": -1}', '系统初始化超级管理员');
+VALUES (1, NULL, 1, '超级管理员', '13701835741', '$2b$12$SrdjFNBnLZwVWcK64vvKFe.rIdM1rOUG3herNDGsIeFVkgrFGlrDW', '13701835741', 'enable', '{"max_cards": -1, "max_sub_users": -1}', '系统初始化超级管理员');
 
 -- 初始化菜单
 INSERT INTO `sys_menus` (`id`, `parent_id`, `user_level`, `code`, `name`, `type`, `icon`, `path`, `permission`, `sort_order`) VALUES

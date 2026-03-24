@@ -16,8 +16,20 @@ from app.services.suspend_service import (
     SuspendPolicyService, SuspendActionService, 
     SuspendLogService, AlertLogService
 )
+from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 
 router = APIRouter()
+
+
+async def _get_accessible_user_ids(current_user, db: AsyncSession):
+    if current_user.user_level == 1:
+        return None
+    if current_user.user_level == 3:
+        return [current_user.id]
+
+    sys_user_crud = SysUserCRUDEnhanced()
+    child_ids = await sys_user_crud.get_children_ids(db, current_user.id)
+    return [current_user.id, *child_ids]
 
 
 # ============ 停卡策略管理 ============
@@ -118,12 +130,14 @@ async def manual_suspend(
     """手动停卡"""
     is_admin = current_user.user_level == 1
     user_id = current_user.id
+    user_ids = await _get_accessible_user_ids(current_user, db)
     
     result = await SuspendActionService.manual_suspend(
         db=db,
         data=data,
         operator_id=user_id,
         user_id=user_id,
+        user_ids=user_ids,
         is_admin=is_admin
     )
     
@@ -147,12 +161,14 @@ async def manual_resume(
     """手动复机"""
     is_admin = current_user.user_level == 1
     user_id = current_user.id
+    user_ids = await _get_accessible_user_ids(current_user, db)
 
     result = await SuspendActionService.manual_resume(
         db=db,
         data=data,
         operator_id=user_id,
         user_id=user_id,
+        user_ids=user_ids,
         is_admin=is_admin
     )
 
@@ -179,7 +195,8 @@ async def force_activate(
         data=data,
         operator_id=current_user.id,
         user_id=current_user.id,
-        is_admin=True
+        is_admin=True,
+        force=True
     )
 
     return ResponseModel(

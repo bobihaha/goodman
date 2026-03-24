@@ -1,14 +1,14 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="充值加油包"
-    width="600px"
+    title="后台补量"
+    width="560px"
     :close-on-click-modal="false"
     @close="handleClose"
   >
     <el-alert
       v-if="pool"
-      :title="`流量池：${pool.name} | 当前用量：${formatFlow(pool.data_used)} / ${formatFlow(pool.data_total)} (${pool.usage_percent}%)`"
+      :title="`流量池：${pool.name} | 当前用量：${formatFlow(pool.data_used)} / ${formatFlow(pool.data_total)} (${Number(pool.usage_percent || 0).toFixed(2)}%)`"
       type="info"
       :closable="false"
       style="margin-bottom: 16px"
@@ -20,59 +20,59 @@
       :rules="rules"
       label-width="120px"
     >
-      <el-form-item label="选择加油包" prop="package_id">
-        <el-select
-          v-model="formData.package_id"
-          placeholder="请选择加油包"
-          style="width: 100%"
-          @change="handlePackageChange"
-        >
-          <el-option
-            v-for="item in packageList"
-            :key="item.id"
-            :label="`${item.name} - ${formatFlow(item.flow_size)} - ¥${item.price} - 有效期${item.valid_days}天`"
-            :value="item.id"
-          >
-            <div style="display: flex; justify-content: space-between; align-items: center">
-              <span>{{ item.name }}</span>
-              <span style="color: #909399; font-size: 12px">
-                {{ formatFlow(item.flow_size) }} | ¥{{ item.price }} | {{ item.valid_days }}天
-              </span>
-            </div>
-          </el-option>
-        </el-select>
-      </el-form-item>
-
-      <el-form-item v-if="selectedPackage" label="加油包详情">
-        <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="流量大小">
-            {{ formatFlow(selectedPackage.flow_size) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="价格">
-            <span style="color: #f56c6c; font-weight: bold; font-size: 16px">
-              ¥{{ selectedPackage.price }}
+      <el-form-item label="增加流量" prop="added_flow_mb">
+        <template v-if="isSelfOwned">
+          <div class="purchase-quantity-row">
+            <el-input-number v-model="purchaseQuantity" :min="1" :step="1" style="width: 220px" />
+            <span class="quantity-summary">
+              x {{ perPackageFlowText }} = {{ totalAddedFlowText }}
             </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="有效期">
-            {{ selectedPackage.valid_days }} 天
-          </el-descriptions-item>
-          <el-descriptions-item label="运营商">
-            {{ CARRIER_MAP[selectedPackage.carrier] }}
-          </el-descriptions-item>
-        </el-descriptions>
+          </div>
+          <div class="purchase-summary-line">
+            当前购买：{{ quantity }} 份 / {{ totalAddedFlowText }}
+          </div>
+          <div style="margin-top: 8px; color: #909399; font-size: 12px;">
+            每份 {{ pool ? formatFlow(pool.flow_size) : '-' }}，按流量池套餐规格整数倍购买，仅当月有效，次月失效
+          </div>
+        </template>
+        <template v-else>
+          <el-select v-model="formData.added_flow_mb" style="width: 100%">
+            <el-option
+              v-for="item in FLOW_PACKAGE_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <div style="margin-top: 8px; color: #909399; font-size: 12px;">
+            固定规格加油包，仅当月有效，次月失效
+          </div>
+          <div class="package-options">
+            <el-tag
+              v-for="item in FLOW_PACKAGE_OPTIONS"
+              :key="item.value"
+              class="package-tag"
+              :type="formData.added_flow_mb === item.value ? 'warning' : 'info'"
+              :effect="formData.added_flow_mb === item.value ? 'dark' : 'plain'"
+              @click="formData.added_flow_mb = item.value"
+            >
+              {{ item.label }}
+            </el-tag>
+          </div>
+        </template>
       </el-form-item>
 
-      <el-form-item v-if="selectedPackage" label="充值后">
+      <el-form-item v-if="pool && totalAddedFlowMb" label="补量后">
         <el-alert type="success" :closable="false">
           <template #title>
             <div>
-              总流量：{{ formatFlow(pool!.data_total) }} → 
+              总流量：{{ formatFlow(pool.data_total) }} ->
               <span style="color: #67c23a; font-weight: bold">
-                {{ formatFlow(pool!.data_total + selectedPackage.flow_size) }}
+                {{ formatFlow(pool.data_total + totalAddedFlowMb) }}
               </span>
             </div>
             <div style="margin-top: 4px">
-              使用率：{{ pool!.usage_percent }}% → 
+              使用率：{{ Number(pool.usage_percent || 0).toFixed(2) }}% ->
               <span style="color: #67c23a; font-weight: bold">
                 {{ calculateNewUsagePercent() }}%
               </span>
@@ -91,12 +91,20 @@
           show-word-limit
         />
       </el-form-item>
+
+      <el-form-item v-if="isSelfOwned" label="购买金额">
+        <span>{{ quotePriceText }}</span>
+      </el-form-item>
+
+      <el-form-item v-if="isSelfOwned" label="当前余额">
+        <span>{{ balanceText }}</span>
+      </el-form-item>
     </el-form>
 
     <template #footer>
       <el-button @click="handleClose">取消</el-button>
       <el-button type="primary" :loading="submitting" @click="handleSubmit">
-        确认充值
+        {{ isSelfOwned ? '确认购买' : '确认补量' }}
       </el-button>
     </template>
   </el-dialog>
@@ -105,10 +113,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { getPoolPackages, rechargePool } from '@/api/modules/pool'
-import { formatFlow } from '@/utils/formatter'
-import { CARRIER_MAP } from '@/constants/card'
-import type { Pool, PoolPackage } from '@/types/pool'
+import { purchasePoolTopup, quotePoolTopup, rechargePool } from '@/api/modules/pool'
+import { formatFlow, formatMoney } from '@/utils/formatter'
+import type { Pool } from '@/types/pool'
+import { FLOW_PACKAGE_OPTIONS, getFlowPackageLabel } from '@/constants/flow'
 
 interface Props {
   modelValue: boolean
@@ -122,7 +130,6 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
-
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
 
@@ -131,73 +138,69 @@ const visible = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
-// 加油包列表
-const packageList = ref<PoolPackage[]>([])
-
-// 表单数据
 const formData = reactive({
-  package_id: undefined as number | undefined,
+  added_flow_mb: 1024,
   remark: ''
 })
-
-// 已选择的加油包
-const selectedPackage = computed(() => {
-  if (!formData.package_id) return null
-  return packageList.value.find(p => p.id === formData.package_id)
+const purchaseQuantity = ref(1)
+const quotePrice = ref<number | null>(null)
+const balance = ref<number | null>(null)
+const isSelfOwned = computed(() => !!props.pool?.can_self_topup)
+const totalAddedFlowMb = computed(() => {
+  if (isSelfOwned.value) {
+    return (props.pool?.flow_size || 0) * (purchaseQuantity.value || 1)
+  }
+  return formData.added_flow_mb || 0
 })
+const quantity = computed(() => {
+  if (isSelfOwned.value) {
+    return purchaseQuantity.value || 1
+  }
+  if (!props.pool?.flow_size || !formData.added_flow_mb) return 0
+  return Math.max(Math.round(formData.added_flow_mb / props.pool.flow_size), 0)
+})
+const perPackageFlowText = computed(() => props.pool?.flow_size ? formatFlow(props.pool.flow_size) : '-')
+const totalAddedFlowText = computed(() => totalAddedFlowMb.value ? formatFlow(totalAddedFlowMb.value) : '-')
+const quotePriceText = computed(() => quotePrice.value == null ? '-' : formatMoney(quotePrice.value))
+const balanceText = computed(() => balance.value == null ? '-' : formatMoney(balance.value))
 
-// 表单验证规则
 const rules: FormRules = {
-  package_id: [
-    { required: true, message: '请选择加油包', trigger: 'change' }
+  added_flow_mb: [
+    { required: true, message: '请输入增加流量', trigger: 'blur' }
   ]
 }
 
-/**
- * 获取加油包列表
- */
-const fetchPackages = async () => {
-  if (!props.pool) return
-
-  try {
-    const data = await getPoolPackages(props.pool.carrier)
-    packageList.value = data || []
-  } catch (error) {
-    console.error('获取加油包列表失败:', error)
-    ElMessage.error('获取加油包列表失败')
-  }
-}
-
-/**
- * 加油包选择变化
- */
-const handlePackageChange = () => {
-  // 可以在这里添加额外的逻辑
-}
-
-/**
- * 计算充值后的使用率
- */
 const calculateNewUsagePercent = () => {
-  if (!props.pool || !selectedPackage.value) return 0
-  const newTotal = props.pool.data_total + selectedPackage.value.flow_size
+  if (!props.pool || !totalAddedFlowMb.value) return 0
+  const newTotal = props.pool.data_total + totalAddedFlowMb.value
   const percent = (props.pool.data_used / newTotal) * 100
-  return Math.round(percent)
+  return Math.round(percent * 100) / 100
 }
 
-/**
- * 提交表单
- */
+watch(
+  () => [props.modelValue, purchaseQuantity.value, props.pool?.id, props.pool?.flow_size, isSelfOwned.value] as const,
+  async ([visibleValue]) => {
+    if (!visibleValue || !props.pool?.id || !props.pool?.flow_size || !isSelfOwned.value) {
+      quotePrice.value = null
+      balance.value = null
+      return
+    }
+    const quote = await quotePoolTopup(props.pool.id, quantity.value || 1)
+    quotePrice.value = quote.total_price
+    balance.value = quote.balance
+  }
+)
+
 const handleSubmit = async () => {
-  if (!formRef.value || !props.pool || !selectedPackage.value) return
+  if (!formRef.value || !props.pool) return
 
   try {
     await formRef.value.validate()
-
-    // 二次确认
     await ElMessageBox.confirm(
-      `确认充值 ${selectedPackage.value.name}（¥${selectedPackage.value.price}）吗？`,
-      '确认充值',
+      isSelfOwned.value
+        ? `确认购买流量池 ${props.pool.name} 的 ${quantity.value} 份加油包吗？共 ${totalAddedFlowText.value}，金额 ${quotePriceText.value}。仅当月有效，次月失效。`
+        : `确认给流量池 ${props.pool.name} 增加 ${getFlowPackageLabel(formData.added_flow_mb)} 吗？仅当月有效，次月失效。`,
+      isSelfOwned.value ? '确认购买' : '确认补量',
       {
         confirmButtonText: '确认',
         cancelButtonText: '取消',
@@ -206,56 +209,74 @@ const handleSubmit = async () => {
     )
 
     submitting.value = true
+    const result: any = isSelfOwned.value
+      ? await purchasePoolTopup({
+          pool_id: props.pool.id,
+          quantity: quantity.value || 1,
+          remark: formData.remark || undefined
+        })
+      : await rechargePool({
+          pool_id: props.pool.id,
+          added_flow_mb: formData.added_flow_mb,
+          remark: formData.remark || undefined
+        })
 
-    await rechargePool({
-      pool_id: props.pool.id,
-      package_id: formData.package_id!
-    })
-
-    ElMessage.success('充值成功')
+    ElMessage.success(
+      isSelfOwned.value
+        ? `购买成功，自动复机 ${result.auto_resumed || 0} 张卡片`
+        : `补量成功，自动复机 ${result.auto_resumed || 0} 张卡片`
+    )
     emit('success')
     handleClose()
   } catch (error: any) {
     if (error !== 'cancel' && error !== false) {
-      console.error('充值失败:', error)
-      ElMessage.error(error.message || '充值失败')
+      console.error('流量池补量失败:', error)
+      ElMessage.error(error.message || '流量池补量失败')
     }
   } finally {
     submitting.value = false
   }
 }
 
-/**
- * 关闭对话框
- */
 const handleClose = () => {
   formRef.value?.resetFields()
-  formData.package_id = undefined
+  formData.added_flow_mb = 1024
+  purchaseQuantity.value = 1
   formData.remark = ''
   visible.value = false
 }
-
-// 监听对话框打开
-watch(
-  () => props.modelValue,
-  (val) => {
-    if (val) {
-      formData.package_id = undefined
-      formData.remark = ''
-      fetchPackages()
-    }
-  }
-)
 </script>
 
 <style scoped lang="scss">
-:deep(.el-select-dropdown__item) {
-  height: auto;
-  padding: 8px 20px;
+.package-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.package-tag {
+  cursor: pointer;
+  user-select: none;
+}
+
+.purchase-quantity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.quantity-summary {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.purchase-summary-line {
+  margin-top: 8px;
+  color: #303133;
+  font-size: 13px;
+  font-weight: 500;
 }
 </style>
-
-
-
-
-

@@ -253,6 +253,13 @@
             批量续费
           </el-button>
           <el-button
+            type="warning"
+            @click="showBatchAddFlowDialog"
+          >
+            <el-icon><Plus /></el-icon>
+            批量补量
+          </el-button>
+          <el-button
             type="danger"
             @click="showBatchSuspendDialog"
           >
@@ -272,6 +279,9 @@
             <el-icon><Download /></el-icon>
             导出
           </el-button>
+          <el-button @click="goPurchaseRecords">
+            购买记录
+          </el-button>
           <el-button
             :disabled="selectedCards.length === 0"
             @click="showExportHistoryDialog"
@@ -287,6 +297,7 @@
       </div>
       <div v-if="selectedCards.length > 0" class="selection-info">
         已选择 <span class="selection-count">{{ selectedCards.length }}</span> 张卡片
+        <el-button type="primary" link @click="showBatchAddFlowDialog">批量补量</el-button>
         <el-button type="text" @click="clearSelection">清空选择</el-button>
       </div>
     </el-card>
@@ -337,46 +348,49 @@
 
         <el-table-column prop="carrier" label="运营商" width="100">
           <template #default="{ row }">
-            {{ CARRIER_MAP[row.carrier] }}
+            {{ getCarrierLabel(row.carrier) }}
           </template>
         </el-table-column>
 
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="CARD_STATUS_MAP[row.status].type">
-              {{ CARD_STATUS_MAP[row.status].label }}
+            <el-tag :type="getStatusMeta(row.status).type">
+              {{ getStatusMeta(row.status).label }}
             </el-tag>
           </template>
         </el-table-column>
 
         <el-table-column label="本月用量" width="120">
           <template #default="{ row }">
-            {{ formatFlow(row.data_used_month) }}
+            {{ formatFlowValue(row.data_used_month) }}
           </template>
         </el-table-column>
 
         <el-table-column label="套餐总量" width="120">
           <template #default="{ row }">
-            {{ formatFlow(row.data_total) }}
+            {{ formatFlowValue(row.data_total) }}
           </template>
         </el-table-column>
 
         <el-table-column label="已用量" width="120">
           <template #default="{ row }">
-            {{ formatFlow(row.data_used) }}
+            {{ formatFlowValue(row.data_used) }}
           </template>
         </el-table-column>
 
         <el-table-column label="流量使用" width="200">
           <template #default="{ row }">
             <div class="flow-usage">
-              <el-progress
-                :percentage="formatUsagePercent(row.data_used, row.data_total)"
-                :color="getProgressColor(formatUsagePercent(row.data_used, row.data_total))"
-                :format="(val: number) => `${Math.round(val)}%`"
-              />
+              <div class="flow-progress-row">
+                <el-progress
+                  :percentage="Math.min(formatUsagePercent(row.data_used, row.data_total), 100)"
+                  :color="getProgressColor(formatUsagePercent(row.data_used, row.data_total))"
+                  :show-text="false"
+                />
+                <span class="flow-percent">{{ formatUsagePercent(row.data_used, row.data_total).toFixed(2) }}%</span>
+              </div>
               <div class="flow-text">
-                {{ formatFlow(row.data_used) }} / {{ formatFlow(row.data_total) }}
+                {{ formatFlowValue(row.data_used) }} / {{ formatFlowValue(row.data_total) }}
               </div>
             </div>
           </template>
@@ -384,34 +398,34 @@
 
         <el-table-column label="套餐规格" width="120">
           <template #default="{ row }">
-            {{ formatFlow(row.flow_size) }}/{{ PERIOD_TYPE_MAP[row.period_type] }}
+            {{ formatFlow(row.flow_size) }}/{{ getPeriodLabel(row.period_type) }}
           </template>
         </el-table-column>
 
         <el-table-column prop="test_expire_date" label="测试期" width="110">
           <template #default="{ row }">
-            <span v-if="row.test_expire_date">{{ row.test_expire_date }}</span>
+            <span v-if="row.test_expire_date">{{ formatDate(row.test_expire_date) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
 
         <el-table-column prop="silent_expire_date" label="沉默期" width="110">
           <template #default="{ row }">
-            <span v-if="row.silent_expire_date">{{ row.silent_expire_date }}</span>
+            <span v-if="row.silent_expire_date">{{ formatDate(row.silent_expire_date) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
 
         <el-table-column prop="activated_at" label="激活日期" width="110">
           <template #default="{ row }">
-            <span v-if="row.activated_at">{{ row.activated_at }}</span>
+            <span v-if="row.activated_at">{{ formatDate(row.activated_at) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
 
         <el-table-column prop="stock_out_at" label="出库日期" width="110">
           <template #default="{ row }">
-            <span v-if="row.stock_out_at">{{ formatDateShort(row.stock_out_at) }}</span>
+            <span v-if="row.stock_out_date || row.stock_out_at">{{ formatDate(row.stock_out_date || row.stock_out_at) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
@@ -419,7 +433,7 @@
         <el-table-column prop="expired_at" label="到期日期" width="110">
           <template #default="{ row }">
             <span :class="{ 'text-danger': isExpired(row.expired_at) }">
-              {{ row.expired_at || '-' }}
+              {{ formatDate(row.expired_at) }}
             </span>
           </template>
         </el-table-column>
@@ -437,17 +451,50 @@
 
         <el-table-column prop="remark" label="备注" min-width="150" show-overflow-tooltip />
 
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="64" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button type="text" size="small" @click="viewDetail(row.id)">
-              详情
-            </el-button>
-            <el-button type="text" size="small" @click="showTransferDialog(row)">
-              划拨
-            </el-button>
-            <el-button type="text" size="small" @click="showRemarkDialog(row)">
-              备注
-            </el-button>
+            <div class="row-actions">
+              <el-dropdown
+                trigger="click"
+                @command="handleRowAction($event, row)"
+              >
+                <el-button
+                  type="text"
+                  size="small"
+                  class="more-actions-btn"
+                  title="操作"
+                >
+                  <el-icon><MoreFilled /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="detail">详情</el-dropdown-item>
+                    <el-dropdown-item command="transfer">划拨</el-dropdown-item>
+                    <el-dropdown-item command="remark">备注</el-dropdown-item>
+                    <el-dropdown-item command="renew">续费</el-dropdown-item>
+                    <el-dropdown-item
+                      command="addFlow"
+                      :disabled="row.card_type !== 'single'"
+                    >
+                      补量
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="resume"
+                      :disabled="row.status !== 'suspended'"
+                    >
+                      复机
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="isSuperAdmin"
+                      command="forceResume"
+                      :disabled="row.status !== 'suspended'"
+                    >
+                      强制复机
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -496,6 +543,12 @@
       @success="handleBatchRenewSuccess"
     />
 
+    <!-- 批量补量对话框 -->
+    <BatchAddFlowDialog
+      v-model="batchAddFlowVisible"
+      @success="handleBatchAddFlowSuccess"
+    />
+
     <!-- 批量停机对话框 -->
     <BatchSuspendDialog
       v-model="batchSuspendVisible"
@@ -521,6 +574,18 @@
       :card="currentCard"
       @success="handleRemarkSuccess"
     />
+
+    <SingleAddFlowDialog
+      v-model="singleAddFlowVisible"
+      :card="currentCard"
+      @success="handleSingleAddFlowSuccess"
+    />
+
+    <SingleRenewDialog
+      v-model="singleRenewVisible"
+      :card="currentCard"
+      @success="handleSingleRenewSuccess"
+    />
   </div>
 </template>
 
@@ -538,14 +603,17 @@ import {
   Connection,
   Edit,
   Refresh,
+  Plus,
   CircleClose,
   Download,
   Filter,
   ArrowDown,
-  ArrowUp
+  ArrowUp,
+  MoreFilled
 } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
 import { userApi } from '@/api'
+import { useAuthStore } from '@/stores/modules/auth'
 import type { Card, CardListParams, CardStats } from '@/types/card'
 import type { User } from '@/types/user'
 import {
@@ -556,19 +624,23 @@ import {
   PERIOD_TYPE_MAP,
   PERIOD_TYPE_OPTIONS
 } from '@/constants/card'
-import { formatFlow, formatDateShort, formatUsagePercent, isExpired } from '@/utils/formatter'
+import { formatFlow, formatFlowValue, formatDate, formatUsagePercent, isExpired } from '@/utils/formatter'
 import BatchQueryDialog from './components/BatchQueryDialog.vue'
 import BatchTransferDialog from './components/BatchTransferDialog.vue'
 import BatchRemarkDialog from './components/BatchRemarkDialog.vue'
 import BatchRenewDialog from './components/BatchRenewDialog.vue'
+import BatchAddFlowDialog from './components/BatchAddFlowDialog.vue'
 import BatchSuspendDialog from './components/BatchSuspendDialog.vue'
 import BatchResumeDialog from './components/BatchResumeDialog.vue'
+import SingleAddFlowDialog from './components/SingleAddFlowDialog.vue'
+import SingleRenewDialog from './components/SingleRenewDialog.vue'
 import TransferDialog from './components/TransferDialog.vue'
 import RemarkDialog from './components/RemarkDialog.vue'
 import ExportHistoryDialog from './components/ExportHistoryDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
 // 数据
 const loading = ref(false)
@@ -626,14 +698,21 @@ const batchQueryVisible = ref(false)
 const batchTransferVisible = ref(false)
 const batchRemarkVisible = ref(false)
 const batchRenewVisible = ref(false)
+const batchAddFlowVisible = ref(false)
 const batchSuspendVisible = ref(false)
 const batchResumeVisible = ref(false)
 const transferVisible = ref(false)
 const remarkVisible = ref(false)
+const singleAddFlowVisible = ref(false)
+const singleRenewVisible = ref(false)
 const exportHistoryVisible = ref(false)
 
 // 计算属性
 const selectedCardIds = computed(() => selectedCards.value.map(card => card.id))
+const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
+const getCarrierLabel = (carrier: any) => CARRIER_MAP[carrier as keyof typeof CARRIER_MAP] || '-'
+const getStatusMeta = (status: any) => CARD_STATUS_MAP[status as keyof typeof CARD_STATUS_MAP] || CARD_STATUS_MAP.stock
+const getPeriodLabel = (periodType: any) => PERIOD_TYPE_MAP[periodType as keyof typeof PERIOD_TYPE_MAP] || '-'
 
 // 获取卡片列表
 const fetchCardList = async () => {
@@ -651,10 +730,10 @@ const fetchCardList = async () => {
       expired_end: expiredRange.value?.[1] || undefined
     }
     
-    const response = await cardApi.getList(params)
+    const response: any = await cardApi.getList(params)
     
     // 计算使用率
-    cardList.value = response.items.map(card => ({
+    cardList.value = (response.items || []).map((card: Card) => ({
       ...card,
       usage_percent: formatUsagePercent(card.data_used, card.data_total)
     }))
@@ -773,6 +852,11 @@ const showBatchRenewDialog = () => {
   batchRenewVisible.value = true
 }
 
+// 显示批量补量对话框
+const showBatchAddFlowDialog = () => {
+  batchAddFlowVisible.value = true
+}
+
 // 显示批量停机对话框
 const showBatchSuspendDialog = () => {
   batchSuspendVisible.value = true
@@ -807,6 +891,10 @@ const handleExport = async () => {
   }
 }
 
+const goPurchaseRecords = () => {
+  router.push('/records/purchases')
+}
+
 // 显示单卡划拨对话框
 const showTransferDialog = (card: Card) => {
   currentCard.value = card
@@ -817,6 +905,113 @@ const showTransferDialog = (card: Card) => {
 const showRemarkDialog = (card: Card) => {
   currentCard.value = card
   remarkVisible.value = true
+}
+
+// 单行补量
+const handleRowAddFlow = (card: Card) => {
+  currentCard.value = card
+  singleAddFlowVisible.value = true
+}
+
+const handleRowRenew = (card: Card) => {
+  currentCard.value = card
+  singleRenewVisible.value = true
+}
+
+const handleRowAction = (command: string, card: Card) => {
+  switch (command) {
+    case 'detail':
+      viewDetail(card.id)
+      break
+    case 'transfer':
+      showTransferDialog(card)
+      break
+    case 'remark':
+      showRemarkDialog(card)
+      break
+    case 'renew':
+      handleRowRenew(card)
+      break
+    case 'addFlow':
+      if (card.card_type === 'single') {
+        handleRowAddFlow(card)
+      }
+      break
+    case 'resume':
+      if (card.status === 'suspended') {
+        handleRowResume(card)
+      }
+      break
+    case 'forceResume':
+      if (card.status === 'suspended' && isSuperAdmin.value) {
+        handleRowForceResume(card)
+      }
+      break
+    default:
+      break
+  }
+}
+
+// 单行复机
+const handleRowResume = async (card: Card) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要复机卡片 ${card.iccid} 吗？`,
+      '复机确认',
+      {
+        confirmButtonText: '确定复机',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.batchResumeByIccids({
+      iccids: [card.iccid]
+    })
+
+    if (result.success > 0) {
+      ElMessage.success('复机成功')
+      fetchCardList()
+      fetchStats()
+    } else {
+      ElMessage.error(result.failed_list?.[0]?.error || '复机失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('单行复机失败:', error)
+    }
+  }
+}
+
+// 单行强制复机
+const handleRowForceResume = async (card: Card) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要强制复机卡片 ${card.iccid} 吗？该操作会绕过人工停卡与超限限制。`,
+      '强制复机确认',
+      {
+        confirmButtonText: '确认强制复机',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.batchForceResumeByIccids({
+      iccids: [card.iccid]
+    })
+
+    if (result.success > 0) {
+      ElMessage.success('强制复机成功')
+      fetchCardList()
+      fetchStats()
+    } else {
+      ElMessage.error(result.failed_list?.[0]?.error || '强制复机失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('单行强制复机失败:', error)
+    }
+  }
 }
 
 // 批量查询成功回调
@@ -857,6 +1052,13 @@ const handleBatchRenewSuccess = () => {
   fetchCardList()
 }
 
+// 批量补量成功回调
+const handleBatchAddFlowSuccess = () => {
+  clearSelection()
+  fetchCardList()
+  fetchStats()
+}
+
 // 批量停机成功回调
 const handleBatchSuspendSuccess = () => {
   clearSelection()
@@ -882,6 +1084,16 @@ const handleRemarkSuccess = () => {
   fetchCardList()
 }
 
+const handleSingleAddFlowSuccess = () => {
+  fetchCardList()
+  fetchStats()
+}
+
+const handleSingleRenewSuccess = () => {
+  fetchCardList()
+  fetchStats()
+}
+
 // 获取进度条颜色
 const getProgressColor = (percent: number) => {
   if (percent >= 90) return '#F56C6C'
@@ -894,7 +1106,7 @@ onMounted(() => {
   // 读取 URL 参数
   const carrierParam = route.query.carrier as string
   if (carrierParam) {
-    searchForm.carrier = carrierParam
+    searchForm.carrier = carrierParam as any
   }
 
   // 到期卡筛选
@@ -904,8 +1116,8 @@ onMounted(() => {
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
     const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
     expiredRange.value = [
-      monthStart.toISOString().split('T')[0],
-      monthEnd.toISOString().split('T')[0]
+      monthStart.toISOString().split('T')[0] || '',
+      monthEnd.toISOString().split('T')[0] || ''
     ]
   }
 
@@ -1036,12 +1248,15 @@ onMounted(() => {
 .toolbar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 12px;
 
   .toolbar-left,
   .toolbar-right {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
@@ -1065,7 +1280,45 @@ onMounted(() => {
   }
 }
 
+.row-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+
+  :deep(.el-button) {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .more-actions-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    padding: 0;
+  }
+}
+
 .flow-usage {
+  .flow-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .flow-percent {
+    flex-shrink: 0;
+    min-width: 54px;
+    font-size: 12px;
+    color: #4e5969;
+    text-align: right;
+  }
+
+  :deep(.el-progress) {
+    flex: 1;
+  }
+
   .flow-text {
     font-size: 12px;
     color: #86909c;

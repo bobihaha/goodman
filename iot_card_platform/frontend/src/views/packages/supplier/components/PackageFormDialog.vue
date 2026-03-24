@@ -323,7 +323,7 @@ const rules: FormRules = {
   ],
   period_months: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (formData.period_type === 'monthly' && !value) {
           callback(new Error('请输入套餐周期（月）'))
         } else {
@@ -335,7 +335,7 @@ const rules: FormRules = {
   ],
   period_days: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (formData.period_type === 'yearly' && !value) {
           callback(new Error('请输入套餐周期（天）'))
         } else {
@@ -407,4 +407,3 @@ const handleSubmit = async () => {
   width: 100%;
 }
 </style>
-

@@ -57,7 +57,7 @@
           :extra="overview?.alerts?.unhandled ? '需要处理' : '一切正常'"
           :extra-color="overview?.alerts?.unhandled ? '#ff4d4f' : '#52c41a'"
           clickable
-          @click="router.push('/alerts')"
+          @click="router.push('/suspend/alerts')"
         />
       </div>
     </div>
@@ -110,7 +110,9 @@ import {
   Connection, 
   User, 
   Warning,
-  Phone
+  Phone,
+  Clock,
+  WarningFilled
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores'
 import { dashboardApi } from '@/api'
@@ -129,54 +131,17 @@ const router = useRouter()
 const userInfo = computed(() => authStore.userInfo)
 
 // 概览数据
-const overview = ref<{
-  cards: {
-    total: number
-    expiring_count: number
-    over_usage_count: number
-    by_status: Array<{
-      status: string
-      status_name: string
-      count: number
-    }>
-    by_carrier: Array<{
-      carrier: string
-      carrier_name: string
-      count: number
-    }>
-  }
-  users: {
-    total_users: number
-    total_sub_users: number
-    active_users: number
-  }
-  packages: {
-    supplier_packages: number
-    sale_packages: number
-  }
-  pools: {
-    total_pools: number
-    total_data: number
-    used_data: number
-    usage_percent: number
-  }
-  alerts: {
-    warning: number
-    critical: number
-    exceed: number
-    unhandled: number
-  }
-} | null>(null)
+const overview = ref<any>(null)
 
 // 获取状态统计
 const getStatusCount = (status: string) => {
-  const item = overview.value?.cards?.by_status?.find(s => s.status === status)
+  const item = overview.value?.cards?.by_status?.find((s: any) => s.status === status)
   return item?.count || 0
 }
 
 // 获取运营商统计
 const getCarrierCount = (carrier: string) => {
-  const item = overview.value?.cards?.by_carrier?.find(c => c.carrier === carrier)
+  const item = overview.value?.cards?.by_carrier?.find((c: any) => c.carrier === carrier)
   return item?.count || 0
 }
 

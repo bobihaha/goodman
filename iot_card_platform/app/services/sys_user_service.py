@@ -1,7 +1,8 @@
 """
 系统用户服务
 """
-from typing import List, Tuple
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Tuple, Optional
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -10,6 +11,7 @@ from app.crud.sys_user_crud import sys_user_crud
 from app.schemas.sys_user import UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate, UserPasswordReset
 from app.schemas.auth import CurrentUser
 from app.services.auth_service import AuthService
+from app.services.account_balance_service import account_balance_service
 from app.utils.exceptions import BusinessException, PermissionDeniedException, UserNotFoundException
 from app.utils.const import validate_account, validate_password, validate_phone, validate_email
 
@@ -155,6 +157,26 @@ class SysUserService:
         cls._check_manage_permission(operator, target_user)
         user = await sys_user_crud.update(db, id=user_id, obj_in={"status": status})
         return UserInfo.model_validate(user)
+
+    @classmethod
+    async def grant_balance(
+        cls,
+        db: AsyncSession,
+        operator: CurrentUser,
+        user_id: int,
+        amount: float,
+        remark: Optional[str] = None,
+        request_id: Optional[str] = None
+    ) -> dict:
+        normalized_amount = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return await account_balance_service.grant_balance(
+            db=db,
+            operator=operator,
+            target_user_id=user_id,
+            amount=normalized_amount,
+            remark=remark,
+            request_id=request_id
+        )
     
     @staticmethod
     def _check_manage_permission(operator: CurrentUser, target: SysUserModel):
@@ -274,4 +296,3 @@ class SysUserService:
 
 
 sys_user_service = SysUserService()
-

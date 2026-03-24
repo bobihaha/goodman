@@ -309,7 +309,7 @@ const searchCustomers = async (keyword: string) => {
       page: 1,
       page_size: 50
     })
-    customerList.value = res.list || res.items || []
+    customerList.value = res.list || []
   } catch (error) {
     console.error('搜索客户失败:', error)
     customerList.value = []
@@ -529,7 +529,7 @@ const rules: FormRules = {
   ],
   period_months: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (formData.period_type === 'monthly' && !value) {
           callback(new Error('请输入套餐周期（月）'))
         } else {
@@ -541,7 +541,7 @@ const rules: FormRules = {
   ],
   period_days: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (formData.period_type === 'yearly' && !value) {
           callback(new Error('请输入套餐周期（天）'))
         } else {
@@ -559,7 +559,7 @@ const rules: FormRules = {
     { required: true, message: '请输入销售价格', trigger: 'blur' },
     { type: 'number', min: 0, message: '销售价格不能为负数', trigger: 'blur' },
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (value < formData.price_cost) {
           callback(new Error('销售价格不能低于成本价'))
         } else {
@@ -639,4 +639,3 @@ const handleSubmit = async () => {
   padding: 8px 20px;
 }
 </style>
-

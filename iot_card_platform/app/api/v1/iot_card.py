@@ -7,13 +7,14 @@ from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.services.iot_card_service import iot_card_service
-from app.utils.auth import get_current_user, require_user_level
+from app.utils.auth import get_current_user, require_user_level, require_any_level
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.schemas.iot_card import (
     CardQuery, CardSearchRequest, CardInfo, CardListResponse, CardStats,
     CardTransferRequest, BatchTransferRequest, TransferRecord,
-    CardRemarkRequest, BatchRemarkRequest, CardExportRequest
+    CardRemarkRequest, BatchRemarkRequest, CardExportRequest,
+    BatchAddFlowByIccidsRequest, CardTopupQuoteRequest, CardRenewQuoteRequest
 )
 
 router = APIRouter(prefix="/cards", tags=["卡片管理"])
@@ -239,6 +240,119 @@ async def batch_resume_by_iccids(
         current_user_id=current_user.id, user_level=current_user.user_level
     )
     return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
+
+
+@router.post("/batch/add-flow-by-iccids", summary="通过ICCID批量增加单卡流量", response_model=ResponseModel)
+async def batch_add_flow_by_iccids(
+    request: BatchAddFlowByIccidsRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_user_level)
+):
+    """通过ICCID批量给非流量池卡补量"""
+    if len(request.iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多操作10000张卡片")
+
+    result = await iot_card_service.batch_add_flow_by_iccids(
+        db=db,
+        iccids=request.iccids,
+        added_flow_mb=request.added_flow_mb,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        remark=request.remark
+    )
+    return ResponseModel(
+        data=result,
+        msg=f"补量完成，成功{result['success']}张，失败{result['failed']}张，自动复机{result['auto_resumed']}张"
+    )
+
+
+@router.post("/{card_id}/topup/quote", summary="单卡加油包试算", response_model=ResponseModel)
+async def quote_card_topup(
+    card_id: int,
+    request: CardTopupQuoteRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_level)
+):
+    quote = await iot_card_service.quote_card_topup(
+        db=db,
+        card_id=card_id,
+        current_user_id=current_user.id
+    )
+    selected = next((item for item in quote["package_options"] if item["package_mb"] == request.package_mb), None)
+    return ResponseModel(data={
+        **quote,
+        "selected_package_mb": request.package_mb,
+        "selected_package_label": selected["label"] if selected else None,
+        "selected_price": selected["price"] if selected else None
+    })
+
+
+@router.post("/{card_id}/topup", summary="购买单卡加油包", response_model=ResponseModel)
+async def purchase_card_topup(
+    card_id: int,
+    request: CardTopupQuoteRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_level)
+):
+    result = await iot_card_service.purchase_card_topup(
+        db=db,
+        card_id=card_id,
+        package_mb=request.package_mb,
+        current_user_id=current_user.id
+    )
+    return ResponseModel(data=result, msg="单卡加油包购买成功")
+
+
+@router.post("/{card_id}/renew/quote", summary="单卡续费试算", response_model=ResponseModel)
+async def quote_card_renew(
+    card_id: int,
+    request: CardRenewQuoteRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_level)
+):
+    result = await iot_card_service.quote_card_renew(
+        db=db,
+        card_id=card_id,
+        renew_months=request.renew_months,
+        current_user_id=current_user.id
+    )
+    return ResponseModel(data=result)
+
+
+@router.post("/{card_id}/renew", summary="购买单卡续费", response_model=ResponseModel)
+async def purchase_card_renew(
+    card_id: int,
+    request: CardRenewQuoteRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_level)
+):
+    result = await iot_card_service.purchase_card_renew(
+        db=db,
+        card_id=card_id,
+        renew_months=request.renew_months,
+        current_user_id=current_user.id
+    )
+    return ResponseModel(data=result, msg="单卡续费购买成功")
+
+
+@router.post("/batch/force-resume-by-iccids", summary="通过ICCID批量强制复机", response_model=ResponseModel)
+async def batch_force_resume_by_iccids(
+    iccids: List[str] = Body(..., description="ICCID列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_user_level)
+):
+    """通过ICCID批量强制复机，仅超级管理员"""
+    if current_user.user_level != 1:
+        return ResponseModel(code=403, msg="仅超级管理员可强制复机")
+    if len(iccids) > 10000:
+        return ResponseModel(code=400, msg="单次最多复机10000张卡片")
+
+    result = await iot_card_service.batch_force_resume_by_iccids(
+        db=db,
+        iccids=iccids,
+        current_user_id=current_user.id
+    )
+    return ResponseModel(data=result, msg=f"强制复机完成，成功{result['success']}张，失败{result['failed']}张")
 
 
 @router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)

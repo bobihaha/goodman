@@ -53,7 +53,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { dashboardApi, type OverUsageCard } from '@/api'
 import { formatCarrier, formatFlowSize, formatPercent } from '@/utils/formatter'
 
@@ -81,16 +80,6 @@ const fetchOverUsageCards = async () => {
 watch(() => props.carrier, () => {
   fetchOverUsageCards()
 })
-
-// 停机
-const handleSuspend = (card: OverUsageCard) => {
-  ElMessage.warning(`停机卡片: ${card.iccid}`)
-}
-
-// 充值
-const handleRecharge = (card: OverUsageCard) => {
-  ElMessage.info(`充值卡片: ${card.iccid}`)
-}
 
 // 查看全部
 const handleViewAll = () => {

@@ -250,9 +250,11 @@ class SysOperationLogCRUD:
     async def get_list(
         db: AsyncSession,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         module: Optional[str] = None,
         action: Optional[str] = None,
         target_type: Optional[str] = None,
+        target_id: Optional[int] = None,
         is_success: Optional[bool] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -267,6 +269,10 @@ class SysOperationLogCRUD:
             query = query.where(SysOperationLogModel.user_id == user_id)
             count_query = count_query.where(SysOperationLogModel.user_id == user_id)
 
+        if user_ids is not None:
+            query = query.where(SysOperationLogModel.user_id.in_(user_ids))
+            count_query = count_query.where(SysOperationLogModel.user_id.in_(user_ids))
+
         if module:
             query = query.where(SysOperationLogModel.module == module)
             count_query = count_query.where(SysOperationLogModel.module == module)
@@ -278,6 +284,10 @@ class SysOperationLogCRUD:
         if target_type:
             query = query.where(SysOperationLogModel.target_type == target_type)
             count_query = count_query.where(SysOperationLogModel.target_type == target_type)
+
+        if target_id is not None:
+            query = query.where(SysOperationLogModel.target_id == target_id)
+            count_query = count_query.where(SysOperationLogModel.target_id == target_id)
 
         if is_success is not None:
             query = query.where(SysOperationLogModel.is_success == (1 if is_success else 0))

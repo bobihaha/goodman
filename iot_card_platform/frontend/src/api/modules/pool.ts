@@ -108,11 +108,23 @@ export function getPoolPackages(carrier?: string) {
 }
 
 /**
- * 充值加油包
+ * 后台补量
  */
 export function rechargePool(data: PoolRechargeRequest) {
   return request.post(`/pools/${data.pool_id}/recharge`, {
-    package_id: data.package_id
+    added_flow_mb: data.added_flow_mb,
+    remark: data.remark
+  })
+}
+
+export function quotePoolTopup(poolId: number, quantity: number) {
+  return request.post(`/pools/${poolId}/topup/quote`, { quantity })
+}
+
+export function purchasePoolTopup(data: { pool_id: number; quantity: number; remark?: string }) {
+  return request.post(`/pools/${data.pool_id}/topup`, {
+    quantity: data.quantity,
+    remark: data.remark
   })
 }
 
@@ -131,4 +143,3 @@ export function exportPools(params?: PoolListParams) {
     responseType: 'blob'
   })
 }
-

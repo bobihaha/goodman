@@ -281,7 +281,7 @@ const queryParams = reactive({
 })
 
 // 表格数据
-const tableData = ref([])
+const tableData = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
 
@@ -289,8 +289,8 @@ const loading = ref(false)
 const summary = ref<any>({})
 
 // 供应商、套餐列表
-const suppliers = ref([])
-const packages = ref([])
+const suppliers = ref<any[]>([])
+const packages = ref<any[]>([])
 
 // 批量查询
 const showBatchQueryDialog = ref(false)
@@ -325,7 +325,7 @@ const fetchInventory = async () => {
   loading.value = true
   try {
     const res = await stockApi.getInventory(queryParams)
-    tableData.value = res.items || []  // 后端返回的是 items
+    tableData.value = res.items || res.list || []
     total.value = res.total || 0
   } catch (error) {
     ElMessage.error('获取库存列表失败')
@@ -338,7 +338,7 @@ const fetchInventory = async () => {
 const fetchSuppliers = async () => {
   try {
     const res = await supplierApi.getList({ page: 1, page_size: 100 })
-    suppliers.value = res.list || res.data?.items || res.data?.list || []
+    suppliers.value = res.list || []
   } catch (error) {
     console.error('获取供应商列表失败', error)
   }
@@ -562,4 +562,3 @@ onMounted(() => {
   }
 }
 </style>
-

@@ -2,7 +2,8 @@
 流量池相关 Pydantic 模型
 """
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from app.flow_packages import FLOW_PACKAGE_LABELS, is_valid_flow_package_size
 
 
 class PoolCreate(BaseModel):
@@ -36,6 +37,25 @@ class PoolAddCards(BaseModel):
 class PoolRemoveCards(BaseModel):
     """从流量池移除卡片"""
     card_ids: List[int] = Field(..., min_length=1, description="卡片ID列表")
+    remark: Optional[str] = Field(None, max_length=200, description="备注")
+
+
+class PoolRechargeRequest(BaseModel):
+    """流量池后台补量"""
+    added_flow_mb: int = Field(..., gt=0, description="增加流量(MB)")
+    remark: Optional[str] = Field(None, max_length=200, description="备注")
+
+    @field_validator("added_flow_mb")
+    @classmethod
+    def validate_added_flow_mb(cls, value: int) -> int:
+        if not is_valid_flow_package_size(value):
+            supported = " / ".join(FLOW_PACKAGE_LABELS[size] for size in FLOW_PACKAGE_LABELS)
+            raise ValueError(f"仅支持固定补量规格: {supported}")
+        return value
+
+
+class PoolTopupPurchaseRequest(BaseModel):
+    quantity: int = Field(..., gt=0, description="购买份数")
     remark: Optional[str] = Field(None, max_length=200, description="备注")
 
 

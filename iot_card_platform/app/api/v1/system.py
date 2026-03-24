@@ -157,6 +157,7 @@ async def get_operation_logs(
     module: Optional[str] = Query(None, description="模块"),
     action: Optional[str] = Query(None, description="动作"),
     target_type: Optional[str] = Query(None, description="目标类型"),
+    target_id: Optional[int] = Query(None, description="目标ID"),
     is_success: Optional[bool] = Query(None, description="是否成功"),
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
@@ -168,10 +169,13 @@ async def get_operation_logs(
     """获取操作日志"""
     logs, total = await OperationLogService.get_logs(
         db=db,
+        current_user_id=current_user.id,
+        current_user_level=current_user.user_level,
         user_id=user_id,
         module=module,
         action=action,
         target_type=target_type,
+        target_id=target_id,
         is_success=is_success,
         start_time=start_time,
         end_time=end_time,

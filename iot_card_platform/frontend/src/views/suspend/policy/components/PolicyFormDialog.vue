@@ -160,10 +160,14 @@ const rules: FormRules = {
 watch(() => props.policy, (policy) => {
   if (policy) {
     form.name = policy.name
-    form.type = policy.type
+    form.type = policy.policy_type
     form.description = policy.description
-    form.enabled = policy.enabled
-    form.config = { ...policy.config }
+    form.enabled = policy.is_enabled
+    form.config = {
+      threshold: policy.stop_threshold ?? 80,
+      days_before: 0,
+      auto_suspend: policy.auto_suspend
+    }
   } else {
     resetForm()
   }

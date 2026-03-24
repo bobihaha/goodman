@@ -11,6 +11,7 @@ export interface User {
   name: string          // 姓名
   phone?: string        // 手机号
   email?: string        // 邮箱
+  avatar?: string       // 头像
   parent_id?: number    // 父级用户ID
   user_level: number    // 用户级别：1-超管，2-用户，3-子用户
   status: UserStatus    // 状态：enable/disable
@@ -23,6 +24,10 @@ export interface User {
     max_cards: number
     max_sub_users: number
     pool_stop_threshold?: number  // 流量池停卡阈值(%)，如120表示用量达120%时全池停卡
+    account_balance?: number
+    balance_alert_threshold?: number
+    last_grant_at?: string
+    last_grant_amount?: number
   }
   permissions?: string[]     // 用户权限列表
   is_super_login?: boolean   // 是否超级登录模式
@@ -40,6 +45,7 @@ export interface LoginRequest {
 // 登录响应
 export interface LoginResponse {
   access_token: string
+  refresh_token: string
   token_type: string
   expires_in: number
   user: User
@@ -60,6 +66,8 @@ export interface UserCreateRequest {
     max_cards: number
     max_sub_users: number
     pool_stop_threshold?: number  // 流量池停卡阈值(%)
+    account_balance?: number
+    balance_alert_threshold?: number
   }
   remark?: string       // 备注
   status?: UserStatus   // 状态（默认enable）
@@ -78,6 +86,8 @@ export interface UserUpdateRequest {
     max_cards: number
     max_sub_users: number
     pool_stop_threshold?: number  // 流量池停卡阈值(%)
+    account_balance?: number
+    balance_alert_threshold?: number
   }
   remark?: string
   status?: UserStatus
@@ -89,6 +99,7 @@ export interface UserListParams {
   page_size?: number
   keyword?: string      // 关键词搜索（账号、姓名、手机号）
   status?: UserStatus   // 状态筛选
+  user_level?: number   // 用户级别筛选
 }
 
 // 用户权限

@@ -98,6 +98,15 @@
       <div v-if="!operationResult">
         <el-button @click="handleClose">取消</el-button>
         <el-button
+          v-if="isSuperAdmin"
+          type="warning"
+          :loading="loading"
+          :disabled="iccidCount === 0 || iccidCount > BATCH_MAX_COUNT"
+          @click="handleForceResume"
+        >
+          强制复机
+        </el-button>
+        <el-button
           type="success"
           :loading="loading"
           :disabled="iccidCount === 0 || iccidCount > BATCH_MAX_COUNT"
@@ -119,6 +128,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
+import { useAuthStore } from '@/stores/modules/auth'
 
 const BATCH_MAX_COUNT = 10000
 
@@ -140,6 +150,7 @@ interface OperationResult {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+const authStore = useAuthStore()
 
 // 数据
 const loading = ref(false)
@@ -151,6 +162,7 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 })
+const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
 
 const iccidCount = computed(() => {
   if (!iccidText.value.trim()) return 0
@@ -235,6 +247,50 @@ const handleResume = async () => {
     }
   } catch (error) {
     // 用户取消操作
+  }
+}
+
+const handleForceResume = async () => {
+  const iccids = parseICCIDs(iccidText.value)
+  if (iccids.length === 0) {
+    ElMessage.warning('请输入ICCID')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要强制复机 ${iccids.length} 张卡片吗？该操作会绕过人工停卡与超限限制。`,
+      '强制复机确认',
+      {
+        confirmButtonText: '确认强制复机',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    loading.value = true
+    const result = await cardApi.batchForceResumeByIccids({ iccids })
+    operationResult.value = {
+      success_count: result.success || 0,
+      failed_count: result.failed || 0,
+      success_list: result.success_list || [],
+      failed_list: result.failed_list || []
+    }
+
+    if (result.success > 0) {
+      ElMessage.success(`成功强制复机 ${result.success} 张卡片`)
+      emit('success')
+    }
+    if (result.failed > 0) {
+      ElMessage.warning(`${result.failed} 张卡片强制复机失败`)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel' && error !== false) {
+      console.error('强制复机失败:', error)
+      ElMessage.error(error.message || '强制复机失败')
+    }
+  } finally {
+    loading.value = false
   }
 }
 

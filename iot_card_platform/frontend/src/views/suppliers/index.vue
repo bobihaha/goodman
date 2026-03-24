@@ -89,7 +89,7 @@
         <el-table-column label="类型" width="120">
           <template #default="{ row }">
             <el-tag :type="getTypeTagType(row.type)">
-              {{ SUPPLIER_TYPE_MAP[row.type] }}
+              {{ getSupplierTypeLabel(row.type as SupplierType) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -104,8 +104,8 @@
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="SUPPLIER_STATUS_MAP[row.status].type">
-              {{ SUPPLIER_STATUS_MAP[row.status].label }}
+            <el-tag :type="getSupplierStatusMeta(row.status).type">
+              {{ getSupplierStatusMeta(row.status).label }}
             </el-tag>
           </template>
         </el-table-column>
@@ -172,7 +172,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import supplierApi from '@/api/modules/supplier'
-import type { Supplier } from '@/types/supplier'
+import type { Supplier, SupplierQueryParams, SupplierType, SupplierStatus } from '@/types/supplier'
 import { formatDateShort } from '@/utils/formatter'
 import {
   SUPPLIER_TYPE_OPTIONS,
@@ -183,10 +183,12 @@ import {
 import SupplierFormDialog from './components/SupplierFormDialog.vue'
 
 // 搜索表单
-const searchForm = reactive({
+type SupplierSearchForm = Omit<SupplierQueryParams, 'page' | 'page_size'>
+
+const searchForm = reactive<SupplierSearchForm>({
   keyword: '',
-  type: '',
-  status: ''
+  type: undefined,
+  status: undefined
 })
 
 // 表格数据
@@ -216,22 +218,22 @@ const getTypeTagType = (type: string) => {
   return typeMap[type] || ''
 }
 
+const getSupplierTypeLabel = (type: SupplierType) => SUPPLIER_TYPE_MAP[type] || type
+const getSupplierStatusMeta = (status: SupplierStatus) => SUPPLIER_STATUS_MAP[status] || { label: status, type: 'info' }
+
 // 获取供应商列表
 const fetchList = async () => {
   loading.value = true
   try {
-    const params = {
+    const params: SupplierQueryParams = {
+      ...searchForm,
       page: pagination.page,
-      page_size: pagination.page_size,
-      ...searchForm
+      page_size: pagination.page_size
     }
-    
-    // 过滤空值
-    Object.keys(params).forEach(key => {
-      if (params[key] === '' || params[key] === undefined) {
-        delete params[key]
-      }
-    })
+
+    if (!params.keyword) delete params.keyword
+    if (!params.type) delete params.type
+    if (!params.status) delete params.status
     
     const response = await supplierApi.getSupplierList(params)
     tableData.value = response.list || []
@@ -254,8 +256,8 @@ const handleSearch = () => {
 const handleReset = () => {
   Object.assign(searchForm, {
     keyword: '',
-    type: '',
-    status: ''
+    type: undefined,
+    status: undefined
   })
   pagination.page = 1
   fetchList()
@@ -421,9 +423,6 @@ onMounted(() => {
   }
 }
 </style>
-
-
-
 
 
 

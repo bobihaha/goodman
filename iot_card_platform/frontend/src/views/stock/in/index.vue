@@ -262,7 +262,7 @@ const selectedPackage = computed(() => {
 const fetchSuppliers = async () => {
   try {
     const res = await supplierApi.getList({ page: 1, page_size: 100 })
-    suppliers.value = res.list || res.data?.items || res.data?.list || []
+    suppliers.value = res.list || []
   } catch (error) {
     console.error('获取供应商列表失败', error)
   }
@@ -272,7 +272,7 @@ const fetchSuppliers = async () => {
 const fetchSupplierPackages = async () => {
   try {
     const res = await packageApi.getSupplierPackages({ page: 1, page_size: 100 })
-    supplierPackages.value = res.list || res.data?.items || res.data?.list || []
+    supplierPackages.value = res.list || []
   } catch (error) {
     console.error('获取底层套餐列表失败', error)
   }
@@ -345,7 +345,12 @@ const handleFileChange = (file: any) => {
     try {
       const data = new Uint8Array(e.target.result)
       const workbook = XLSX.read(data, { type: 'array' })
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+      const sheetName = workbook.SheetNames[0]
+      if (!sheetName) {
+        ElMessage.warning('Excel文件中未找到工作表')
+        return
+      }
+      const firstSheet: any = workbook.Sheets[sheetName]
       const rows = XLSX.utils.sheet_to_json(firstSheet, {
         header: 1,
         raw: false,

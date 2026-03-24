@@ -487,7 +487,8 @@ class CardSuspendCRUD:
     async def get_cards_by_ids(
         db: AsyncSession,
         card_ids: List[int],
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None
     ) -> List[IotCardModel]:
         """批量获取卡片"""
         query = select(IotCardModel).where(
@@ -496,7 +497,9 @@ class CardSuspendCRUD:
         )
         if user_id:
             query = query.where(IotCardModel.user_id == user_id)
-        
+        elif user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+
         result = await db.execute(query)
         return list(result.scalars().all())
 

@@ -55,6 +55,26 @@ export const systemApi = {
     return request.get('/system/logs/operation', { params })
   },
 
+  /** 获取购买记录 */
+  getPurchaseLogs(params: any) {
+    return request.get('/system/logs/operation', {
+      params: {
+        ...params,
+        module: 'orders'
+      }
+    })
+  },
+
+  /** 获取余额变动记录 */
+  getBalanceLogs(params: any) {
+    return request.get('/system/logs/operation', {
+      params: {
+        ...params,
+        module: 'balance'
+      }
+    })
+  },
+
   // ============ 告警规则 ============
 
   /** 获取告警规则 */

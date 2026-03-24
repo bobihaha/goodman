@@ -29,7 +29,8 @@ async def get_overview(
     overview = await DashboardService.get_overview(
         db=db,
         user_id=user_id,
-        is_admin=is_admin
+        is_admin=is_admin,
+        user_level=current_user.user_level
     )
     
     return ResponseModel(data=overview.model_dump())
@@ -43,8 +44,9 @@ async def get_card_stats(
     """获取卡片统计数据"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
-    stats = await DashboardService.get_card_stats(db, user_id)
+    stats = await DashboardService.get_card_stats(db, user_id, user_ids)
     return ResponseModel(data=stats.model_dump())
 
 
@@ -58,12 +60,14 @@ async def get_usage_trend(
     """获取流量使用趋势"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
     trend = await DashboardService.get_usage_trend(
         db=db,
         period=period,
         days=days,
-        user_id=user_id
+        user_id=user_id,
+        user_ids=user_ids
     )
     return ResponseModel(data=trend.model_dump())
 
@@ -77,11 +81,13 @@ async def get_recent_alerts(
     """获取最近告警消息"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
     alerts = await DashboardService.get_recent_alerts(
         db=db,
         limit=limit,
-        user_id=user_id
+        user_id=user_id,
+        user_ids=user_ids
     )
     return ResponseModel(data=alerts)
 
@@ -108,8 +114,9 @@ async def get_pool_stats(
     """获取流量池统计数据"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
-    stats = await DashboardService.get_pool_stats(db, user_id)
+    stats = await DashboardService.get_pool_stats(db, user_id, user_ids)
     return ResponseModel(data=stats.model_dump())
 
 
@@ -144,8 +151,9 @@ async def get_pools_usage_percent(
     """获取流量池用量百分比"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
-    pools = await DashboardService.get_pools_usage_percent(db, user_id)
+    pools = await DashboardService.get_pools_usage_percent(db, user_id, user_ids)
     return ResponseModel(data=pools)
 
 
@@ -161,8 +169,9 @@ async def get_expiring_cards(
 
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
 
-    cards = await DashboardService.get_expiring_cards(db, user_id, carrier)
+    cards = await DashboardService.get_expiring_cards(db, user_id, user_ids, carrier)
     return ResponseModel(data=cards)
 
 
@@ -178,6 +187,7 @@ async def get_over_usage_cards(
 
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
+    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
 
-    cards = await DashboardService.get_over_usage_cards(db, user_id, carrier)
+    cards = await DashboardService.get_over_usage_cards(db, user_id, user_ids, carrier)
     return ResponseModel(data=cards)

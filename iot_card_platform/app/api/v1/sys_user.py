@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, Depends, Body, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.sys_user import UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate, UserPasswordReset, UserStatus
+from app.schemas.sys_user import UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate, UserPasswordReset, UserStatus, UserBalanceGrantRequest
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.services.sys_user_service import sys_user_service
@@ -63,8 +63,25 @@ async def reset_user_password(user_id: int = Path(...), password_data: UserPassw
     return ResponseModel(msg="密码重置成功")
 
 
+@router.post("/{user_id}/balance/grant", summary="给用户分配余额", response_model=ResponseModel)
+async def grant_user_balance(
+    user_id: int = Path(...),
+    request: UserBalanceGrantRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    result = await sys_user_service.grant_balance(
+        db=db,
+        operator=current_user,
+        user_id=user_id,
+        amount=request.amount,
+        remark=request.remark,
+        request_id=request.request_id
+    )
+    return ResponseModel(data=result, msg="余额分配成功")
+
+
 @router.put("/password/change", summary="修改密码", response_model=ResponseModel)
 async def change_password(password_data: UserPasswordUpdate = Body(...), db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
     await sys_user_service.change_password(db, current_user, password_data)
     return ResponseModel(msg="密码修改成功")
-

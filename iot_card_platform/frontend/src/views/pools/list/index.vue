@@ -50,6 +50,7 @@
             搜索
           </el-button>
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+          <el-button @click="goPurchaseRecords">购买记录</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -78,7 +79,7 @@
       </div>
       <div class="stat-item">
         <span class="stat-label">总流量/已用</span>
-        <span class="stat-value">{{ formatFlow(poolStats.total_flow) }} / {{ formatFlow(poolStats.used_flow) }}</span>
+        <span class="stat-value">{{ formatFlowValue(poolStats.total_flow) }} / {{ formatFlowValue(poolStats.used_flow) }}</span>
       </div>
     </div>
 
@@ -112,16 +113,16 @@
         <div class="pool-usage">
           <div class="usage-title">流量使用情况：</div>
           <div class="usage-stats">
-            <span class="total">共{{ formatFlow(pool.data_total) }}</span>
-            <span class="remaining">剩余<span class="value">{{ formatFlow(pool.data_remaining) }}</span></span>
+            <span class="total">共{{ formatFlowValue(pool.data_total) }}</span>
+            <span class="remaining">剩余<span class="value">{{ formatFlowValue(pool.data_remaining) }}</span></span>
           </div>
           <el-progress
-            :percentage="pool.usage_percent"
+            :percentage="Math.min(pool.usage_percent, 100)"
             :color="getProgressColor(pool.usage_percent, pool.alert_threshold_1, pool.alert_threshold_2, pool.alert_threshold_3)"
             :stroke-width="8"
             :show-text="false"
           />
-          <div class="usage-percent-text">{{ pool.usage_percent }}%</div>
+          <div class="usage-percent-text">{{ Number(pool.usage_percent || 0).toFixed(2) }}%</div>
         </div>
 
         <!-- 卡片情况 -->
@@ -165,7 +166,7 @@
         <!-- 操作按钮 -->
         <div class="pool-actions" @click.stop>
           <el-button size="small" @click="handleEdit(pool)">告警设置</el-button>
-          <el-button size="small" type="warning" @click="handleRecharge(pool)">充值</el-button>
+          <el-button size="small" type="warning" plain @click="handleRecharge(pool)">后台补量</el-button>
         </div>
       </el-card>
 
@@ -214,11 +215,11 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Search, Refresh, ArrowRight } from '@element-plus/icons-vue'
-import { getPoolList, getPoolStats, togglePoolStatus } from '@/api/modules/pool'
-import { formatFlow } from '@/utils/formatter'
-import { CARRIER_MAP, CARRIER_OPTIONS } from '@/constants/card'
+import { getPoolList, getPoolStats } from '@/api/modules/pool'
+import { formatFlowValue } from '@/utils/formatter'
+import { CARRIER_OPTIONS } from '@/constants/card'
 import { POOL_STATUS_MAP, POOL_STATUS_OPTIONS } from '@/constants/pool'
 import type { Pool, PoolListParams, PoolStats } from '@/types/pool'
 import PoolFormDialog from './components/PoolFormDialog.vue'
@@ -257,7 +258,7 @@ const poolStats = ref<PoolStats | null>(null)
  */
 const fetchPoolStats = async () => {
   try {
-    const response = await getPoolStats()
+    const response: any = await getPoolStats()
     poolStats.value = response
   } catch (error) {
     console.error('获取流量池统计失败:', error)
@@ -275,7 +276,7 @@ const fetchPoolList = async () => {
       page: pagination.page,
       page_size: pagination.page_size
     }
-    const response = await getPoolList(params)
+    const response: any = await getPoolList(params)
     poolList.value = response.items || []
     pagination.total = response.total || 0
   } catch (error) {
@@ -315,6 +316,10 @@ const handleReset = () => {
   handleSearch()
 }
 
+const goPurchaseRecords = () => {
+  router.push('/records/purchases')
+}
+
 /**
  * 编辑流量池
  */
@@ -337,36 +342,6 @@ const handleRecharge = (pool: Pool) => {
   currentPool.value = pool
   rechargeDialogVisible.value = true
 }
-
-/**
- * 启用/禁用流量池
- */
-const handleToggleStatus = async (pool: Pool) => {
-  const action = pool.status === 'enable' ? '禁用' : '启用'
-  try {
-    await ElMessageBox.confirm(
-      `确定要${action}流量池"${pool.name}"吗？`,
-      '确认操作',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-
-    const newStatus = pool.status === 'enable' ? 'disable' : 'enable'
-    await togglePoolStatus(pool.id, newStatus)
-    ElMessage.success(`${action}成功`)
-    fetchPoolList()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error(`${action}流量池失败:`, error)
-      ElMessage.error(`${action}失败`)
-    }
-  }
-}
-
-
 
 /**
  * 获取进度条颜色
@@ -584,6 +559,13 @@ onMounted(() => {
         display: flex;
         gap: 8px;
         justify-content: flex-end;
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid #f2f3f5;
+
+        :deep(.el-button) {
+          min-width: 88px;
+        }
       }
     }
 

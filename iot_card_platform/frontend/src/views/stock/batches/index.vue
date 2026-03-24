@@ -178,13 +178,13 @@ const queryParams = reactive({
 })
 
 // 表格数据
-const tableData = ref([])
+const tableData = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
 
 // 供应商和套餐列表
-const suppliers = ref([])
-const packages = ref([])
+const suppliers = ref<any[]>([])
+const packages = ref<any[]>([])
 
 // 对话框
 const dialogVisible = ref(false)
@@ -214,7 +214,7 @@ const fetchBatches = async () => {
   loading.value = true
   try {
     const res = await stockApi.getBatches(queryParams)
-    tableData.value = res.items || []  // 批次API返回 items
+    tableData.value = res.items || res.list || []
     total.value = res.total || 0
   } catch (error) {
     ElMessage.error('获取批次列表失败')
@@ -227,7 +227,7 @@ const fetchBatches = async () => {
 const fetchSuppliers = async () => {
   try {
     const res = await supplierApi.getList({ page: 1, page_size: 100 })
-    suppliers.value = res.list || res.data?.items || res.data?.list || []
+    suppliers.value = res.list || []
   } catch (error) {
     console.error('获取供应商列表失败', error)
   }
@@ -237,7 +237,7 @@ const fetchSuppliers = async () => {
 const fetchPackages = async () => {
   try {
     const res = await packageApi.getSupplierPackages({ page: 1, page_size: 100 })
-    packages.value = res.items || []  // 套餐API返回 items
+    packages.value = res.list || res.items || []
   } catch (error) {
     console.error('获取套餐列表失败', error)
   }
@@ -291,7 +291,7 @@ const handleSubmit = async () => {
 }
 
 // 查看详情
-const handleView = (row: any) => {
+const handleView = (_row: any) => {
   ElMessage.info('批次详情功能开发中')
 }
 
@@ -355,4 +355,3 @@ onMounted(() => {
   }
 }
 </style>
-

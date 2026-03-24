@@ -40,7 +40,7 @@
           :default-expand-all="true"
           @check="handleTreeCheck"
         >
-          <template #default="{ node, data }">
+          <template #default="{ data }">
             <div class="menu-node">
               <span class="menu-name">{{ data.name }}</span>
               <span class="menu-path">{{ data.path || '' }}</span>
@@ -154,7 +154,7 @@ const loadMenus = async () => {
     
     // 只保留 menu 和 directory 类型，过滤掉 button 类型
     const menuAndDirOnly = allMenus.value.filter(menu => {
-      const type = typeof menu.type === 'object' ? menu.type.value : menu.type
+      const type = typeof menu.type === 'object' ? (menu.type as any)?.value : menu.type
       return type === 'menu' || type === 'directory'
     })
     

@@ -54,6 +54,19 @@ export const userApi = {
    */
   updatePassword(id: number, password: string): Promise<void> {
     return request.put<void>(`/users/${id}/password`, { new_password: password })
+  },
+
+  /**
+   * 给用户分配余额
+   */
+  grantBalance(id: number, data: { amount: number; remark?: string; request_id?: string }): Promise<{
+    target_user_id: number
+    target_user_name: string
+    before_balance: number
+    amount: number
+    after_balance: number
+    duplicated?: boolean
+  }> {
+    return request.post(`/users/${id}/balance/grant`, data)
   }
 }
-

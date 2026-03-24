@@ -42,6 +42,7 @@ export interface CreateSupplierRequest {
   api_config?: Record<string, any>
   sync_interval?: number
   remark?: string
+  status?: SupplierStatus
 }
 
 // 更新供应商请求
@@ -83,7 +84,6 @@ export interface ApiTestResult {
   message: string
   response_time?: number
 }
-
 
 
 

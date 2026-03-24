@@ -9,9 +9,7 @@ import type {
   SupplierPackageListParams,
   SalePackageListParams,
   CreateSupplierPackageRequest,
-  UpdateSupplierPackageRequest,
   CreateSalePackageRequest,
-  UpdateSalePackageRequest,
   Supplier,
   SupplierListParams
 } from '@/types/package'
@@ -142,4 +140,3 @@ export const packageApi = {
     return salePackageApi.getDetail(id)
   }
 }
-
