@@ -123,6 +123,7 @@
             <!-- 出库记录表格 -->
             <el-table :data="outRecords" v-loading="outLoading" border stripe>
               <el-table-column prop="id" label="记录ID" width="80" />
+              <el-table-column prop="record_no" label="出库单号" width="190" />
               <el-table-column prop="user_name" label="目标用户" width="120" />
               <el-table-column prop="sale_package_name" label="销售套餐" width="200" />
               <el-table-column prop="card_count" label="出库数量" width="100">
@@ -250,6 +251,7 @@
     >
       <el-descriptions :column="2" border v-if="currentOutRecord">
         <el-descriptions-item label="记录ID">{{ currentOutRecord.id }}</el-descriptions-item>
+        <el-descriptions-item label="出库单号">{{ currentOutRecord.record_no || '-' }}</el-descriptions-item>
         <el-descriptions-item label="目标用户">{{ currentOutRecord.user_name }}</el-descriptions-item>
         <el-descriptions-item label="销售套餐">{{ currentOutRecord.sale_package_name }}</el-descriptions-item>
         <el-descriptions-item label="出库数量">

@@ -18,6 +18,14 @@ class SysUserCRUD(CRUDBase[SysUserModel]):
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_h5_slug(self, db: AsyncSession, slug: str) -> Optional[SysUserModel]:
+        stmt = select(SysUserModel).where(
+            SysUserModel.h5_slug == slug,
+            SysUserModel.is_deleted == 0
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_users_by_parent(self, db: AsyncSession, parent_id: int, query: UserQuery) -> Tuple[List[SysUserModel], int]:
         conditions = [SysUserModel.parent_id == parent_id, SysUserModel.is_deleted == 0]
         if query.keyword:
@@ -68,6 +76,14 @@ class SysUserCRUD(CRUDBase[SysUserModel]):
 
     async def check_account_exists(self, db: AsyncSession, account: str, exclude_id: Optional[int] = None) -> bool:
         conditions = [SysUserModel.account == account, SysUserModel.is_deleted == 0]
+        if exclude_id:
+            conditions.append(SysUserModel.id != exclude_id)
+        stmt = select(func.count(SysUserModel.id)).where(*conditions)
+        result = await db.execute(stmt)
+        return (result.scalar() or 0) > 0
+
+    async def check_h5_slug_exists(self, db: AsyncSession, slug: str, exclude_id: Optional[int] = None) -> bool:
+        conditions = [SysUserModel.h5_slug == slug, SysUserModel.is_deleted == 0]
         if exclude_id:
             conditions.append(SysUserModel.id != exclude_id)
         stmt = select(func.count(SysUserModel.id)).where(*conditions)

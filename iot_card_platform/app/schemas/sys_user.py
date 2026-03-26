@@ -46,6 +46,43 @@ class UserUpdate(BaseModel):
     status: Optional[UserStatus] = None
 
 
+class UserH5Config(BaseModel):
+    enabled: bool = False
+    slug: Optional[str] = None
+    title: Optional[str] = None
+    logo: Optional[str] = None
+    banner: Optional[str] = None
+    notice: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_wechat: Optional[str] = None
+    theme: Optional[Dict[str, Any]] = None
+    allow_suspend: bool = True
+    allow_resume: bool = True
+    allow_remark: bool = True
+    require_verify: bool = False
+    status: str = "enabled"
+    last_reset_at: Optional[datetime] = None
+
+
+class UserH5ConfigUpdate(BaseModel):
+    title: Optional[str] = Field(None, max_length=100)
+    logo: Optional[str] = Field(None, max_length=255)
+    banner: Optional[str] = Field(None, max_length=255)
+    notice: Optional[str] = Field(None, max_length=1000)
+    contact_phone: Optional[str] = Field(None, max_length=30)
+    contact_wechat: Optional[str] = Field(None, max_length=50)
+    theme: Optional[Dict[str, Any]] = None
+    allow_suspend: Optional[bool] = None
+    allow_resume: Optional[bool] = None
+    allow_remark: Optional[bool] = None
+    require_verify: Optional[bool] = None
+    status: Optional[str] = Field(None, pattern=r"^(enabled|disabled|expired)$")
+
+
+class UserH5StatusUpdate(BaseModel):
+    status: str = Field(..., pattern=r"^(enabled|disabled|expired)$")
+
+
 class UserInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
@@ -60,6 +97,7 @@ class UserInfo(BaseModel):
     alert_notify: Optional[Dict[str, Any]] = None
     quota: Optional[Dict[str, Any]] = None
     remark: Optional[str] = None
+    h5: Optional[UserH5Config] = None
     status: str
     last_login_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

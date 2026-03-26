@@ -3,7 +3,14 @@
  */
 
 import request from '@/utils/request'
-import type { User, UserCreateRequest, UserUpdateRequest, UserListParams } from '@/types/user'
+import type {
+  User,
+  UserCreateRequest,
+  UserUpdateRequest,
+  UserListParams,
+  UserH5Config,
+  UserH5ConfigUpdateRequest
+} from '@/types/user'
 import type { PaginationResponse } from '@/types/common'
 
 export const userApi = {
@@ -68,5 +75,25 @@ export const userApi = {
     duplicated?: boolean
   }> {
     return request.post(`/users/${id}/balance/grant`, data)
+  },
+
+  getH5Detail(id: number): Promise<UserH5Config> {
+    return request.get<UserH5Config>(`/users/${id}/h5/detail`)
+  },
+
+  generateH5(id: number): Promise<UserH5Config> {
+    return request.post<UserH5Config>(`/users/${id}/h5/generate`)
+  },
+
+  updateH5Config(id: number, data: UserH5ConfigUpdateRequest): Promise<UserH5Config> {
+    return request.put<UserH5Config>(`/users/${id}/h5/config`, data)
+  },
+
+  resetH5(id: number): Promise<UserH5Config> {
+    return request.post<UserH5Config>(`/users/${id}/h5/reset`)
+  },
+
+  updateH5Status(id: number, status: 'enabled' | 'disabled' | 'expired'): Promise<UserH5Config> {
+    return request.put<UserH5Config>(`/users/${id}/h5/status`, { status })
   }
 }

@@ -17,6 +17,15 @@ export const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/h5/:slug',
+    name: 'H5Portal',
+    component: () => import('@/views/h5/index.vue'),
+    meta: {
+      title: '卡片自助服务',
+      requiresAuth: false
+    }
+  },
+  {
     path: '/',
     component: MainLayout,
     redirect: '/dashboard',
@@ -227,4 +236,3 @@ export const routes: RouteRecordRaw[] = [
     ]
   }
 ]
-

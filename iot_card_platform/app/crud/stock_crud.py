@@ -951,7 +951,7 @@ class StockOutRecordCRUD:
         
         query_sql = f"""
             SELECT 
-                sor.id, sor.user_id, sor.sale_package_id,
+                sor.id, sor.user_id, sor.to_user_id, sor.record_no, sor.sale_package_id,
                 sor.card_count, sor.success_count, sor.failed_count,
                 sor.unit_price, sor.total_amount,
                 sor.remark, sor.operator_id, sor.created_at,
@@ -975,6 +975,8 @@ class StockOutRecordCRUD:
             items.append({
                 "id": row.id,
                 "user_id": row.user_id,
+                "to_user_id": row.to_user_id,
+                "record_no": row.record_no,
                 "user_name": row.user_name,
                 "sale_package_id": row.sale_package_id,
                 "sale_package_name": row.sale_package_name,
@@ -998,7 +1000,7 @@ class StockOutRecordCRUD:
         
         query_sql = """
             SELECT 
-                sor.id, sor.user_id, sor.sale_package_id,
+                sor.id, sor.user_id, sor.to_user_id, sor.record_no, sor.sale_package_id,
                 sor.card_count, sor.success_count, sor.failed_count,
                 sor.unit_price, sor.total_amount,
                 sor.remark, sor.operator_id, sor.created_at,
@@ -1043,6 +1045,8 @@ class StockOutRecordCRUD:
         data = {
             "id": row.id,
             "user_id": row.user_id,
+            "to_user_id": row.to_user_id,
+            "record_no": row.record_no,
             "user_name": row.user_name,
             "sale_package_id": row.sale_package_id,
             "sale_package_name": row.sale_package_name,

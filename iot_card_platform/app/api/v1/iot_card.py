@@ -33,7 +33,7 @@ async def get_cards(
     over_usage: Optional[bool] = Query(None, description="是否超量"),
     remark: Optional[str] = Query(None, description="备注关键词"),
     customer_id: Optional[int] = Query(None, description="关联客户ID"),
-    batch_id: Optional[int] = Query(None, description="出库单号/批次ID"),
+    batch_id: Optional[str] = Query(None, description="出库单号/批次ID"),
     project_id: Optional[int] = Query(None, description="项目ID"),
     stock_out_start: Optional[str] = Query(None, description="出库开始日期 YYYY-MM-DD"),
     stock_out_end: Optional[str] = Query(None, description="出库结束日期 YYYY-MM-DD"),

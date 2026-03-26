@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
-from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system, sync, permission, project, debug
+from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system, sync, permission, project, debug, h5
 from app.config import settings
 from app.utils.logger import logger
 from app.utils.exceptions import BusinessException, business_exception_handler, global_exception_handler
@@ -64,6 +64,7 @@ app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["仪表�
 app.include_router(system.router, prefix="/api/v1/system", tags=["系统设置"])
 app.include_router(project.router, prefix="/api/v1/projects", tags=["项目管理"])
 app.include_router(debug.router, prefix="/api/v1", tags=["调试接口"])
+app.include_router(h5.router, prefix="/api/v1", tags=["H5自助服务"])
 
 # 跨域配置
 app.add_middleware(

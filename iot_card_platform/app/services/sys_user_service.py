@@ -1,14 +1,19 @@
 """
 系统用户服务
 """
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple, Optional
+import secrets
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
 from app.crud.sys_user_crud import sys_user_crud
-from app.schemas.sys_user import UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate, UserPasswordReset
+from app.schemas.sys_user import (
+    UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate,
+    UserPasswordReset, UserH5Config, UserH5ConfigUpdate
+)
 from app.schemas.auth import CurrentUser
 from app.services.auth_service import AuthService
 from app.services.account_balance_service import account_balance_service
@@ -20,6 +25,55 @@ UNLIMITED_QUOTA = -1
 
 
 class SysUserService:
+    @staticmethod
+    def _build_h5_config(user: SysUserModel) -> UserH5Config:
+        return UserH5Config(
+            enabled=bool(user.h5_enabled),
+            slug=user.h5_slug,
+            title=user.h5_title,
+            logo=user.h5_logo,
+            banner=user.h5_banner,
+            notice=user.h5_notice,
+            contact_phone=user.h5_contact_phone,
+            contact_wechat=user.h5_contact_wechat,
+            theme=user.h5_theme,
+            allow_suspend=bool(user.h5_allow_suspend),
+            allow_resume=bool(user.h5_allow_resume),
+            allow_remark=bool(user.h5_allow_remark),
+            require_verify=bool(user.h5_require_verify),
+            status=user.h5_status or "enabled",
+            last_reset_at=user.h5_last_reset_at
+        )
+
+    @classmethod
+    def _build_user_info(cls, user: SysUserModel) -> UserInfo:
+        payload = {
+            "id": user.id,
+            "parent_id": user.parent_id,
+            "user_level": user.user_level,
+            "name": user.name,
+            "account": user.account,
+            "phone": user.phone,
+            "email": user.email,
+            "avatar": user.avatar,
+            "alert_notify": user.alert_notify,
+            "quota": user.quota,
+            "remark": user.remark,
+            "status": user.status.value if hasattr(user.status, "value") else user.status,
+            "last_login_at": user.last_login_at,
+            "created_at": user.created_at,
+            "h5": cls._build_h5_config(user)
+        }
+        return UserInfo.model_validate(payload)
+
+    @staticmethod
+    async def _generate_unique_h5_slug(db: AsyncSession, exclude_id: Optional[int] = None) -> str:
+        for _ in range(10):
+            slug = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8]
+            if slug and not await sys_user_crud.check_h5_slug_exists(db, slug, exclude_id=exclude_id):
+                return slug
+        raise BusinessException(code=500, msg="生成H5地址失败，请重试")
+
     @classmethod
     async def create_user(cls, db: AsyncSession, operator: CurrentUser, user_data: UserCreate) -> UserInfo:
         if await sys_user_crud.check_account_exists(db, user_data.account):
@@ -67,7 +121,7 @@ class SysUserService:
         elif new_level == UserLevel.SUB_USER.value:
             await cls._assign_default_menus_for_sub_user(db, user.id, parent_id)
 
-        return UserInfo.model_validate(user)
+        return cls._build_user_info(user)
     
     @classmethod
     async def update_user(cls, db: AsyncSession, operator: CurrentUser, user_id: int, user_data: UserUpdate) -> UserInfo:
@@ -81,7 +135,7 @@ class SysUserService:
             raise BusinessException(code=400, msg="没有需要更新的字段")
         
         user = await sys_user_crud.update(db, id=user_id, obj_in=update_dict)
-        return UserInfo.model_validate(user)
+        return cls._build_user_info(user)
     
     @classmethod
     async def delete_user(cls, db: AsyncSession, operator: CurrentUser, user_id: int) -> bool:
@@ -112,7 +166,7 @@ class SysUserService:
             raise UserNotFoundException()
         if user.id != operator.id:
             cls._check_manage_permission(operator, user)
-        return UserInfo.model_validate(user)
+        return cls._build_user_info(user)
     
     @classmethod
     async def get_user_list(cls, db: AsyncSession, operator: CurrentUser, query: UserQuery) -> Tuple[List[UserInfo], int]:
@@ -122,7 +176,7 @@ class SysUserService:
             users, total = await sys_user_crud.get_users_by_parent(db, operator.id, query)
         else:
             return [], 0
-        return [UserInfo.model_validate(u) for u in users], total
+        return [cls._build_user_info(u) for u in users], total
     
     @classmethod
     async def change_password(cls, db: AsyncSession, operator: CurrentUser, password_data: UserPasswordUpdate) -> bool:
@@ -156,7 +210,116 @@ class SysUserService:
             raise UserNotFoundException()
         cls._check_manage_permission(operator, target_user)
         user = await sys_user_crud.update(db, id=user_id, obj_in={"status": status})
-        return UserInfo.model_validate(user)
+        return cls._build_user_info(user)
+
+    @classmethod
+    async def get_h5_detail(cls, db: AsyncSession, operator: CurrentUser, user_id: int) -> UserH5Config:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_manage_permission(operator, target_user)
+        return cls._build_h5_config(target_user)
+
+    @classmethod
+    async def generate_h5(cls, db: AsyncSession, operator: CurrentUser, user_id: int) -> UserH5Config:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_manage_permission(operator, target_user)
+        if target_user.user_level == UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=400, msg="超级管理员不支持生成H5")
+
+        slug = target_user.h5_slug or await cls._generate_unique_h5_slug(db, exclude_id=target_user.id)
+        update_data = {
+            "h5_enabled": 1,
+            "h5_slug": slug,
+            "h5_title": target_user.h5_title or f"{target_user.name}自助服务",
+            "h5_status": "enabled",
+            "h5_allow_suspend": target_user.h5_allow_suspend if target_user.h5_allow_suspend is not None else 1,
+            "h5_allow_resume": target_user.h5_allow_resume if target_user.h5_allow_resume is not None else 1,
+            "h5_allow_remark": target_user.h5_allow_remark if target_user.h5_allow_remark is not None else 1,
+            "h5_require_verify": target_user.h5_require_verify if target_user.h5_require_verify is not None else 0,
+            "h5_last_reset_at": datetime.now()
+        }
+        user = await sys_user_crud.update(db, id=user_id, obj_in=update_data)
+        return cls._build_h5_config(user)
+
+    @classmethod
+    async def update_h5_config(
+        cls,
+        db: AsyncSession,
+        operator: CurrentUser,
+        user_id: int,
+        config: UserH5ConfigUpdate
+    ) -> UserH5Config:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_manage_permission(operator, target_user)
+        if target_user.user_level == UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=400, msg="超级管理员不支持配置H5")
+
+        update_dict = config.model_dump(exclude_unset=True)
+        mapped = {}
+        field_mapping = {
+            "title": "h5_title",
+            "logo": "h5_logo",
+            "banner": "h5_banner",
+            "notice": "h5_notice",
+            "contact_phone": "h5_contact_phone",
+            "contact_wechat": "h5_contact_wechat",
+            "theme": "h5_theme",
+            "allow_suspend": "h5_allow_suspend",
+            "allow_resume": "h5_allow_resume",
+            "allow_remark": "h5_allow_remark",
+            "require_verify": "h5_require_verify",
+            "status": "h5_status"
+        }
+        for key, value in update_dict.items():
+            mapped[field_mapping[key]] = int(value) if isinstance(value, bool) else value
+
+        if not mapped:
+            raise BusinessException(code=400, msg="没有需要更新的H5配置")
+
+        user = await sys_user_crud.update(db, id=user_id, obj_in=mapped)
+        return cls._build_h5_config(user)
+
+    @classmethod
+    async def reset_h5(cls, db: AsyncSession, operator: CurrentUser, user_id: int) -> UserH5Config:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_manage_permission(operator, target_user)
+        if target_user.user_level == UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=400, msg="超级管理员不支持重置H5地址")
+
+        slug = await cls._generate_unique_h5_slug(db, exclude_id=user_id)
+        user = await sys_user_crud.update(
+            db,
+            id=user_id,
+            obj_in={
+                "h5_enabled": 1,
+                "h5_slug": slug,
+                "h5_status": "enabled",
+                "h5_last_reset_at": datetime.now()
+            }
+        )
+        return cls._build_h5_config(user)
+
+    @classmethod
+    async def change_h5_status(cls, db: AsyncSession, operator: CurrentUser, user_id: int, status: str) -> UserH5Config:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_manage_permission(operator, target_user)
+        if target_user.user_level == UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=400, msg="超级管理员不支持设置H5状态")
+        user = await sys_user_crud.update(
+            db,
+            id=user_id,
+            obj_in={"h5_status": status, "h5_enabled": 1 if status == "enabled" else 0}
+        )
+        return cls._build_h5_config(user)
 
     @classmethod
     async def grant_balance(

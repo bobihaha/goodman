@@ -58,7 +58,7 @@ class CardInfo(BaseModel):
     msisdn: Optional[str] = None
     user_id: Optional[int] = None
     supplier_id: Optional[int] = None
-    batch_id: Optional[int] = None
+    batch_id: Optional[str] = None
     sale_package_id: Optional[int] = None
     sale_price: Optional[float] = Field(None, description="套餐单价(元/周期)")
     # 规格
@@ -94,6 +94,7 @@ class CardInfo(BaseModel):
     remark: Optional[str] = None
     stock_in_at: Optional[str] = None
     stock_out_at: Optional[str] = None
+    stock_out_no: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -209,7 +210,7 @@ class CardExportRequest(BaseModel):
     over_usage: Optional[bool] = Field(None, description="是否超量")
     remark: Optional[str] = Field(None, description="备注关键词")
     customer_id: Optional[int] = Field(None, description="客户ID")
-    batch_id: Optional[int] = Field(None, description="批次ID")
+    batch_id: Optional[str] = Field(None, description="出库单号/批次ID")
     stock_out_start: Optional[str] = Field(None, description="出库开始日期 YYYY-MM-DD")
     stock_out_end: Optional[str] = Field(None, description="出库结束日期 YYYY-MM-DD")
     activated_start: Optional[str] = Field(None, description="激活开始日期 YYYY-MM-DD")

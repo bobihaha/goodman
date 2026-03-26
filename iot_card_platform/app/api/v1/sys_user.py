@@ -3,7 +3,11 @@
 """
 from fastapi import APIRouter, Depends, Body, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.sys_user import UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate, UserPasswordReset, UserStatus, UserBalanceGrantRequest
+from app.schemas.sys_user import (
+    UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate,
+    UserPasswordReset, UserStatus, UserBalanceGrantRequest,
+    UserH5ConfigUpdate, UserH5StatusUpdate
+)
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.services.sys_user_service import sys_user_service
@@ -79,6 +83,58 @@ async def grant_user_balance(
         request_id=request.request_id
     )
     return ResponseModel(data=result, msg="余额分配成功")
+
+
+@router.post("/{user_id}/h5/generate", summary="生成用户H5地址", response_model=ResponseModel)
+async def generate_user_h5(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.generate_h5(db, current_user, user_id)
+    return ResponseModel(data=config.model_dump(), msg="H5地址生成成功")
+
+
+@router.get("/{user_id}/h5/detail", summary="获取用户H5配置", response_model=ResponseModel)
+async def get_user_h5_detail(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.get_h5_detail(db, current_user, user_id)
+    return ResponseModel(data=config.model_dump())
+
+
+@router.put("/{user_id}/h5/config", summary="更新用户H5配置", response_model=ResponseModel)
+async def update_user_h5_config(
+    user_id: int = Path(...),
+    payload: UserH5ConfigUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.update_h5_config(db, current_user, user_id, payload)
+    return ResponseModel(data=config.model_dump(), msg="H5配置更新成功")
+
+
+@router.post("/{user_id}/h5/reset", summary="重置用户H5地址", response_model=ResponseModel)
+async def reset_user_h5(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.reset_h5(db, current_user, user_id)
+    return ResponseModel(data=config.model_dump(), msg="H5地址已重置")
+
+
+@router.put("/{user_id}/h5/status", summary="修改用户H5状态", response_model=ResponseModel)
+async def update_user_h5_status(
+    user_id: int = Path(...),
+    payload: UserH5StatusUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.change_h5_status(db, current_user, user_id, payload.status)
+    return ResponseModel(data=config.model_dump(), msg="H5状态更新成功")
 
 
 @router.put("/password/change", summary="修改密码", response_model=ResponseModel)

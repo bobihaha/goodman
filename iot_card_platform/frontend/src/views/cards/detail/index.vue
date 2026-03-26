@@ -113,6 +113,9 @@
               {{ formatDate(card?.expired_at) }}
             </span>
           </el-descriptions-item>
+          <el-descriptions-item label="出库单号">
+            {{ card?.stock_out_no || card?.batch_id || '-' }}
+          </el-descriptions-item>
           <el-descriptions-item label="出库时间">
             {{ formatDateTime(card?.stock_out_at) }}
           </el-descriptions-item>

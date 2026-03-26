@@ -4,6 +4,24 @@
 
 import type { UserStatus } from './common'
 
+export interface UserH5Config {
+  enabled: boolean
+  slug?: string
+  title?: string
+  logo?: string
+  banner?: string
+  notice?: string
+  contact_phone?: string
+  contact_wechat?: string
+  theme?: Record<string, any>
+  allow_suspend: boolean
+  allow_resume: boolean
+  allow_remark: boolean
+  require_verify: boolean
+  status: 'enabled' | 'disabled' | 'expired'
+  last_reset_at?: string
+}
+
 // 用户信息（与后端数据库字段对应）
 export interface User {
   id: number
@@ -30,6 +48,7 @@ export interface User {
     last_grant_amount?: number
   }
   permissions?: string[]     // 用户权限列表
+  h5?: UserH5Config
   is_super_login?: boolean   // 是否超级登录模式
   original_user_id?: number  // 原用户ID（超级登录时）
   created_at: string
@@ -91,6 +110,21 @@ export interface UserUpdateRequest {
   }
   remark?: string
   status?: UserStatus
+}
+
+export interface UserH5ConfigUpdateRequest {
+  title?: string
+  logo?: string
+  banner?: string
+  notice?: string
+  contact_phone?: string
+  contact_wechat?: string
+  theme?: Record<string, any>
+  allow_suspend?: boolean
+  allow_resume?: boolean
+  allow_remark?: boolean
+  require_verify?: boolean
+  status?: 'enabled' | 'disabled' | 'expired'
 }
 
 // 用户列表查询参数

@@ -14,7 +14,7 @@ from app.db.models.package import (
     CarrierType, PeriodType, PackageStatus
 )
 from app.db.models.iot_card import (
-    IotCardModel, CardTransferModel,
+    IotCardModel, CardTransferModel, CardH5RemarkLogModel,
     CardStatus, SuspendType
 )
 from app.db.models.stock import (
@@ -41,7 +41,7 @@ __all__ = [
     "SupplierModel", "SupplierType", "SupplierStatus",
     "SupplierPackageModel", "SalePackageModel",
     "CarrierType", "PeriodType", "PackageStatus",
-    "IotCardModel", "CardTransferModel",
+    "IotCardModel", "CardTransferModel", "CardH5RemarkLogModel",
     "CardStatus", "SuspendType",
     "PurchaseBatchModel", "StockInRecordModel", "StockOutRecordModel",
     "BatchStatus", "StockInStatus", "StockOutStatus",

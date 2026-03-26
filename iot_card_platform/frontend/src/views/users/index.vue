@@ -78,12 +78,23 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="H5" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.h5?.slug" class="h5-cell">
+              <el-tag :type="row.h5.status === 'enabled' ? 'success' : 'info'">
+                {{ getH5StatusLabel(row.h5.status) }}
+              </el-tag>
+              <div class="h5-url">{{ buildH5Url(row.h5.slug) }}</div>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="420" fixed="right">
+        <el-table-column label="操作" width="620" fixed="right">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -109,6 +120,22 @@
               @click="handleGrantBalance(row)"
             >
               分配余额
+            </el-button>
+            <el-button
+              v-if="canManageH5(row) && !row.h5?.slug"
+              type="success"
+              link
+              @click="handleGenerateH5(row)"
+            >
+              生成H5
+            </el-button>
+            <el-button
+              v-if="canManageH5(row) && row.h5?.slug"
+              type="primary"
+              link
+              @click="handleEditH5(row)"
+            >
+              H5配置
             </el-button>
             <el-button
               v-if="canSuperLogin(row)"
@@ -198,6 +225,12 @@
       :user="currentUser"
       @success="handleGrantBalanceSuccess"
     />
+
+    <UserH5ConfigDialog
+      v-model="h5DialogVisible"
+      :user="currentUser"
+      @success="handleH5Success"
+    />
   </div>
 </template>
 
@@ -212,6 +245,7 @@ import UserFormDialog from './components/UserFormDialog.vue'
 import ResetPasswordDialog from './components/ResetPasswordDialog.vue'
 import UserPermissionDialog from './components/UserPermissionDialog.vue'
 import GrantBalanceDialog from './components/GrantBalanceDialog.vue'
+import UserH5ConfigDialog from './components/UserH5ConfigDialog.vue'
 import { useAuthStore } from '@/stores/modules/auth'
 import { useRouter } from 'vue-router'
 
@@ -240,6 +274,7 @@ const formDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
 const permissionDialogVisible = ref(false)
 const grantBalanceDialogVisible = ref(false)
+const h5DialogVisible = ref(false)
 const currentUser = ref<User | null>(null)
 
 /**
@@ -300,6 +335,35 @@ const canGrantBalance = (user: User): boolean => {
     return true
   }
   return false
+}
+
+const canManageH5 = (user: User): boolean => {
+  const currentUser = authStore.userInfo
+  if (!currentUser) return false
+  if (currentUser.user_level === 1) {
+    return user.user_level === 2
+  }
+  if (currentUser.user_level === 2) {
+    if (user.user_level === 2) {
+      return currentUser.id === user.id
+    }
+    if (user.user_level === 3) {
+      return user.parent_id === currentUser.id
+    }
+  }
+  return false
+}
+
+const getH5StatusLabel = (status?: string) => {
+  if (status === 'enabled') return '已启用'
+  if (status === 'disabled') return '已停用'
+  if (status === 'expired') return '已过期'
+  return '未生成'
+}
+
+const buildH5Url = (slug?: string) => {
+  if (!slug) return ''
+  return `${window.location.origin}/h5/${slug}`
 }
 
 /**
@@ -428,6 +492,18 @@ const handleGrantBalance = (user: User) => {
   grantBalanceDialogVisible.value = true
 }
 
+const handleGenerateH5 = async (user: User) => {
+  await userApi.generateH5(user.id)
+  ElMessage.success('H5地址已生成')
+  fetchUserList()
+}
+
+const handleEditH5 = async (user: User) => {
+  const h5 = await userApi.getH5Detail(user.id)
+  currentUser.value = { ...user, h5 }
+  h5DialogVisible.value = true
+}
+
 /**
  * 切换状态
  */
@@ -511,6 +587,11 @@ const handleGrantBalanceSuccess = () => {
   fetchUserList()
 }
 
+const handleH5Success = () => {
+  h5DialogVisible.value = false
+  fetchUserList()
+}
+
 // 初始化
 onMounted(async () => {
   // 确保获取当前用户信息
@@ -540,6 +621,17 @@ onMounted(async () => {
     margin-top: 20px;
     display: flex;
     justify-content: flex-end;
+  }
+
+  .h5-cell {
+    display: grid;
+    gap: 6px;
+  }
+
+  .h5-url {
+    color: #606266;
+    font-size: 12px;
+    word-break: break-all;
   }
 }
 </style>

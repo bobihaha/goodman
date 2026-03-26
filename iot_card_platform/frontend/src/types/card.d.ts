@@ -25,11 +25,16 @@ export interface Card {
   msisdn?: string
   user_id?: number
   supplier_id?: number
-  batch_id?: number
+  batch_id?: string
   sale_package_id?: number
+  sale_price?: number
   carrier: Carrier
+  carrier_name?: string
   flow_size: number
+  flow_size_display?: string
   period_type: PeriodType
+  period_name?: string
+  spec_name?: string
   card_type: CardType             // 卡片类型
   card_type_name?: string         // 卡片类型名称
   test_expire_date?: string       // 测试期到期日（格式：26/1/31）
@@ -39,9 +44,13 @@ export interface Card {
   data_used: number               // 已用流量
   data_total: number              // 套餐总量
   data_used_month: number         // 本月用量
+  data_remain?: number
+  data_usage_percent?: number
   data_sync_at?: string
   status: CardStatus
+  status_name?: string
   suspend_type?: SuspendType
+  suspend_type_name?: string
   suspend_at?: string
   suspend_reason?: string
   pool_id?: number
@@ -50,6 +59,7 @@ export interface Card {
   stock_in_at?: string            // 入库时间（ISO格式）
   stock_out_at?: string           // 出库时间（ISO格式）
   stock_out_date?: string         // 出库日期
+  stock_out_no?: string           // 出库单号
   created_at: string
   updated_at?: string
   // 前端计算字段
@@ -74,7 +84,7 @@ export interface CardListParams {
   // 高级搜索
   remark?: string
   customer_id?: number
-  batch_id?: number
+  batch_id?: string
   stock_out_start?: string
   stock_out_end?: string
   activated_start?: string
@@ -144,7 +154,7 @@ export interface CardExportParams {
   over_usage?: boolean
   remark?: string
   customer_id?: number
-  batch_id?: number
+  batch_id?: string
   stock_out_start?: string
   stock_out_end?: string
   activated_start?: string

@@ -56,7 +56,7 @@
         <el-form-item label="关键词">
           <el-input
             v-model="searchForm.keyword"
-            placeholder="ICCID / MSISDN / 后6位"
+            placeholder="ICCID / MSISDN / 移动后6位 / 联通电信后2-7位"
             clearable
             style="width: 293px"
             @keyup.enter="handleSearch"
@@ -177,8 +177,8 @@
 
         <el-form-item label="出库单号">
           <el-input
-            v-model.number="searchForm.batch_id"
-            placeholder="批次ID"
+            v-model="searchForm.batch_id"
+            placeholder="请输入出库单号或批次ID"
             clearable
             style="width: 160px"
             @keyup.enter="handleSearch"

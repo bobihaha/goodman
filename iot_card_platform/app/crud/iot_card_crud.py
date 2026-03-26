@@ -1,15 +1,39 @@
 """
 物联网卡 CRUD 操作
 """
-from typing import Optional, List, Tuple
-from sqlalchemy import select, func, or_, and_, delete
+from typing import Optional, List, Tuple, Dict
+from sqlalchemy import select, func, or_, and_, delete, exists, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models.iot_card import IotCardModel, CardTransferModel, CardStatus
+from app.db.models.iot_card import IotCardModel, CardTransferModel, CardStatus, CardUserRemarkModel
 from app.db.models.package import CarrierType, PeriodType
+from app.db.models.stock import StockOutRecordCardModel, StockOutRecordModel
 
 
 class IotCardCRUD:
     """物联网卡 CRUD"""
+
+    @staticmethod
+    def _build_short_iccid_keyword_filter(keyword: str):
+        """短关键字查询:
+        1. 移动卡按 ICCID 后6位查询
+        2. 联通/电信卡按 ICCID 倒数第2位到倒数第7位的连续6位数字查询
+        3. 号码保持后缀模糊匹配
+        """
+        ctcc_cucc_mid6 = func.substr(IotCardModel.iccid, func.length(IotCardModel.iccid) - 6, 6)
+        return or_(
+            and_(
+                IotCardModel.carrier == CarrierType.cmcc,
+                or_(
+                    IotCardModel.iccid_suffix == keyword,
+                    func.right(IotCardModel.iccid, 6) == keyword
+                )
+            ),
+            and_(
+                IotCardModel.carrier.in_([CarrierType.cucc, CarrierType.ctcc]),
+                ctcc_cucc_mid6 == keyword
+            ),
+            IotCardModel.msisdn.like(f"%{keyword}")
+        )
 
     async def get_by_id(self, db: AsyncSession, card_id: int, user_id: Optional[int] = None) -> Optional[IotCardModel]:
         """根据ID获取卡片"""
@@ -65,7 +89,7 @@ class IotCardCRUD:
         over_usage: Optional[bool] = None,
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
-        batch_id: Optional[int] = None,
+        batch_id: Optional[str] = None,
         project_id: Optional[int] = None,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
@@ -74,7 +98,8 @@ class IotCardCRUD:
         expired_start: Optional[str] = None,
         expired_end: Optional[str] = None,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        remark_user_id: Optional[int] = None
     ) -> Tuple[List[IotCardModel], int]:
         """获取卡片列表"""
         query = select(IotCardModel).where(IotCardModel.is_deleted == 0)
@@ -88,16 +113,11 @@ class IotCardCRUD:
             query = query.where(IotCardModel.user_id == user_id)
             count_query = count_query.where(IotCardModel.user_id == user_id)
 
-        # 关键词搜索 (ICCID/MSISDN/后6位)
+        # 关键词搜索 (ICCID/MSISDN/短码)
         if keyword:
             keyword = keyword.strip().replace('%', '\\%').replace('_', '\\_')
             if len(keyword) <= 6:
-                # 后6位精确查询
-                keyword_filter = or_(
-                    IotCardModel.iccid_suffix == keyword,
-                    func.right(IotCardModel.iccid, 6) == keyword,
-                    IotCardModel.msisdn.like(f"%{keyword}")
-                )
+                keyword_filter = self._build_short_iccid_keyword_filter(keyword)
             else:
                 # 完整匹配
                 keyword_filter = or_(
@@ -156,7 +176,18 @@ class IotCardCRUD:
 
         # 备注模糊搜索
         if remark:
-            remark_filter = IotCardModel.remark.like(f"%{remark}%")
+            if remark_user_id is not None:
+                user_remark_filter = exists(
+                    select(CardUserRemarkModel.id).where(
+                        CardUserRemarkModel.card_id == IotCardModel.id,
+                        CardUserRemarkModel.user_id == remark_user_id,
+                        CardUserRemarkModel.is_deleted == 0,
+                        CardUserRemarkModel.remark.like(f"%{remark}%")
+                    )
+                )
+                remark_filter = user_remark_filter
+            else:
+                remark_filter = IotCardModel.remark.like(f"%{remark}%")
             query = query.where(remark_filter)
             count_query = count_query.where(remark_filter)
 
@@ -166,9 +197,25 @@ class IotCardCRUD:
             count_query = count_query.where(IotCardModel.user_id == customer_id)
 
         # 出库单号/批次过滤
-        if batch_id is not None:
-            query = query.where(IotCardModel.batch_id == batch_id)
-            count_query = count_query.where(IotCardModel.batch_id == batch_id)
+        if batch_id:
+            batch_keyword = str(batch_id).strip()
+            stock_out_no_filter = text("""
+                EXISTS (
+                    SELECT 1
+                    FROM stock_out_record_cards sorc
+                    INNER JOIN stock_out_records sor ON sorc.record_id = sor.id
+                    WHERE sorc.card_id = iot_cards.id
+                      AND sorc.is_deleted = 0
+                      AND sor.is_deleted = 0
+                      AND sor.record_no = :stock_out_record_no
+                )
+            """)
+            if batch_keyword.isdigit():
+                batch_filter = or_(IotCardModel.batch_id == int(batch_keyword), stock_out_no_filter)
+            else:
+                batch_filter = stock_out_no_filter
+            query = query.where(batch_filter).params(stock_out_record_no=batch_keyword)
+            count_query = count_query.where(batch_filter).params(stock_out_record_no=batch_keyword)
 
         # 项目过滤
         if project_id is not None:
@@ -227,7 +274,7 @@ class IotCardCRUD:
         user_ids: Optional[List[int]] = None,
         limit: int = 10
     ) -> List[IotCardModel]:
-        """快速搜索 (支持后6位)"""
+        """快速搜索 (支持移动后6位、联通/电信后2位至后7位)"""
         keyword = keyword.strip()
         query = select(IotCardModel).where(IotCardModel.is_deleted == 0)
 
@@ -237,13 +284,7 @@ class IotCardCRUD:
             query = query.where(IotCardModel.user_id == user_id)
 
         if len(keyword) <= 6:
-            query = query.where(
-                or_(
-                    IotCardModel.iccid_suffix == keyword,
-                    func.right(IotCardModel.iccid, 6) == keyword,
-                    IotCardModel.msisdn.like(f"%{keyword}")
-                )
-            )
+            query = query.where(self._build_short_iccid_keyword_filter(keyword))
         else:
             query = query.where(
                 or_(
@@ -340,6 +381,60 @@ class IotCardCRUD:
         await db.commit()
         await db.refresh(card)
         return card
+
+    async def get_user_remark_map(
+        self,
+        db: AsyncSession,
+        card_ids: List[int],
+        user_id: int
+    ) -> Dict[int, str]:
+        """获取指定用户在一组卡片上的备注"""
+        if not card_ids:
+            return {}
+
+        result = await db.execute(
+            select(CardUserRemarkModel.card_id, CardUserRemarkModel.remark).where(
+                CardUserRemarkModel.card_id.in_(card_ids),
+                CardUserRemarkModel.user_id == user_id,
+                CardUserRemarkModel.is_deleted == 0
+            )
+        )
+        return {
+            card_id: remark
+            for card_id, remark in result.all()
+        }
+
+    async def upsert_user_remark(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        user_id: int,
+        remark: str,
+        source: str = "system"
+    ) -> CardUserRemarkModel:
+        """新增或更新用户侧卡片备注"""
+        result = await db.execute(
+            select(CardUserRemarkModel).where(
+                CardUserRemarkModel.card_id == card_id,
+                CardUserRemarkModel.user_id == user_id,
+                CardUserRemarkModel.is_deleted == 0
+            )
+        )
+        item = result.scalar_one_or_none()
+        if item:
+            item.remark = remark
+            item.source = source
+        else:
+            item = CardUserRemarkModel(
+                card_id=card_id,
+                user_id=user_id,
+                remark=remark,
+                source=source
+            )
+            db.add(item)
+
+        await db.flush()
+        return item
 
     async def batch_update_remark(
         self,

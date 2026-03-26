@@ -2,7 +2,7 @@
 物联网卡模型
 包含: 卡片表、采购批次表、流量池表、划拨记录表
 """
-from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL
+from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL, UniqueConstraint
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel, Base
@@ -269,3 +269,34 @@ class CardUsageHistoryModel(Base):
             "snapshot_month": self.snapshot_month,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class CardH5RemarkLogModel(Base):
+    """H5 备注日志"""
+    __tablename__ = "card_h5_remark_logs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True, comment="二级用户ID")
+    card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
+    iccid = Column(String(30), nullable=False, index=True, comment="ICCID")
+    old_remark = Column(String(500), nullable=True, comment="旧备注")
+    new_remark = Column(String(500), nullable=True, comment="新备注")
+    source = Column(String(20), nullable=False, default="h5", comment="来源")
+    operator_name = Column(String(50), nullable=True, comment="操作人姓名")
+    operator_phone = Column(String(20), nullable=True, comment="操作人手机号")
+    client_ip = Column(String(50), nullable=True, comment="客户端IP")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class CardUserRemarkModel(BaseModel):
+    """按用户隔离的卡片备注"""
+    __tablename__ = "card_user_remarks"
+    __table_args__ = (
+        UniqueConstraint("card_id", "user_id", name="uk_card_user_remark_card_user"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
+    user_id = Column(BigInteger, nullable=False, index=True, comment="备注所属用户ID")
+    remark = Column(String(500), nullable=True, comment="备注内容")
+    source = Column(String(20), nullable=False, default="system", comment="来源: system/h5")

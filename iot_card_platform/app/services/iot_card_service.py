@@ -4,7 +4,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text, bindparam
 from app.crud.iot_card_crud import iot_card_crud, card_transfer_crud
 from app.crud.package_crud import sale_package_crud
 from app.db.models.iot_card import IotCardModel
@@ -13,6 +13,7 @@ from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.crud.system_crud import SysOperationLogCRUD
 from app.services.suspend_service import SuspendActionService
 from app.schemas.suspend import ManualResume
+from app.config import settings
 from app.flow_packages import (
     FLOW_PACKAGE_LABELS,
     FLOW_PACKAGE_PRICES,
@@ -26,6 +27,53 @@ from app.clients.supplier_api import get_supplier_client
 
 class IotCardService:
     """物联网卡服务"""
+
+    async def _get_stock_out_no_map(
+        self,
+        db: AsyncSession,
+        card_ids: List[int]
+    ) -> dict[int, str]:
+        """获取卡片最近一次出库单号"""
+        if not card_ids:
+            return {}
+
+        sql = text("""
+            SELECT sorc.card_id, sor.record_no
+            FROM stock_out_record_cards sorc
+            INNER JOIN stock_out_records sor ON sorc.record_id = sor.id
+            WHERE sorc.card_id IN :card_ids
+              AND sor.is_deleted = 0
+              AND sorc.is_deleted = 0
+            ORDER BY sor.id DESC, sorc.id DESC
+        """).bindparams(bindparam("card_ids", expanding=True))
+
+        result = await db.execute(sql, {"card_ids": card_ids})
+        stock_out_no_map: dict[int, str] = {}
+        for card_id, record_no in result.all():
+            if card_id not in stock_out_no_map:
+                stock_out_no_map[card_id] = record_no
+        return stock_out_no_map
+
+    async def _hydrate_card_dicts(
+        self,
+        db: AsyncSession,
+        card_dicts: List[dict],
+        current_user_id: int
+    ) -> List[dict]:
+        """补齐当前用户视角下的备注和出库单号"""
+        if not card_dicts:
+            return card_dicts
+
+        card_ids = [item["id"] for item in card_dicts if item.get("id") is not None]
+        remark_map = await iot_card_crud.get_user_remark_map(db, card_ids, current_user_id)
+        stock_out_no_map = await self._get_stock_out_no_map(db, card_ids)
+
+        for item in card_dicts:
+            card_id = item.get("id")
+            item["remark"] = remark_map.get(card_id)
+            item["stock_out_no"] = stock_out_no_map.get(card_id)
+
+        return card_dicts
 
     @staticmethod
     def _normalize_price(value: Decimal) -> Decimal:
@@ -147,7 +195,7 @@ class IotCardService:
         over_usage: Optional[bool] = None,
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
-        batch_id: Optional[int] = None,
+        batch_id: Optional[str] = None,
         project_id: Optional[int] = None,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
@@ -184,10 +232,13 @@ class IotCardService:
             expired_start=expired_start,
             expired_end=expired_end,
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            remark_user_id=current_user_id
         )
 
-        return [item.to_dict() for item in items], total
+        card_dicts = [item.to_dict() for item in items]
+        await self._hydrate_card_dicts(db, card_dicts, current_user_id)
+        return card_dicts, total
 
     async def get_card_detail(
         self,
@@ -203,6 +254,7 @@ class IotCardService:
             raise BusinessException(code=404, msg="卡片不存在或无权访问")
 
         card_dict = card.to_dict()
+        await self._hydrate_card_dicts(db, [card_dict], current_user_id)
 
         # 兼容历史数据：部分停机卡状态已更新，但卡表未回填 suspend_at/suspend_reason
         if card.status and card.status.value == "suspended" and not card_dict.get("suspend_at"):
@@ -311,10 +363,14 @@ class IotCardService:
         from app.utils.const import sanitize_text
         remark = sanitize_text(remark)
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
-        card = await iot_card_crud.update_remark(db, card_id, remark, user_ids=user_ids)
+        card = await iot_card_crud.get_by_id_in_scope(db, card_id, user_ids)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在或无权操作")
-        return card.to_dict()
+        await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
+        await db.commit()
+        card_dict = card.to_dict()
+        await self._hydrate_card_dicts(db, [card_dict], current_user_id)
+        return card_dict
 
     async def batch_update_remark(
         self,
@@ -331,7 +387,11 @@ class IotCardService:
         from app.utils.const import sanitize_text
         remark = sanitize_text(remark)
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
-        count = await iot_card_crud.batch_update_remark(db, card_ids, remark, user_ids=user_ids)
+        cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
+        for card in cards:
+            await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
+        await db.commit()
+        count = len(cards)
         return {
             "success": count,
             "total": len(card_ids),
@@ -457,7 +517,7 @@ class IotCardService:
         over_usage: Optional[bool] = None,
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
-        batch_id: Optional[int] = None,
+        batch_id: Optional[str] = None,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
         activated_start: Optional[str] = None,
@@ -492,13 +552,15 @@ class IotCardService:
                 expired_start=expired_start,
                 expired_end=expired_end,
                 page=1,
-                page_size=settings.max_export_size
+                page_size=settings.max_export_size,
+                remark_user_id=current_user_id
             )
 
         # 转换为导出格式
+        item_dicts = [item.to_dict() for item in items]
+        await self._hydrate_card_dicts(db, item_dicts, current_user_id)
         export_data = []
-        for item in items:
-            d = item.to_dict()
+        for d in item_dicts:
             export_data.append({
                 "ICCID": d["iccid"],
                 "IMSI": d["imsi"] or "",
@@ -609,6 +671,8 @@ class IotCardService:
                 card_dict["price_sale"] = None
             found_list.append(card_dict)
 
+        await self._hydrate_card_dicts(db, found_list, current_user_id)
+
         not_found = [iccid for iccid in iccids if iccid not in found_iccids]
 
         return {
@@ -632,8 +696,11 @@ class IotCardService:
         # 未找到的ICCID
         not_found = [iccid for iccid in iccids if iccid not in found_iccids]
         
+        found_list = [card.to_dict() for card in found_cards]
+        await self._hydrate_card_dicts(db, found_list, current_user_id)
+
         return {
-            "found": [card.to_dict() for card in found_cards],
+            "found": found_list,
             "not_found": not_found
         }
 
@@ -729,33 +796,19 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量备注"""
-        from sqlalchemy import select
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
         success_list = []
         failed_list = []
-        
+
         for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
+            card = card_map.get(iccid)
             if not card:
                 failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
                 continue
-            
+
             try:
-                card.remark = remark
+                await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
                 success_list.append({
                     "iccid": card.iccid,
                     "msisdn": card.msisdn,
@@ -765,7 +818,7 @@ class IotCardService:
                 failed_list.append({"iccid": iccid, "error": str(e)})
         
         await db.commit()
-        
+
         return {
             "success": len(success_list),
             "failed": len(failed_list),
@@ -2366,7 +2419,7 @@ class IotCardService:
         over_usage: Optional[bool] = None,
         remark: Optional[str] = None,
         customer_id: Optional[int] = None,
-        batch_id: Optional[int] = None,
+        batch_id: Optional[str] = None,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
         activated_start: Optional[str] = None,
@@ -2450,6 +2503,131 @@ class IotCardService:
                 })
 
         return export_data
+
+    async def batch_query_cards(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """批量查询卡片（最终覆盖重复旧实现）"""
+        found_cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        found_iccids = {card.iccid for card in found_cards}
+        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
+        found_list = [card.to_dict() for card in found_cards]
+        await self._hydrate_card_dicts(db, found_list, current_user_id)
+        return {
+            "found": found_list,
+            "not_found": not_found
+        }
+
+    async def batch_transfer_by_iccids(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        to_user_id: int,
+        current_user_id: int,
+        user_level: int,
+        remark: Optional[str] = None
+    ) -> dict:
+        """通过ICCID批量划拨（最终覆盖重复旧实现）"""
+        from sqlalchemy import select
+        from app.db.models.sys_user import SysUserModel
+        from app.db.models.iot_card import CardTransferModel
+
+        if user_level == UserLevel.SUB_USER.value:
+            raise BusinessException(code=403, msg="子用户无权划拨卡片")
+
+        target_user = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
+        if not target_user.scalar_one_or_none():
+            raise BusinessException(code=404, msg="目标用户不存在")
+
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
+
+        target_user_obj = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
+        target_user_name = target_user_obj.scalar_one().name
+
+        success_list = []
+        failed_list = []
+
+        for iccid in iccids:
+            card = card_map.get(iccid)
+            if not card:
+                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
+                continue
+
+            try:
+                old_user_id = card.user_id
+                card.user_id = to_user_id
+                db.add(
+                    CardTransferModel(
+                        card_id=card.id,
+                        iccid=card.iccid,
+                        from_user_id=old_user_id,
+                        to_user_id=to_user_id,
+                        operator_id=current_user_id,
+                        remark=remark
+                    )
+                )
+                success_list.append({
+                    "iccid": card.iccid,
+                    "msisdn": card.msisdn,
+                    "to_user_name": target_user_name,
+                    "message": "划拨成功"
+                })
+            except Exception as exc:
+                failed_list.append({"iccid": iccid, "error": str(exc)})
+
+        await db.commit()
+
+        return {
+            "success": len(success_list),
+            "failed": len(failed_list),
+            "success_list": success_list,
+            "failed_list": failed_list
+        }
+
+    async def batch_remark_by_iccids(
+        self,
+        db: AsyncSession,
+        iccids: List[str],
+        remark: str,
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        """通过ICCID批量备注（最终覆盖重复旧实现）"""
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
+
+        success_list = []
+        failed_list = []
+
+        for iccid in iccids:
+            card = card_map.get(iccid)
+            if not card:
+                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
+                continue
+
+            try:
+                await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
+                success_list.append({
+                    "iccid": card.iccid,
+                    "msisdn": card.msisdn,
+                    "remark": remark
+                })
+            except Exception as exc:
+                failed_list.append({"iccid": iccid, "error": str(exc)})
+
+        await db.commit()
+
+        return {
+            "success": len(success_list),
+            "failed": len(failed_list),
+            "success_list": success_list,
+            "failed_list": failed_list
+        }
 
 
 iot_card_service = IotCardService()
