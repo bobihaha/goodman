@@ -1,6 +1,6 @@
 """
 停卡策略模型
-包含: 停卡策略表、停卡记录表、告警记录表
+包含: 停卡策略表、停卡记录表、告警记录表、供应商停复机操作表
 """
 from sqlalchemy import Column, String, Enum, BigInteger, Integer, DateTime, Text
 from enum import Enum as PyEnum
@@ -153,6 +153,50 @@ class SuspendLogModel(BaseModel):
             "api_result": self.api_result,
             "operator_id": self.operator_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class SupplierSuspendOperationModel(BaseModel):
+    """供应商停复机操作记录"""
+    __tablename__ = "supplier_suspend_operations"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="记录ID")
+    card_id = Column(BigInteger, nullable=False, index=True, comment="卡片ID")
+    supplier_id = Column(BigInteger, nullable=True, index=True, comment="供应商ID")
+    iccid = Column(String(30), nullable=False, index=True, comment="ICCID")
+    msisdn = Column(String(20), nullable=True, comment="号码")
+    action = Column(Enum(SuspendActionType), nullable=False, comment="操作: suspend/resume")
+    callback_no = Column(String(64), nullable=False, unique=True, index=True, comment="供应商回调单号")
+    request_payload = Column(Text, nullable=True, comment="请求报文")
+    request_result = Column(Text, nullable=True, comment="请求结果")
+    callback_payload = Column(Text, nullable=True, comment="回调报文")
+    callback_code = Column(String(32), nullable=True, comment="回调状态码")
+    callback_msg = Column(String(255), nullable=True, comment="回调消息")
+    account_status = Column(String(32), nullable=True, comment="供应商回调卡状态")
+    callback_status = Column(String(20), nullable=False, default="pending", comment="回调状态: pending/success/failed")
+    operator_id = Column(BigInteger, nullable=True, comment="操作人ID")
+    completed_at = Column(DateTime, nullable=True, comment="回调完成时间")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "card_id": self.card_id,
+            "supplier_id": self.supplier_id,
+            "iccid": self.iccid,
+            "msisdn": self.msisdn,
+            "action": self.action.value if self.action else None,
+            "callback_no": self.callback_no,
+            "request_payload": self.request_payload,
+            "request_result": self.request_result,
+            "callback_payload": self.callback_payload,
+            "callback_code": self.callback_code,
+            "callback_msg": self.callback_msg,
+            "account_status": self.account_status,
+            "callback_status": self.callback_status,
+            "operator_id": self.operator_id,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

@@ -40,7 +40,8 @@ async def check_and_update_card_status(
                     start_date=today,
                     period_type=card.period_type.value,
                     period_months=card.period_count if card.period_type.value == "monthly" else None,
-                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None
+                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None,
+                    carrier=card.carrier.value if card.carrier else None
                 )
             status_changed = True
 
@@ -62,7 +63,8 @@ async def check_and_update_card_status(
                     start_date=today,
                     period_type=card.period_type.value,
                     period_months=card.period_count if card.period_type.value == "monthly" else None,
-                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None
+                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None,
+                    carrier=card.carrier.value if card.carrier else None
                 )
 
             status_changed = True
@@ -75,7 +77,8 @@ async def check_and_update_card_status(
                 start_date=today,
                 period_type=card.period_type.value,
                 period_months=card.period_count if card.period_type.value == "monthly" else None,
-                period_days=card.period_count * 360 if card.period_type.value == "yearly" else None
+                period_days=card.period_count * 360 if card.period_type.value == "yearly" else None,
+                carrier=card.carrier.value if card.carrier else None
             )
         status_changed = True
 

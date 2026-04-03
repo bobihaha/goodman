@@ -45,6 +45,32 @@ export const cardApi = {
     return get<CardDiagnostics>(`/cards/${id}/diagnostics`)
   },
 
+  // 同步单卡用量
+  syncSingleCard(iccid: string): Promise<{
+    sync_no: string
+    sync_type: string
+    total: number
+    success: number
+    failed: number
+    status: string
+    changed: boolean
+    changed_fields: string[]
+  }> {
+    return post(`/sync/cards/${iccid}`)
+  },
+
+  restartCard(cardId: number): Promise<{
+    card_id: number
+    iccid: string
+    action: 'restart'
+    status: 'processing' | 'success'
+    suspend_callback_no?: string
+    resume_callback_no?: string
+    message?: string
+  }> {
+    return post(`/cards/${cardId}/restart`)
+  },
+
   // 快速搜索（后6位）
   search(keyword: string, limit = 10): Promise<Card[]> {
     return get<Card[]>('/cards/search', { params: { keyword, limit } })

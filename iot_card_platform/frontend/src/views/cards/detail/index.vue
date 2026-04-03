@@ -66,6 +66,15 @@
                 复机
               </el-button>
               <el-button
+                type="primary"
+                size="small"
+                :disabled="!card || !['activated', 'testing', 'silent', 'suspended'].includes(card.status)"
+                @click="handleRestart"
+              >
+                <el-icon><Refresh /></el-icon>
+                重启
+              </el-button>
+              <el-button
                 v-if="isSuperAdmin"
                 type="warning"
                 size="small"
@@ -633,6 +642,29 @@ const handleResume = async () => {
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('复机失败:', error)
+    }
+  }
+}
+
+const handleRestart = async () => {
+  if (!card.value?.id || !card.value?.iccid) return
+  try {
+    await ElMessageBox.confirm(
+      '确定要重启该卡片吗？系统会执行停机后再复机。',
+      '重启确认',
+      {
+        confirmButtonText: '确定重启',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.restartCard(card.value.id)
+    ElMessage.success(result.message || (result.status === 'processing' ? '重启请求已提交' : '重启成功'))
+    fetchCardDetail()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('重启失败:', error)
     }
   }
 }

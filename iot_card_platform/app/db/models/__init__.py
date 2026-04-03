@@ -26,7 +26,7 @@ from app.db.models.pool import (
     PoolStatus, POOL_STATUS_NAMES
 )
 from app.db.models.suspend import (
-    SuspendPolicyModel, SuspendLogModel, AlertLogModel,
+    SuspendPolicyModel, SuspendLogModel, SupplierSuspendOperationModel, AlertLogModel,
     SuspendActionType, AlertLevel, AlertTargetType,
     SUSPEND_ACTION_NAMES, ALERT_LEVEL_NAMES, ALERT_TARGET_NAMES
 )
@@ -47,7 +47,7 @@ __all__ = [
     "BatchStatus", "StockInStatus", "StockOutStatus",
     "TrafficPoolModel", "PoolCardLogModel",
     "PoolStatus", "POOL_STATUS_NAMES",
-    "SuspendPolicyModel", "SuspendLogModel", "AlertLogModel",
+    "SuspendPolicyModel", "SuspendLogModel", "SupplierSuspendOperationModel", "AlertLogModel",
     "SuspendActionType", "AlertLevel", "AlertTargetType",
     "SUSPEND_ACTION_NAMES", "ALERT_LEVEL_NAMES", "ALERT_TARGET_NAMES",
     "ProjectModel",

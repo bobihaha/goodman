@@ -342,6 +342,19 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="刷新" width="90" align="center">
+          <template #default="{ row }">
+            <el-button
+              type="primary"
+              link
+              :loading="refreshingMap[row.id]"
+              @click="handleRowRefresh(row)"
+            >
+              刷新
+            </el-button>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="card_type" label="卡片类型" width="110">
           <template #default="{ row }">
             <el-tag v-if="row.card_type === 'pool'" type="success" size="small">
@@ -375,7 +388,7 @@
 
         <el-table-column label="套餐总量" width="120">
           <template #default="{ row }">
-            {{ formatFlowValue(row.data_total) }}
+            {{ formatFlowValue(getDisplayTotal(row)) }}
           </template>
         </el-table-column>
 
@@ -390,14 +403,14 @@
             <div class="flow-usage">
               <div class="flow-progress-row">
                 <el-progress
-                  :percentage="Math.min(formatUsagePercent(row.data_used, row.data_total), 100)"
-                  :color="getProgressColor(formatUsagePercent(row.data_used, row.data_total))"
+                  :percentage="Math.min(formatUsagePercent(row.data_used, getDisplayTotal(row)), 100)"
+                  :color="getProgressColor(formatUsagePercent(row.data_used, getDisplayTotal(row)))"
                   :show-text="false"
                 />
-                <span class="flow-percent">{{ formatUsagePercent(row.data_used, row.data_total).toFixed(2) }}%</span>
+                <span class="flow-percent">{{ formatUsagePercent(row.data_used, getDisplayTotal(row)).toFixed(2) }}%</span>
               </div>
               <div class="flow-text">
-                {{ formatFlowValue(row.data_used) }} / {{ formatFlowValue(row.data_total) }}
+                {{ formatFlowValue(row.data_used) }} / {{ formatFlowValue(getDisplayTotal(row)) }}
               </div>
             </div>
           </template>
@@ -490,6 +503,12 @@
                       :disabled="row.status !== 'suspended'"
                     >
                       复机
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="restart"
+                      :disabled="!['activated', 'testing', 'silent', 'suspended'].includes(row.status)"
+                    >
+                      重启
                     </el-dropdown-item>
                     <el-dropdown-item
                       v-if="isSuperAdmin"
@@ -663,6 +682,7 @@ const loading = ref(false)
 const cardList = ref<Card[]>([])
 const selectedCards = ref<Card[]>([])
 const currentCard = ref<Card | null>(null)
+const refreshingMap = ref<Record<number, boolean>>({})
 const isBatchQueryMode = ref(false)
 const batchQueryNotFound = ref<string[]>([])
 const showAdvanced = ref(false)
@@ -766,6 +786,15 @@ const exportHistoryFilterParams = computed(() => ({
   expired_end: expiredRange.value?.[1] || undefined
 }))
 
+const getDisplayTotal = (card: Card) => {
+  const total = Number(card.data_total || 0)
+  const specTotal = Number(card.flow_size || 0)
+  if (card.period_type === 'monthly' && specTotal > total) {
+    return specTotal
+  }
+  return total
+}
+
 // 获取卡片列表
 const fetchCardList = async () => {
   loading.value = true
@@ -787,7 +816,7 @@ const fetchCardList = async () => {
     // 计算使用率
     cardList.value = (response.items || []).map((card: Card) => ({
       ...card,
-      usage_percent: formatUsagePercent(card.data_used, card.data_total)
+      usage_percent: formatUsagePercent(card.data_used, getDisplayTotal(card))
     }))
     
     pagination.total = response.total
@@ -975,6 +1004,45 @@ const showDiagnosticsDialog = (card: Card) => {
   diagnosticsVisible.value = true
 }
 
+const handleRowRefresh = async (card: Card) => {
+  if (!card.iccid) {
+    ElMessage.warning('当前卡片缺少 ICCID，无法刷新')
+    return
+  }
+
+  refreshingMap.value = {
+    ...refreshingMap.value,
+    [card.id]: true
+  }
+
+  try {
+    const result = await cardApi.syncSingleCard(card.iccid)
+    const changedFields = result.changed_fields || []
+    if (result.changed) {
+      ElMessage.success(
+        changedFields.length
+          ? `卡片 ${card.iccid} 已同步，更新字段：${changedFields.join('、')}`
+          : `卡片 ${card.iccid} 已同步并更新`
+      )
+    } else {
+      ElMessage.info(`卡片 ${card.iccid} 已同步，供应商数据无变化`)
+    }
+
+    await Promise.all([
+      fetchCardList(),
+      fetchStats()
+    ])
+  } catch (error) {
+    console.error('单卡刷新失败:', error)
+    ElMessage.error('刷新失败，请稍后重试')
+  } finally {
+    refreshingMap.value = {
+      ...refreshingMap.value,
+      [card.id]: false
+    }
+  }
+}
+
 const handleRowAction = (command: string, card: Card) => {
   switch (command) {
     case 'detail':
@@ -997,6 +1065,11 @@ const handleRowAction = (command: string, card: Card) => {
     case 'resume':
       if (card.status === 'suspended') {
         handleRowResume(card)
+      }
+      break
+    case 'restart':
+      if (['activated', 'testing', 'silent', 'suspended'].includes(card.status)) {
+        handleRowRestart(card)
       }
       break
     case 'forceResume':
@@ -1036,6 +1109,32 @@ const handleRowResume = async (card: Card) => {
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('单行复机失败:', error)
+    }
+  }
+}
+
+const handleRowRestart = async (card: Card) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要重启卡片 ${card.iccid} 吗？系统会执行停机后再复机。`,
+      '重启确认',
+      {
+        confirmButtonText: '确定重启',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const result = await cardApi.restartCard(card.id)
+    ElMessage.success(result.message || (result.status === 'processing' ? '重启请求已提交' : '重启成功'))
+
+    await Promise.all([
+      fetchCardList(),
+      fetchStats()
+    ])
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('单行重启失败:', error)
     }
   }
 }

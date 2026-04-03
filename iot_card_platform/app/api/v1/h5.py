@@ -54,7 +54,7 @@ async def suspend_h5_card(
     db: AsyncSession = Depends(get_db)
 ):
     result = await h5_service.suspend_card(db, slug, card_id, request.reason)
-    return ResponseModel(data=result, msg="停机成功")
+    return ResponseModel(data=result, msg="停机请求已提交")
 
 
 @router.post("/{slug}/card/{card_id}/resume", summary="H5复机", response_model=ResponseModel)
@@ -65,7 +65,17 @@ async def resume_h5_card(
     db: AsyncSession = Depends(get_db)
 ):
     result = await h5_service.resume_card(db, slug, card_id)
-    return ResponseModel(data=result, msg="复机成功")
+    return ResponseModel(data=result, msg="复机请求已提交")
+
+
+@router.post("/{slug}/card/{card_id}/refresh", summary="H5刷新(停机后复机)", response_model=ResponseModel)
+async def refresh_h5_card(
+    slug: str = Path(...),
+    card_id: int = Path(...),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await h5_service.refresh_card(db, slug, card_id)
+    return ResponseModel(data=result, msg="刷新请求已提交")
 
 
 @router.put("/{slug}/card/{card_id}/remark", summary="H5修改备注", response_model=ResponseModel)

@@ -71,7 +71,7 @@
             :closable="false"
             style="margin-bottom: 20px; max-width: 700px; margin-left: auto; margin-right: auto"
           >
-            <div>1. 请使用固定模板格式：列A-ICCID（必填）、列B-IMSI（必填）、列C-电话号码（必填）</div>
+            <div>1. 请使用固定模板格式：列A-电话号码（必填）、列B-ICCID（必填）、列C-IMSI（必填）</div>
             <div>2. 支持 Excel (.xlsx, .xls) 和 CSV 格式</div>
             <div>3. 第一行为表头，从第二行开始为数据</div>
             <div>4. 单次最多导入 10000 条</div>
@@ -272,7 +272,7 @@ const fetchSuppliers = async () => {
 const fetchSupplierPackages = async () => {
   try {
     const res = await packageApi.getSupplierPackages({ page: 1, page_size: 100 })
-    supplierPackages.value = res.list || []
+    supplierPackages.value = res.items || res.list || []
   } catch (error) {
     console.error('获取底层套餐列表失败', error)
   }
@@ -302,9 +302,9 @@ const nextStep = async () => {
 const handleDownloadTemplate = () => {
   // 创建模板数据
   const templateData = [
-    ['ICCID', 'IMSI', '电话号码'],
-    ['89860123456789012345', '460012345678901', '13800138000'],
-    ['89860123456789012346', '460012345678902', '13800138001']
+    ['电话号码', 'ICCID', 'IMSI'],
+    ['13800138000', '89860123456789012345', '460012345678901'],
+    ['13800138001', '89860123456789012346', '460012345678902']
   ]
   
   // 创建工作簿
@@ -367,9 +367,9 @@ const handleFileChange = (file: any) => {
       }
 
       rows.slice(1).forEach((row: any[], index: number) => {
-        const iccid = normalizeExcelCell(row?.[0])
-        const imsi = normalizeExcelCell(row?.[1])
-        const msisdn = normalizeExcelCell(row?.[2])
+        const msisdn = normalizeExcelCell(row?.[0])
+        const iccid = normalizeExcelCell(row?.[1])
+        const imsi = normalizeExcelCell(row?.[2])
 
         // 跳过完全空白行
         if (!iccid && !imsi && !msisdn) {
@@ -515,20 +515,30 @@ const handleSubmit = async () => {
       cards: cardList.value,
       remark: formData.remark
     })
-    
-    ElMessage.success(`入库成功！成功 ${result.success} 张，失败 ${result.failed} 张`)
-    
-    // 重置表单
-    cardList.value = []
-    formData.supplier_id = undefined
-    formData.package_id = undefined
-    formData.test_expire_date = ''
-    formData.silent_expire_date = ''
-    formData.remark = ''
-    currentStep.value = 0
-    
-    if (uploadRef.value) {
-      uploadRef.value.clearFiles()
+
+    if (result.success > 0) {
+      const hasFailed = result.failed > 0
+      ElMessage[hasFailed ? 'warning' : 'success'](
+        hasFailed
+          ? `部分入库成功：成功 ${result.success} 张，失败 ${result.failed} 张`
+          : `入库成功！成功 ${result.success} 张`
+      )
+
+      // 仅在有成功入库时重置表单
+      cardList.value = []
+      formData.supplier_id = undefined
+      formData.package_id = undefined
+      formData.test_expire_date = ''
+      formData.silent_expire_date = ''
+      formData.remark = ''
+      currentStep.value = 0
+
+      if (uploadRef.value) {
+        uploadRef.value.clearFiles()
+      }
+    } else {
+      const firstFailReason = result.fail_details?.[0]?.reason
+      ElMessage.warning(firstFailReason ? `入库失败：${firstFailReason}` : '入库失败，所有卡片都未通过校验')
     }
   } catch (error: any) {
     ElMessage.error(error.message || '入库失败')

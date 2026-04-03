@@ -8,7 +8,7 @@ from typing import Optional, List, Tuple
 from datetime import datetime
 
 from app.db.models.suspend import (
-    SuspendPolicyModel, SuspendLogModel, AlertLogModel,
+    SuspendPolicyModel, SuspendLogModel, SupplierSuspendOperationModel, AlertLogModel,
     SuspendActionType, AlertLevel, AlertTargetType
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
@@ -425,6 +425,81 @@ class AlertLogCRUD:
         )
         count = result.scalar()
         return count > 0
+
+
+class SupplierSuspendOperationCRUD:
+    """供应商停复机操作记录 CRUD"""
+
+    @staticmethod
+    async def create(
+        db: AsyncSession,
+        card_id: int,
+        supplier_id: Optional[int],
+        iccid: str,
+        msisdn: Optional[str],
+        action: SuspendActionType,
+        callback_no: str,
+        request_payload: Optional[str] = None,
+        operator_id: Optional[int] = None
+    ) -> SupplierSuspendOperationModel:
+        operation = SupplierSuspendOperationModel(
+            card_id=card_id,
+            supplier_id=supplier_id,
+            iccid=iccid,
+            msisdn=msisdn,
+            action=action,
+            callback_no=callback_no,
+            request_payload=request_payload,
+            operator_id=operator_id
+        )
+        db.add(operation)
+        await db.commit()
+        await db.refresh(operation)
+        return operation
+
+    @staticmethod
+    async def get_by_callback_no(db: AsyncSession, callback_no: str) -> Optional[SupplierSuspendOperationModel]:
+        result = await db.execute(
+            select(SupplierSuspendOperationModel).where(
+                SupplierSuspendOperationModel.callback_no == callback_no,
+                SupplierSuspendOperationModel.is_deleted == 0
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def update_request_result(
+        db: AsyncSession,
+        operation_id: int,
+        request_result: str
+    ) -> Optional[SupplierSuspendOperationModel]:
+        operation = await db.get(SupplierSuspendOperationModel, operation_id)
+        if not operation or operation.is_deleted == 1:
+            return None
+        operation.request_result = request_result
+        await db.commit()
+        await db.refresh(operation)
+        return operation
+
+    @staticmethod
+    async def update_callback_result(
+        db: AsyncSession,
+        operation: SupplierSuspendOperationModel,
+        callback_payload: str,
+        callback_code: Optional[str],
+        callback_msg: Optional[str],
+        account_status: Optional[str],
+        callback_status: str
+    ) -> SupplierSuspendOperationModel:
+        operation.callback_payload = callback_payload
+        operation.callback_code = callback_code
+        operation.callback_msg = callback_msg
+        operation.account_status = account_status
+        operation.callback_status = callback_status
+        operation.completed_at = datetime.now()
+        await db.commit()
+        await db.refresh(operation)
+        return operation
 
 
 class CardSuspendCRUD:

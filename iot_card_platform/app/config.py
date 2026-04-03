@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # 批量操作限制
     max_batch_operation_size: int = 10000
     max_export_size: int = 10000
+    refresh_resume_fallback_seconds: int = 30
+    supplier_callback_reconcile_seconds: int = 90
+    supplier_status_conflict_window_seconds: int = 600
+    refresh_status_poll_interval_seconds: int = 5
+    refresh_suspend_confirm_timeout_seconds: int = 45
+    refresh_resume_confirm_timeout_seconds: int = 90
 
     model_config = SettingsConfigDict(
         env_file=".env",

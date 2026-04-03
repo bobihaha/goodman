@@ -348,7 +348,7 @@ const fetchSuppliers = async () => {
 const fetchPackages = async () => {
   try {
     const res = await packageApi.getSalePackages({ page: 1, page_size: 100, status: 'enable' })
-    packages.value = res.list || []  // 销售套餐API返回 list
+    packages.value = res.items || res.list || []
   } catch (error) {
     console.error('获取套餐列表失败', error)
   }

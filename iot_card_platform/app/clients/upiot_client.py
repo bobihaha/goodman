@@ -6,6 +6,7 @@ Host: ec.upiot.net
 import hashlib
 import json
 import logging
+import re
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -18,13 +19,13 @@ logger = logging.getLogger(__name__)
 # upiot 卡状态码 -> 系统状态映射
 UPIOT_STATUS_MAP = {
     "00": "activated",      # 正使用
-    "10": "test",           # 测试期
+    "10": "testing",        # 测试期
     "11": "silent",         # 沉默期
     "02": "suspended",      # 停机
-    "03": "pre_cancelled",  # 预销号
+    "03": "cancelled",      # 预销号
     "04": "cancelled",      # 销号
     "12": "suspended",      # 停机保号
-    "15": "inventory",      # 库存期
+    "15": "stock",          # 库存期
     "99": "unknown",        # 未知
 }
 
@@ -58,6 +59,7 @@ class UpiotSupplierClient(SupplierAPIClient):
         super().__init__(api_url, api_key, api_secret)
         if not self.api_url:
             self.api_url = "http://ec.upiot.net"
+        self.last_sor_result: Optional[Dict[str, Any]] = None
 
     # ========== 签名计算 ==========
 
@@ -148,6 +150,16 @@ class UpiotSupplierClient(SupplierAPIClient):
     def _map_work_status_text(self, value: Any) -> str:
         return UPIOT_WORK_STATUS_MAP.get(str(value), "未知")
 
+    def _parse_supplier_error(self, error: Exception) -> Dict[str, Optional[str]]:
+        message = str(error)
+        match = re.search(r"code=([^,]+), msg=(.+)$", message)
+        if not match:
+            return {"code": None, "msg": message}
+        return {
+            "code": match.group(1).strip(),
+            "msg": match.group(2).strip(),
+        }
+
     # ========== 核心接口实现 ==========
 
     async def get_card_usage(self, iccid: str) -> Dict[str, Any]:
@@ -219,27 +231,81 @@ class UpiotSupplierClient(SupplierAPIClient):
                 })
         return results
 
-    async def suspend_card(self, iccid: str, reason: Optional[str] = None) -> bool:
+    async def suspend_card(self, iccid: str, reason: Optional[str] = None, callback_no: Optional[str] = None) -> bool:
         """
         停卡
         upiot接口: POST /sor/  type=01
         """
+        self.last_sor_result = None
         try:
-            await self._post("sor", {"number": iccid, "type": "01"})
+            payload = {"number": iccid, "type": "01"}
+            if callback_no:
+                payload["callback_no"] = callback_no
+            await self._post("sor", payload)
+            self.last_sor_result = {"submitted": True}
             return True
         except Exception as e:
+            error_meta = self._parse_supplier_error(e)
+            supplier_msg = error_meta.get("msg") or ""
+            if error_meta.get("code") == "535" and "停机" in supplier_msg and "正使用" not in supplier_msg:
+                self.last_sor_result = {
+                    "submitted": True,
+                    "idempotent": True,
+                    "supplier_code": error_meta.get("code"),
+                    "supplier_msg": supplier_msg,
+                    "reconciled_status": "suspended",
+                }
+                logger.warning(
+                    "upiot suspend_card already suspended, reconcile locally: iccid=%s, msg=%s",
+                    iccid,
+                    supplier_msg,
+                )
+                return True
+            self.last_sor_result = {
+                "submitted": False,
+                "supplier_code": error_meta.get("code"),
+                "supplier_msg": supplier_msg,
+                "error": str(e),
+            }
             logger.error(f"upiot suspend_card failed: iccid={iccid}, error={e}")
             return False
 
-    async def resume_card(self, iccid: str) -> bool:
+    async def resume_card(self, iccid: str, callback_no: Optional[str] = None) -> bool:
         """
         复机
         upiot接口: POST /sor/  type=00
         """
+        self.last_sor_result = None
         try:
-            await self._post("sor", {"number": iccid, "type": "00"})
+            payload = {"number": iccid, "type": "00"}
+            if callback_no:
+                payload["callback_no"] = callback_no
+            await self._post("sor", payload)
+            self.last_sor_result = {"submitted": True}
             return True
         except Exception as e:
+            error_meta = self._parse_supplier_error(e)
+            supplier_msg = error_meta.get("msg") or ""
+            if error_meta.get("code") == "535" and "正使用" in supplier_msg:
+                self.last_sor_result = {
+                    "submitted": True,
+                    "idempotent": True,
+                    "supplier_code": error_meta.get("code"),
+                    "supplier_msg": supplier_msg,
+                    "reconciled_status": "activated",
+                }
+                logger.warning(
+                    "upiot resume_card already active, reconcile locally: iccid=%s, msg=%s",
+                    iccid,
+                    supplier_msg,
+                )
+                return True
+            self.last_sor_result = {
+                "submitted": False,
+                "supplier_code": error_meta.get("code"),
+                "supplier_msg": supplier_msg,
+                "error": str(e),
+            }
             logger.error(f"upiot resume_card failed: iccid={iccid}, error={e}")
             return False
 

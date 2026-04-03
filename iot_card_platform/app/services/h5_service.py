@@ -1,21 +1,38 @@
 """
 H5 自助服务
 """
+import asyncio
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.crud.iot_card_crud import iot_card_crud
 from app.crud.sys_user_crud import sys_user_crud
+from app.db.models.suspend import SupplierSuspendOperationModel, SuspendActionType
+from app.db.models.iot_card import CardStatus, SuspendType
 from app.db.models.iot_card import CardH5RemarkLogModel, IotCardModel
 from app.db.models.sys_user import UserLevel
-from app.schemas.h5 import H5PortalConfig, H5CardActionFlags
+from app.schemas.h5 import H5PortalConfig, H5CardActionFlags, H5CardActionResult
+from app.config import settings
+from app.clients.supplier_api import get_supplier_client
 from app.services.iot_card_service import iot_card_service
+from app.services.suspend_service import SuspendActionService
 from app.utils.const import sanitize_text
 from app.utils.exceptions import BusinessException
 
 
 class H5Service:
+    REFRESH_ACTIVE_STATUSES = {
+        CardStatus.activated.value,
+        CardStatus.testing.value,
+        CardStatus.silent.value,
+    }
+    REFRESH_PROTECTED_SUSPEND_TYPES = {
+        SuspendType.expired,
+        SuspendType.card_exceed,
+        SuspendType.pool_exceed,
+    }
+
     @staticmethod
     def _mask_iccid(iccid: str) -> str:
         if len(iccid) <= 8:
@@ -31,6 +48,57 @@ class H5Service:
     @staticmethod
     def _is_enabled(user) -> bool:
         return bool(user.h5_enabled) and (user.h5_status or "enabled") == "enabled"
+
+    async def _has_refresh_history(self, db: AsyncSession, card_id: int) -> bool:
+        result = await db.execute(
+            select(SupplierSuspendOperationModel.id).where(
+                SupplierSuspendOperationModel.card_id == card_id,
+                SupplierSuspendOperationModel.action == SuspendActionType.suspend,
+                SupplierSuspendOperationModel.request_result.like('%"refresh_resume_pending": true%'),
+                SupplierSuspendOperationModel.is_deleted == 0
+            ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _get_supplier_lifecycle_status(
+        self,
+        card: IotCardModel,
+        supplier
+    ) -> str:
+        supplier_client = get_supplier_client(
+            supplier_id=card.supplier_id,
+            api_url=supplier.api_url or "",
+            api_key=supplier.api_key or "",
+            api_secret=supplier.api_secret or ""
+        )
+        lifecycle = await supplier_client.get_card_lifecycle(card.iccid)
+        return str(lifecycle.get('status') or '').strip()
+
+    async def _wait_for_supplier_status(
+        self,
+        db: AsyncSession,
+        card: IotCardModel,
+        supplier,
+        expected_statuses: set[str],
+        timeout_seconds: int
+    ) -> Optional[str]:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        latest_status = None
+
+        while True:
+            latest_status = await self._get_supplier_lifecycle_status(card, supplier)
+            if latest_status:
+                SuspendActionService.normalize_card_suspend_state(card, latest_status)
+                await db.commit()
+                await db.refresh(card)
+
+            if latest_status in expected_statuses:
+                return latest_status
+
+            if asyncio.get_running_loop().time() >= deadline:
+                return latest_status
+
+            await asyncio.sleep(settings.refresh_status_poll_interval_seconds)
 
     @staticmethod
     def _build_portal_config(user) -> H5PortalConfig:
@@ -135,15 +203,31 @@ class H5Service:
         card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+        if card.status == CardStatus.suspended:
+            raise BusinessException(code=400, msg="卡片已停机")
+        if card.status not in [CardStatus.activated, CardStatus.testing, CardStatus.silent]:
+            raise BusinessException(code=400, msg=f"卡片状态不支持停机: {card.status.value}")
 
-        result = await iot_card_service.batch_suspend_by_iccids(
+        supplier_map = await SuspendActionService._load_supplier_map(db, [card])
+        supplier = supplier_map.get(card.supplier_id)
+        api_success, callback_no, _ = await SuspendActionService._call_supplier_suspend(
             db=db,
-            iccids=[card.iccid],
+            card=card,
+            supplier=supplier,
             reason=reason,
-            current_user_id=user.id,
-            user_level=user.user_level
+            operator_id=user.id
         )
-        return result
+        if not api_success:
+            raise BusinessException(code=502, msg="供应商停机请求提交失败")
+
+        return H5CardActionResult(
+            card_id=card.id,
+            iccid=card.iccid,
+            action="suspend",
+            status="processing",
+            callback_no=callback_no,
+            message="停机请求已提交，处理中"
+        ).model_dump()
 
     async def resume_card(self, db: AsyncSession, slug: str, card_id: int) -> dict:
         user = await self._get_h5_user(db, slug)
@@ -153,14 +237,129 @@ class H5Service:
         card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+        if card.status != CardStatus.suspended:
+            raise BusinessException(code=400, msg="卡片未处于停机状态")
 
-        result = await iot_card_service.batch_resume_by_iccids(
+        can_resume, fail_reason = await SuspendActionService._check_resume_eligibility(
             db=db,
-            iccids=[card.iccid],
-            current_user_id=user.id,
-            user_level=user.user_level
+            card=card,
+            force=False
         )
-        return result
+        if not can_resume:
+            raise BusinessException(code=400, msg=fail_reason or "当前不允许复机")
+
+        supplier_map = await SuspendActionService._load_supplier_map(db, [card])
+        supplier = supplier_map.get(card.supplier_id)
+        api_success, callback_no, _ = await SuspendActionService._call_supplier_resume(
+            db=db,
+            card=card,
+            supplier=supplier,
+            operator_id=user.id
+        )
+        if not api_success:
+            raise BusinessException(code=502, msg="供应商复机请求提交失败")
+
+        return H5CardActionResult(
+            card_id=card.id,
+            iccid=card.iccid,
+            action="resume",
+            status="processing",
+            callback_no=callback_no,
+            message="复机请求已提交，处理中"
+        ).model_dump()
+
+    async def refresh_card(self, db: AsyncSession, slug: str, card_id: int) -> dict:
+        user = await self._get_h5_user(db, slug)
+        if not user.h5_allow_suspend or not user.h5_allow_resume:
+            raise BusinessException(code=403, msg="当前账号H5未同时开通停机和复机功能")
+
+        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        if not card:
+            raise BusinessException(code=404, msg="卡片不存在")
+
+        supplier_map = await SuspendActionService._load_supplier_map(db, [card])
+        supplier = supplier_map.get(card.supplier_id)
+        if not supplier:
+            raise BusinessException(code=404, msg="供应商不存在")
+
+        current_supplier_status = await self._get_supplier_lifecycle_status(card, supplier)
+        has_refresh_history = await self._has_refresh_history(db, card.id)
+
+        if card.suspend_type in self.REFRESH_PROTECTED_SUSPEND_TYPES:
+            raise BusinessException(code=400, msg="当前卡片处于业务停卡状态，不支持刷新重启")
+        if card.suspend_type == SuspendType.manual and current_supplier_status == CardStatus.suspended.value and not has_refresh_history:
+            raise BusinessException(code=400, msg="当前卡片处于人工停卡状态，不支持刷新重启")
+
+        suspend_callback_no = None
+        if current_supplier_status in self.REFRESH_ACTIVE_STATUSES:
+            suspend_success, suspend_callback_no, _ = await SuspendActionService._call_supplier_suspend(
+                db=db,
+                card=card,
+                supplier=supplier,
+                reason="H5刷新操作-停机",
+                operator_id=user.id
+            )
+            if not suspend_success:
+                raise BusinessException(code=502, msg="供应商停机请求提交失败")
+            if suspend_callback_no:
+                await SuspendActionService.mark_refresh_resume_pending(db, suspend_callback_no)
+                SuspendActionService.schedule_refresh_resume_fallback(suspend_callback_no)
+
+            suspended_status = await self._wait_for_supplier_status(
+                db=db,
+                card=card,
+                supplier=supplier,
+                expected_statuses={CardStatus.suspended.value},
+                timeout_seconds=settings.refresh_suspend_confirm_timeout_seconds
+            )
+            if suspended_status != CardStatus.suspended.value:
+                raise BusinessException(code=502, msg="刷新失败：停机状态未在规定时间内生效")
+        elif current_supplier_status != CardStatus.suspended.value:
+            raise BusinessException(code=400, msg=f"当前卡片状态不支持刷新: {current_supplier_status or card.status.value}")
+
+        resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+            db=db,
+            card=card,
+            supplier=supplier,
+            operator_id=user.id
+        )
+        if not resume_success:
+            raise BusinessException(code=502, msg="供应商复机请求提交失败")
+        if suspend_callback_no:
+            await SuspendActionService.mark_refresh_resume_submitted(
+                db=db,
+                suspend_callback_no=suspend_callback_no,
+                resume_callback_no=resume_callback_no,
+                submitted=resume_success
+            )
+
+        resumed_status = await self._wait_for_supplier_status(
+            db=db,
+            card=card,
+            supplier=supplier,
+            expected_statuses=self.REFRESH_ACTIVE_STATUSES,
+            timeout_seconds=settings.refresh_resume_confirm_timeout_seconds
+        )
+        if resumed_status not in self.REFRESH_ACTIVE_STATUSES:
+            return H5CardActionResult(
+                card_id=card.id,
+                iccid=card.iccid,
+                action="refresh",
+                status="processing",
+                suspend_callback_no=suspend_callback_no,
+                resume_callback_no=resume_callback_no,
+                message="刷新请求已提交，复机处理中，请稍后刷新页面查看状态"
+            ).model_dump()
+
+        return H5CardActionResult(
+            card_id=card.id,
+            iccid=card.iccid,
+            action="refresh",
+            status="success",
+            suspend_callback_no=suspend_callback_no,
+            resume_callback_no=resume_callback_no,
+            message="刷新完成，卡片已恢复激活"
+        ).model_dump()
 
     async def update_remark(
         self,

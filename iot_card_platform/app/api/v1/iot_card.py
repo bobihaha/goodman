@@ -119,6 +119,21 @@ async def get_card_diagnostics(
     return ResponseModel(data=result)
 
 
+@router.post("/{card_id}/restart", summary="重启卡片", response_model=ResponseModel)
+async def restart_card(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    result = await iot_card_service.restart_card(
+        db=db,
+        card_id=card_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level
+    )
+    return ResponseModel(data=result, msg=result.get("message") or "重启请求已提交")
+
+
 # === 批量操作放在单个操作之前 ===
 
 @router.put("/batch/remark", summary="批量更新备注", response_model=ResponseModel)

@@ -1,16 +1,19 @@
 """
 停卡策略服务层
 """
+import asyncio
+import json
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime, date
 import logging
 
 from app.crud.suspend_crud import (
-    SuspendPolicyCRUD, SuspendLogCRUD, AlertLogCRUD, CardSuspendCRUD
+    SuspendPolicyCRUD, SuspendLogCRUD, SupplierSuspendOperationCRUD, AlertLogCRUD, CardSuspendCRUD
 )
 from app.db.models.suspend import (
-    SuspendPolicyModel, SuspendLogModel, AlertLogModel,
+    SuspendPolicyModel, SuspendLogModel, SupplierSuspendOperationModel, AlertLogModel,
     SuspendActionType, AlertLevel, AlertTargetType
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
@@ -18,8 +21,11 @@ from app.db.models.supplier import SupplierModel
 from app.schemas.suspend import (
     PolicyCreate, PolicyUpdate, ManualSuspend, ManualResume, SuspendResult
 )
+from app.config import settings
 from app.clients.supplier_api import get_supplier_client
+from app.clients.upiot_client import UPIOT_STATUS_MAP
 from sqlalchemy import select
+from app.db.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +104,138 @@ class SuspendActionService:
     """停卡/复机操作服务"""
 
     @staticmethod
+    def _check_card_not_expired(card: IotCardModel) -> Tuple[bool, Optional[str]]:
+        if card.expired_at and card.expired_at < date.today():
+            return False, "套餐已过期，请先续费"
+        return True, None
+
+    @staticmethod
+    def _check_single_card_resume_eligibility(card: IotCardModel) -> Tuple[bool, Optional[str]]:
+        if card.data_used > card.data_total:
+            return False, "单卡流量仍超限，请先补量"
+        return True, None
+
+    @staticmethod
+    async def _check_pool_card_resume_eligibility(
+        db: AsyncSession,
+        card: IotCardModel
+    ) -> Tuple[bool, Optional[str]]:
+        if not card.pool_id:
+            return False, "流量池信息缺失，暂不可复机"
+
+        from app.crud.pool_crud import pool_crud
+        from app.db.models.sys_user import SysUserModel
+        import json
+
+        pool = await pool_crud.update_stats(db, card.pool_id)
+        if not pool:
+            return False, "流量池不存在，暂不可复机"
+
+        threshold = 100
+        if pool.user_id:
+            quota_result = await db.execute(
+                select(SysUserModel.quota).where(
+                    SysUserModel.id == pool.user_id,
+                    SysUserModel.is_deleted == 0
+                )
+            )
+            quota_data = quota_result.scalar_one_or_none()
+            if quota_data:
+                quota = quota_data if isinstance(quota_data, dict) else json.loads(quota_data)
+                threshold = quota.get("pool_stop_threshold", 100)
+
+        if pool.get_usage_percent() >= threshold:
+            return False, "流量池仍超限，请先补量"
+        return True, None
+
+    @staticmethod
+    def normalize_card_suspend_state(
+        card: IotCardModel,
+        target_status: Optional[str],
+        suspend_type: Optional[SuspendType] = None,
+        reason: Optional[str] = None
+    ) -> None:
+        if not target_status or target_status not in {status.value for status in CardStatus}:
+            return
+
+        card.status = CardStatus(target_status)
+
+        if target_status == CardStatus.suspended.value:
+            resolved_suspend_type = suspend_type
+            if resolved_suspend_type is None:
+                current_suspend_type = card.suspend_type or SuspendType.none
+                resolved_suspend_type = (
+                    current_suspend_type
+                    if current_suspend_type != SuspendType.none
+                    else SuspendType.manual
+                )
+            card.suspend_type = resolved_suspend_type
+            if card.suspend_at is None:
+                card.suspend_at = datetime.now()
+            if reason:
+                card.suspend_reason = reason
+            elif not card.suspend_reason:
+                card.suspend_reason = "供应商状态同步为停机"
+            return
+
+        if target_status in {
+            CardStatus.activated.value,
+            CardStatus.testing.value,
+            CardStatus.silent.value,
+            CardStatus.expired.value,
+            CardStatus.cancelled.value,
+            CardStatus.stock.value
+        }:
+            card.suspend_type = SuspendType.none
+            card.suspend_at = None
+            card.suspend_reason = None
+
+    @staticmethod
+    def _matches_operation_target(
+        action: SuspendActionType,
+        lifecycle_status: Optional[str]
+    ) -> bool:
+        if not lifecycle_status:
+            return False
+        if action == SuspendActionType.suspend:
+            return lifecycle_status == CardStatus.suspended.value
+        if action == SuspendActionType.resume:
+            return lifecycle_status in {
+                CardStatus.activated.value,
+                CardStatus.testing.value,
+                CardStatus.silent.value,
+            }
+        return False
+
+    @staticmethod
+    def _generate_callback_no(action: SuspendActionType, iccid: str) -> str:
+        action_prefix = "sus" if action == SuspendActionType.suspend else "res"
+        suffix = uuid.uuid4().hex[:10]
+        return f"{action_prefix}_{iccid[-8:]}_{suffix}"
+
+    @staticmethod
+    async def _create_supplier_operation(
+        db: AsyncSession,
+        card: IotCardModel,
+        supplier: Optional[SupplierModel],
+        action: SuspendActionType,
+        operator_id: Optional[int],
+        request_payload: Dict[str, Any]
+    ) -> SupplierSuspendOperationModel:
+        callback_no = request_payload["callback_no"]
+        return await SupplierSuspendOperationCRUD.create(
+            db=db,
+            card_id=card.id,
+            supplier_id=supplier.id if supplier else None,
+            iccid=card.iccid,
+            msisdn=card.msisdn,
+            action=action,
+            callback_no=callback_no,
+            request_payload=json.dumps(request_payload, ensure_ascii=False),
+            operator_id=operator_id
+        )
+
+    @staticmethod
     async def _load_supplier_map(
         db: AsyncSession,
         cards: List[IotCardModel]
@@ -114,25 +252,183 @@ class SuspendActionService:
         return {item.id: item for item in supplier_result.scalars().all()}
 
     @staticmethod
-    async def _call_supplier_suspend(card: IotCardModel, supplier: Optional[SupplierModel], reason: Optional[str]) -> bool:
-        if not supplier:
-            return False
-        try:
-            supplier_client = get_supplier_client(
-                supplier_id=card.supplier_id,
-                api_url=supplier.api_url or "",
-                api_key=supplier.api_key or "",
-                api_secret=supplier.api_secret or ""
+    def schedule_pending_operation_reconcile(
+        callback_no: str,
+        delay_seconds: Optional[int] = None
+    ) -> None:
+        effective_delay = max(5, delay_seconds or settings.supplier_callback_reconcile_seconds)
+        asyncio.create_task(
+            SuspendActionService._run_pending_operation_reconcile(
+                callback_no=callback_no,
+                delay_seconds=effective_delay
             )
-            return await supplier_client.suspend_card(card.iccid, reason)
-        except Exception as exc:
-            logger.error(f"供应商API停机失败: iccid={card.iccid}, error={exc}")
-            return False
+        )
 
     @staticmethod
-    async def _call_supplier_resume(card: IotCardModel, supplier: Optional[SupplierModel]) -> bool:
+    async def _run_pending_operation_reconcile(
+        callback_no: str,
+        delay_seconds: int
+    ) -> None:
+        await asyncio.sleep(delay_seconds)
+
+        async with AsyncSessionLocal() as db:
+            try:
+                operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, callback_no)
+                if not operation or operation.callback_status != "pending":
+                    return
+
+                card = await db.get(IotCardModel, operation.card_id)
+                if not card:
+                    return
+
+                supplier = None
+                if operation.supplier_id:
+                    supplier_result = await db.execute(
+                        select(SupplierModel).where(
+                            SupplierModel.id == operation.supplier_id,
+                            SupplierModel.is_deleted == 0
+                        )
+                    )
+                    supplier = supplier_result.scalar_one_or_none()
+                if not supplier:
+                    return
+
+                supplier_client = get_supplier_client(
+                    supplier_id=card.supplier_id,
+                    api_url=supplier.api_url or "",
+                    api_key=supplier.api_key or "",
+                    api_secret=supplier.api_secret or ""
+                )
+                lifecycle_data = await supplier_client.get_card_lifecycle(card.iccid)
+                lifecycle_status = lifecycle_data.get("status")
+
+                request_meta: Dict[str, Any] = {}
+                if operation.request_result:
+                    try:
+                        request_meta = json.loads(operation.request_result)
+                    except Exception:
+                        request_meta = {"raw_request_result": operation.request_result}
+                request_meta["auto_reconcile_checked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                request_meta["auto_reconcile_observed_status"] = lifecycle_status
+                request_meta["auto_reconcile_attempts"] = int(request_meta.get("auto_reconcile_attempts") or 0) + 1
+                await SupplierSuspendOperationCRUD.update_request_result(
+                    db=db,
+                    operation_id=operation.id,
+                    request_result=json.dumps(request_meta, ensure_ascii=False)
+                )
+
+                if not SuspendActionService._matches_operation_target(operation.action, lifecycle_status):
+                    if (
+                        operation.action == SuspendActionType.resume
+                        and request_meta.get("submitted")
+                        and lifecycle_status == CardStatus.suspended.value
+                        and request_meta["auto_reconcile_attempts"] < 5
+                    ):
+                        SuspendActionService.schedule_pending_operation_reconcile(
+                            callback_no=callback_no,
+                            delay_seconds=settings.supplier_callback_reconcile_seconds
+                        )
+                    return
+
+                SuspendActionService.normalize_card_suspend_state(
+                    card,
+                    lifecycle_status,
+                    suspend_type=SuspendType.manual if operation.action == SuspendActionType.suspend else None,
+                    reason="供应商生命周期自动对账收敛"
+                )
+                await SupplierSuspendOperationCRUD.update_callback_result(
+                    db=db,
+                    operation=operation,
+                    callback_payload=json.dumps(
+                        {
+                            "source": "auto_reconcile",
+                            "callback_no": callback_no,
+                            "status": lifecycle_status,
+                            "checked_at": request_meta["auto_reconcile_checked_at"],
+                        },
+                        ensure_ascii=False
+                    ),
+                    callback_code="AUTO_RECONCILE",
+                    callback_msg="Supplier lifecycle status matched expected state",
+                    account_status=lifecycle_status,
+                    callback_status="success"
+                )
+                if operation.action == SuspendActionType.resume:
+                    await SuspendActionService._close_refresh_suspend_chain(
+                        db=db,
+                        card=card,
+                        resume_callback_no=callback_no,
+                        lifecycle_status=lifecycle_status
+                    )
+            except Exception as exc:
+                logger.error("供应商操作自动收敛失败: callback_no=%s error=%s", callback_no, exc, exc_info=True)
+
+    @staticmethod
+    async def _close_refresh_suspend_chain(
+        db: AsyncSession,
+        card: IotCardModel,
+        resume_callback_no: str,
+        lifecycle_status: Optional[str]
+    ) -> None:
+        result = await db.execute(
+            select(SupplierSuspendOperationModel).where(
+                SupplierSuspendOperationModel.card_id == card.id,
+                SupplierSuspendOperationModel.action == SuspendActionType.suspend,
+                SupplierSuspendOperationModel.callback_status == "pending",
+                SupplierSuspendOperationModel.is_deleted == 0
+            ).order_by(SupplierSuspendOperationModel.id.desc())
+        )
+        operations = list(result.scalars().all())
+        for operation in operations:
+            request_meta: Dict[str, Any] = {}
+            if operation.request_result:
+                try:
+                    request_meta = json.loads(operation.request_result)
+                except Exception:
+                    request_meta = {"raw_request_result": operation.request_result}
+
+            if request_meta.get("refresh_resume_callback_no") != resume_callback_no:
+                continue
+
+            await SupplierSuspendOperationCRUD.update_callback_result(
+                db=db,
+                operation=operation,
+                callback_payload=json.dumps(
+                    {
+                        "source": "auto_chain_resume",
+                        "resume_callback_no": resume_callback_no,
+                        "status": lifecycle_status,
+                        "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    },
+                    ensure_ascii=False
+                ),
+                callback_code="AUTO_CHAINED",
+                callback_msg="Refresh suspend chain completed by resume operation",
+                account_status=lifecycle_status,
+                callback_status="success"
+            )
+            break
+
+    @staticmethod
+    async def _call_supplier_suspend(
+        db: AsyncSession,
+        card: IotCardModel,
+        supplier: Optional[SupplierModel],
+        reason: Optional[str],
+        operator_id: Optional[int] = None
+    ) -> tuple[bool, Optional[str], Optional[str]]:
         if not supplier:
-            return False
+            return False, None, None
+        callback_no = SuspendActionService._generate_callback_no(SuspendActionType.suspend, card.iccid)
+        request_payload = {"number": card.iccid, "type": "01", "callback_no": callback_no}
+        operation = await SuspendActionService._create_supplier_operation(
+            db=db,
+            card=card,
+            supplier=supplier,
+            action=SuspendActionType.suspend,
+            operator_id=operator_id,
+            request_payload=request_payload
+        )
         try:
             supplier_client = get_supplier_client(
                 supplier_id=card.supplier_id,
@@ -140,10 +436,196 @@ class SuspendActionService:
                 api_key=supplier.api_key or "",
                 api_secret=supplier.api_secret or ""
             )
-            return await supplier_client.resume_card(card.iccid)
+            result = await supplier_client.suspend_card(card.iccid, reason, callback_no=callback_no)
+            request_meta = getattr(supplier_client, "last_sor_result", None) or {"submitted": result}
+            await SupplierSuspendOperationCRUD.update_request_result(
+                db=db,
+                operation_id=operation.id,
+                request_result=json.dumps(request_meta, ensure_ascii=False)
+            )
+            if request_meta.get("submitted"):
+                SuspendActionService.schedule_pending_operation_reconcile(callback_no)
+            return result, callback_no, request_meta.get("reconciled_status")
         except Exception as exc:
+            await SupplierSuspendOperationCRUD.update_request_result(
+                db=db,
+                operation_id=operation.id,
+                request_result=json.dumps({"submitted": False, "error": str(exc)}, ensure_ascii=False)
+            )
+            logger.error(f"供应商API停机失败: iccid={card.iccid}, error={exc}")
+            return False, callback_no, None
+
+    @staticmethod
+    async def _call_supplier_resume(
+        db: AsyncSession,
+        card: IotCardModel,
+        supplier: Optional[SupplierModel],
+        operator_id: Optional[int] = None
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        if not supplier:
+            return False, None, None
+        callback_no = SuspendActionService._generate_callback_no(SuspendActionType.resume, card.iccid)
+        request_payload = {"number": card.iccid, "type": "00", "callback_no": callback_no}
+        operation = await SuspendActionService._create_supplier_operation(
+            db=db,
+            card=card,
+            supplier=supplier,
+            action=SuspendActionType.resume,
+            operator_id=operator_id,
+            request_payload=request_payload
+        )
+        try:
+            supplier_client = get_supplier_client(
+                supplier_id=card.supplier_id,
+                api_url=supplier.api_url or "",
+                api_key=supplier.api_key or "",
+                api_secret=supplier.api_secret or ""
+            )
+            result = await supplier_client.resume_card(card.iccid, callback_no=callback_no)
+            request_meta = getattr(supplier_client, "last_sor_result", None) or {"submitted": result}
+            await SupplierSuspendOperationCRUD.update_request_result(
+                db=db,
+                operation_id=operation.id,
+                request_result=json.dumps(request_meta, ensure_ascii=False)
+            )
+            if request_meta.get("submitted"):
+                SuspendActionService.schedule_pending_operation_reconcile(callback_no)
+            return result, callback_no, request_meta.get("reconciled_status")
+        except Exception as exc:
+            await SupplierSuspendOperationCRUD.update_request_result(
+                db=db,
+                operation_id=operation.id,
+                request_result=json.dumps({"submitted": False, "error": str(exc)}, ensure_ascii=False)
+            )
             logger.error(f"供应商API复机失败: iccid={card.iccid}, error={exc}")
-            return False
+            return False, callback_no, None
+
+    @staticmethod
+    async def mark_refresh_resume_pending(
+        db: AsyncSession,
+        suspend_callback_no: str
+    ) -> None:
+        operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, suspend_callback_no)
+        if not operation:
+            return
+
+        metadata: Dict[str, Any] = {}
+        if operation.request_result:
+            try:
+                metadata = json.loads(operation.request_result)
+            except Exception:
+                metadata = {"raw_request_result": operation.request_result}
+
+        metadata["refresh_resume_pending"] = True
+        await SupplierSuspendOperationCRUD.update_request_result(
+            db=db,
+            operation_id=operation.id,
+            request_result=json.dumps(metadata, ensure_ascii=False)
+        )
+
+    @staticmethod
+    async def mark_refresh_resume_submitted(
+        db: AsyncSession,
+        suspend_callback_no: str,
+        resume_callback_no: Optional[str],
+        submitted: bool
+    ) -> None:
+        operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, suspend_callback_no)
+        if not operation:
+            return
+
+        metadata: Dict[str, Any] = {}
+        if operation.request_result:
+            try:
+                metadata = json.loads(operation.request_result)
+            except Exception:
+                metadata = {"raw_request_result": operation.request_result}
+
+        metadata["refresh_resume_pending"] = True
+        metadata["refresh_resume_submitted"] = submitted
+        metadata["refresh_resume_callback_no"] = resume_callback_no
+        await SupplierSuspendOperationCRUD.update_request_result(
+            db=db,
+            operation_id=operation.id,
+            request_result=json.dumps(metadata, ensure_ascii=False)
+        )
+
+    @staticmethod
+    def schedule_refresh_resume_fallback(
+        suspend_callback_no: str,
+        delay_seconds: Optional[int] = None
+    ) -> None:
+        effective_delay = max(1, delay_seconds or settings.refresh_resume_fallback_seconds)
+        asyncio.create_task(
+            SuspendActionService._run_refresh_resume_fallback(
+                suspend_callback_no=suspend_callback_no,
+                delay_seconds=effective_delay
+            )
+        )
+
+    @staticmethod
+    async def _run_refresh_resume_fallback(
+        suspend_callback_no: str,
+        delay_seconds: int
+    ) -> None:
+        await asyncio.sleep(delay_seconds)
+
+        async with AsyncSessionLocal() as db:
+            try:
+                operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, suspend_callback_no)
+                if not operation or operation.action != SuspendActionType.suspend:
+                    return
+
+                request_meta: Dict[str, Any] = {}
+                if operation.request_result:
+                    try:
+                        request_meta = json.loads(operation.request_result)
+                    except Exception:
+                        request_meta = {"raw_request_result": operation.request_result}
+
+                if not request_meta.get("refresh_resume_pending"):
+                    return
+
+                if request_meta.get("refresh_resume_submitted"):
+                    return
+
+                if operation.callback_status != "pending":
+                    return
+
+                card = await db.get(IotCardModel, operation.card_id)
+                if not card:
+                    logger.warning("刷新兜底复机未找到卡片: callback_no=%s", suspend_callback_no)
+                    return
+
+                supplier = None
+                if operation.supplier_id:
+                    supplier_result = await db.execute(
+                        select(SupplierModel).where(
+                            SupplierModel.id == operation.supplier_id,
+                            SupplierModel.is_deleted == 0
+                        )
+                    )
+                    supplier = supplier_result.scalar_one_or_none()
+
+                resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+                    db=db,
+                    card=card,
+                    supplier=supplier,
+                    operator_id=operation.operator_id
+                )
+
+                request_meta["refresh_resume_fallback_delay_seconds"] = delay_seconds
+                request_meta["refresh_resume_fallback_triggered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                request_meta["refresh_resume_submitted"] = resume_success
+                request_meta["refresh_resume_callback_no"] = resume_callback_no
+                request_meta["refresh_resume_fallback_triggered"] = True
+                await SupplierSuspendOperationCRUD.update_request_result(
+                    db=db,
+                    operation_id=operation.id,
+                    request_result=json.dumps(request_meta, ensure_ascii=False)
+                )
+            except Exception as exc:
+                logger.error("刷新兜底复机执行失败: callback_no=%s error=%s", suspend_callback_no, exc, exc_info=True)
 
     @staticmethod
     async def _check_resume_eligibility(
@@ -156,48 +638,23 @@ class SuspendActionService:
             return True, None
 
         suspend_type = card.suspend_type or SuspendType.none
+        card_valid, card_invalid_reason = SuspendActionService._check_card_not_expired(card)
+        if not card_valid and suspend_type != SuspendType.expired:
+            return False, card_invalid_reason
 
         if suspend_type == SuspendType.expired:
-            if card.expired_at and card.expired_at >= date.today():
-                return True, None
-            return False, "到期停卡，请先续费"
+            return SuspendActionService._check_card_not_expired(card)
 
         if suspend_type == SuspendType.manual:
-            return False, "人工停卡需管理员强制复机"
+            if card.pool_id:
+                return await SuspendActionService._check_pool_card_resume_eligibility(db, card)
+            return SuspendActionService._check_single_card_resume_eligibility(card)
 
         if suspend_type == SuspendType.card_exceed:
-            if card.data_used > card.data_total:
-                return False, "单卡流量仍超限，请先补量"
-            return True, None
+            return SuspendActionService._check_single_card_resume_eligibility(card)
 
         if suspend_type == SuspendType.pool_exceed:
-            if not card.pool_id:
-                return False, "流量池信息缺失，暂不可复机"
-
-            from app.crud.pool_crud import pool_crud
-            from app.db.models.sys_user import SysUserModel
-            import json
-
-            pool = await pool_crud.update_stats(db, card.pool_id)
-            if not pool:
-                return False, "流量池不存在，暂不可复机"
-
-            threshold = 100
-            if pool.user_id:
-                quota_result = await db.execute(
-                    select(SysUserModel.quota).where(
-                        SysUserModel.id == pool.user_id,
-                        SysUserModel.is_deleted == 0
-                    )
-                )
-                quota_data = quota_result.scalar_one_or_none()
-                if quota_data:
-                    quota = quota_data if isinstance(quota_data, dict) else json.loads(quota_data)
-                    threshold = quota.get("pool_stop_threshold", 100)
-
-            if pool.get_usage_percent() >= threshold:
-                return False, "流量池仍超限，请先补量"
-            return True, None
+            return await SuspendActionService._check_pool_card_resume_eligibility(db, card)
 
         return True, None
 
@@ -206,7 +663,9 @@ class SuspendActionService:
         db: AsyncSession,
         card: IotCardModel,
         operator_id: Optional[int] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        api_called: bool = False,
+        api_result: Optional[str] = None
     ) -> None:
         """执行复机并记录日志"""
         old_suspend_type = card.suspend_type.value if card.suspend_type else "manual"
@@ -219,6 +678,8 @@ class SuspendActionService:
             action=SuspendActionType.resume,
             suspend_type=old_suspend_type,
             reason=reason,
+            api_called=api_called,
+            api_result=api_result,
             operator_id=operator_id
         )
 
@@ -262,7 +723,13 @@ class SuspendActionService:
 
             # 调用供应商API停机
             supplier = supplier_map.get(card.supplier_id)
-            api_success = await SuspendActionService._call_supplier_suspend(card, supplier, data.reason)
+            api_success, callback_no, reconciled_status = await SuspendActionService._call_supplier_suspend(
+                db=db,
+                card=card,
+                supplier=supplier,
+                reason=data.reason,
+                operator_id=operator_id
+            )
 
             # 只有API成功才更新数据库
             if not api_success:
@@ -270,12 +737,22 @@ class SuspendActionService:
                 continue
 
             # 执行停卡
-            await CardSuspendCRUD.suspend_card(
-                db=db,
-                card_id=card_id,
-                suspend_type=SuspendType.manual,
-                reason=data.reason
-            )
+            if reconciled_status == CardStatus.suspended.value:
+                SuspendActionService.normalize_card_suspend_state(
+                    card,
+                    reconciled_status,
+                    suspend_type=SuspendType.manual,
+                    reason=data.reason,
+                )
+                await db.commit()
+                await db.refresh(card)
+            else:
+                await CardSuspendCRUD.suspend_card(
+                    db=db,
+                    card_id=card_id,
+                    suspend_type=SuspendType.manual,
+                    reason=data.reason
+                )
 
             # 记录日志
             await SuspendLogCRUD.create(
@@ -285,6 +762,8 @@ class SuspendActionService:
                 action=SuspendActionType.suspend,
                 suspend_type="manual",
                 reason=data.reason,
+                api_called=True,
+                api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None,
                 operator_id=operator_id
             )
 
@@ -343,19 +822,40 @@ class SuspendActionService:
 
             # 调用供应商API复机
             supplier = supplier_map.get(card.supplier_id)
-            api_success = await SuspendActionService._call_supplier_resume(card, supplier)
+            api_success, callback_no, reconciled_status = await SuspendActionService._call_supplier_resume(
+                db=db,
+                card=card,
+                supplier=supplier,
+                operator_id=operator_id
+            )
 
             # 只有API成功才更新数据库
             if not api_success:
                 fail_cards.append({"card_id": card_id, "iccid": card.iccid, "reason": "供应商API调用失败"})
                 continue
 
-            await SuspendActionService._resume_card_with_logging(
-                db=db,
-                card=card,
-                operator_id=operator_id,
-                reason=data.reason
-            )
+            if reconciled_status in {
+                CardStatus.activated.value,
+                CardStatus.testing.value,
+                CardStatus.silent.value
+            }:
+                await SuspendActionService._resume_card_with_logging(
+                    db=db,
+                    card=card,
+                    operator_id=operator_id,
+                    reason=data.reason or "供应商返回已在使用，已自动纠正本地状态",
+                    api_called=bool(callback_no),
+                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None
+                )
+            else:
+                await SuspendActionService._resume_card_with_logging(
+                    db=db,
+                    card=card,
+                    operator_id=operator_id,
+                    reason=data.reason,
+                    api_called=bool(callback_no),
+                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None
+                )
 
             success_cards.append(card.iccid)
 
@@ -491,7 +991,12 @@ class SuspendActionService:
                     supplier_map = await SuspendActionService._load_supplier_map(db, [card])
                     supplier = supplier_map.get(card.supplier_id)
                     reason = f"单卡流量超限自动停卡({usage_percent}%)"
-                    api_success = await SuspendActionService._call_supplier_suspend(card, supplier, reason)
+                    api_success, _, _ = await SuspendActionService._call_supplier_suspend(
+                        db=db,
+                        card=card,
+                        supplier=supplier,
+                        reason=reason
+                    )
                     if api_success:
                         await CardSuspendCRUD.suspend_card(
                             db=db,
@@ -551,7 +1056,12 @@ class SuspendActionService:
                 continue
 
             supplier = supplier_map.get(card.supplier_id)
-            api_success = await SuspendActionService._call_supplier_resume(card, supplier)
+            api_success, _, _ = await SuspendActionService._call_supplier_resume(
+                db=db,
+                card=card,
+                supplier=supplier,
+                operator_id=operator_id
+            )
             if not api_success:
                 continue
 
@@ -564,6 +1074,91 @@ class SuspendActionService:
             resumed_count += 1
 
         return {"resumed_count": resumed_count}
+
+
+class SupplierCallbackService:
+    """供应商回调处理服务"""
+
+    @staticmethod
+    async def handle_upiot_sor_callback(
+        db: AsyncSession,
+        payload: Dict[str, Any]
+    ) -> None:
+        callback_no = str(payload.get("callback_no") or "").strip()
+        if not callback_no:
+            logger.warning("UPIOT 停复机回调缺少 callback_no: payload=%s", payload)
+            return
+
+        operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, callback_no)
+        if not operation:
+            logger.warning("UPIOT 停复机回调未找到操作记录: callback_no=%s payload=%s", callback_no, payload)
+            return
+
+        callback_code = str(payload.get("code") or "").strip() or None
+        callback_msg = str(payload.get("msg") or "").strip() or None
+        account_status = str(payload.get("account_status") or "").strip() or None
+
+        callback_success = (callback_code in {"200", "0", "SUCCESS", "success"} or callback_code is None) and bool(account_status)
+        mapped_status = UPIOT_STATUS_MAP.get(account_status or "", None)
+
+        card = await db.get(IotCardModel, operation.card_id)
+        if card and mapped_status:
+            SuspendActionService.normalize_card_suspend_state(card, mapped_status)
+
+        await SupplierSuspendOperationCRUD.update_callback_result(
+            db=db,
+            operation=operation,
+            callback_payload=json.dumps(payload, ensure_ascii=False),
+            callback_code=callback_code,
+            callback_msg=callback_msg,
+            account_status=account_status,
+            callback_status="success" if callback_success else "failed"
+        )
+
+        if not callback_success or operation.action != SuspendActionType.suspend:
+            return
+
+        request_meta: Dict[str, Any] = {}
+        if operation.request_result:
+            try:
+                request_meta = json.loads(operation.request_result)
+            except Exception:
+                request_meta = {"raw_request_result": operation.request_result}
+
+        if not request_meta.get("refresh_resume_pending") or request_meta.get("refresh_resume_submitted"):
+            return
+
+        if not card:
+            logger.warning("刷新自动复机未找到卡片: callback_no=%s", callback_no)
+            return
+
+        supplier = None
+        if operation.supplier_id:
+            supplier_result = await db.execute(
+                select(SupplierModel).where(
+                    SupplierModel.id == operation.supplier_id,
+                    SupplierModel.is_deleted == 0
+                )
+            )
+            supplier = supplier_result.scalar_one_or_none()
+
+        resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+            db=db,
+            card=card,
+            supplier=supplier,
+            operator_id=operation.operator_id
+        )
+
+        request_meta["refresh_resume_submitted"] = resume_success
+        request_meta["refresh_resume_callback_no"] = resume_callback_no
+        await SupplierSuspendOperationCRUD.update_request_result(
+            db=db,
+            operation_id=operation.id,
+            request_result=json.dumps(request_meta, ensure_ascii=False)
+        )
+
+        if not resume_success:
+            logger.error("刷新自动复机提交失败: callback_no=%s iccid=%s", callback_no, operation.iccid)
 
 
 class SuspendLogService:

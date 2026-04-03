@@ -67,3 +67,14 @@ class H5CardSuspendRequest(BaseModel):
 
 class H5CardResumeRequest(BaseModel):
     verify_code: Optional[str] = Field(None, max_length=20)
+
+
+class H5CardActionResult(BaseModel):
+    card_id: int
+    iccid: str
+    action: str
+    status: str = "processing"
+    callback_no: Optional[str] = None
+    suspend_callback_no: Optional[str] = None
+    resume_callback_no: Optional[str] = None
+    message: Optional[str] = None

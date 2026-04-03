@@ -8,11 +8,13 @@ from sqlalchemy import select, or_, and_
 import asyncio
 from app.crud.sync_crud import sync_log_crud, sync_task_crud
 from app.db.models.sync import SyncType, SyncStatus
-from app.db.models.iot_card import IotCardModel, CardStatus
+from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
+from app.db.models.suspend import SupplierSuspendOperationModel, SuspendActionType
 from app.db.models.supplier import SupplierModel
 from app.clients.supplier_api import get_supplier_client
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 from app.utils.exceptions import BusinessException
+from app.config import settings
 
 
 class SyncService:
@@ -21,6 +23,58 @@ class SyncService:
     # 重试配置
     MAX_RETRIES = 3
     RETRY_DELAY = 1.0  # 秒
+
+    async def _get_latest_supplier_operation(
+        self,
+        db: AsyncSession,
+        card_id: int
+    ) -> Optional[SupplierSuspendOperationModel]:
+        result = await db.execute(
+            select(SupplierSuspendOperationModel).where(
+                SupplierSuspendOperationModel.card_id == card_id,
+                SupplierSuspendOperationModel.is_deleted == 0
+            ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _resolve_lifecycle_status(
+        self,
+        db: AsyncSession,
+        card: IotCardModel,
+        lifecycle_status: str
+    ) -> str:
+        protected_suspend_types = {
+            SuspendType.manual,
+            SuspendType.expired,
+            SuspendType.card_exceed,
+            SuspendType.pool_exceed,
+        }
+        current_suspend_type = card.suspend_type or SuspendType.none
+
+        # 业务停卡优先，避免同步把套餐管控/人工停卡直接冲掉。
+        if current_suspend_type in protected_suspend_types and lifecycle_status != CardStatus.suspended.value:
+            return CardStatus.suspended.value
+
+        # 只有没有明确业务停卡原因时，才让供应商“已正使用”纠偏覆盖短期状态冲突。
+        if lifecycle_status == CardStatus.suspended.value and current_suspend_type == SuspendType.none:
+            latest_operation = await self._get_latest_supplier_operation(db, card.id)
+            if latest_operation and latest_operation.action == SuspendActionType.resume:
+                conflict_deadline = datetime.now() - timedelta(
+                    seconds=settings.supplier_status_conflict_window_seconds
+                )
+                if latest_operation.updated_at and latest_operation.updated_at >= conflict_deadline:
+                    if latest_operation.callback_status == "success" and latest_operation.account_status in {
+                        CardStatus.activated.value,
+                        CardStatus.testing.value,
+                        CardStatus.silent.value,
+                    }:
+                        return CardStatus.activated.value
+
+                    request_result = latest_operation.request_result or ""
+                    if '"reconciled_status": "activated"' in request_result or '"auto_reconcile_observed_status": "activated"' in request_result:
+                        return CardStatus.activated.value
+
+        return lifecycle_status
 
     async def _record_usage_snapshot(self, db: AsyncSession, card, snapshot_type: str):
         """记录用量快照"""
@@ -429,7 +483,7 @@ class SyncService:
         triggered_by: Optional[int] = None,
         current_user = None
     ) -> dict:
-        """同步单卡信息 (流量+生命周期)"""
+        """同步单卡用量信息"""
         # 获取卡片
         card_query = select(IotCardModel).where(
             IotCardModel.iccid == iccid,
@@ -466,6 +520,16 @@ class SyncService:
             if not supplier:
                 raise BusinessException(code=404, msg="供应商不存在")
 
+            before_snapshot = {
+                "data_used": card.data_used,
+                "data_used_month": card.data_used_month,
+                "data_total": card.data_total,
+                "status": card.status.value if card.status else None,
+                "activated_at": card.activated_at.isoformat() if card.activated_at else None,
+                "expired_at": card.expired_at.isoformat() if card.expired_at else None,
+                "data_sync_at": card.data_sync_at.isoformat() if card.data_sync_at else None,
+            }
+
             client = get_supplier_client(
                 supplier_id=card.supplier_id,
                 api_url=supplier.api_url or "",
@@ -477,53 +541,36 @@ class SyncService:
             usage_data = await self._retry_api_call(client.get_card_usage, iccid)
             card.data_used = usage_data.get("data_used", 0)
             card.data_total = usage_data.get("data_total", card.data_total)
+            card.data_used_month = card.data_used
             card.data_sync_at = datetime.now()
 
-            # 检查并更新卡片状态
+            # 只同步供应商用量，但允许基于本地规则推导激活状态和日期
             from app.services.card_status_service import check_and_update_card_status
             await check_and_update_card_status(db, card)
 
-            # 记录旧状态
-            old_status = card.status
-
-            # 同步生命周期（带重试）
-            lifecycle_data = await self._retry_api_call(client.get_card_lifecycle, iccid)
-            if lifecycle_data.get("test_expire_date"):
-                card.test_expire_date = datetime.strptime(
-                    lifecycle_data["test_expire_date"], "%Y-%m-%d"
-                ).date()
-            if lifecycle_data.get("silent_expire_date"):
-                card.silent_expire_date = datetime.strptime(
-                    lifecycle_data["silent_expire_date"], "%Y-%m-%d"
-                ).date()
-            if lifecycle_data.get("activated_at"):
-                card.activated_at = datetime.strptime(
-                    lifecycle_data["activated_at"], "%Y-%m-%d"
-                ).date()
-            if lifecycle_data.get("expired_at"):
-                card.expired_at = datetime.strptime(
-                    lifecycle_data["expired_at"], "%Y-%m-%d"
-                ).date()
-            if lifecycle_data.get("status"):
-                card.status = CardStatus(lifecycle_data["status"])
-
-            # 如果卡片从非激活状态变为激活状态，且是流量池卡，自动加入流量池
-            from app.db.models.iot_card import CardType
-            if (old_status != CardStatus.activated and 
-                card.status == CardStatus.activated and
-                card.card_type == CardType.pool and
-                card.pool_id is None and
-                card.user_id is not None):
-                await self._auto_join_pool(db, card)
-
             await db.commit()
+
+            after_snapshot = {
+                "data_used": card.data_used,
+                "data_used_month": card.data_used_month,
+                "data_total": card.data_total,
+                "status": card.status.value if card.status else None,
+                "activated_at": card.activated_at.isoformat() if card.activated_at else None,
+                "expired_at": card.expired_at.isoformat() if card.expired_at else None,
+                "data_sync_at": card.data_sync_at.isoformat() if card.data_sync_at else None,
+            }
+
+            changed_fields = [
+                field_name
+                for field_name, old_value in before_snapshot.items()
+                if old_value != after_snapshot[field_name]
+            ]
 
             await sync_log_crud.update_status(
                 db, log.id, SyncStatus.success,
                 total_count=1, success_count=1, fail_count=0,
                 sync_data={
-                    "usage": usage_data,
-                    "lifecycle": lifecycle_data
+                    "usage": usage_data
                 }
             )
 
@@ -533,7 +580,11 @@ class SyncService:
                 "total": 1,
                 "success": 1,
                 "failed": 0,
-                "status": "success"
+                "status": "success",
+                "changed": bool(changed_fields),
+                "changed_fields": changed_fields,
+                "before": before_snapshot,
+                "after": after_snapshot
             }
 
         except Exception as e:

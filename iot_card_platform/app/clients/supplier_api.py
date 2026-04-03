@@ -76,14 +76,14 @@ class SupplierAPIClient(ABC):
         pass
 
     @abstractmethod
-    async def suspend_card(self, iccid: str, reason: Optional[str] = None) -> bool:
+    async def suspend_card(self, iccid: str, reason: Optional[str] = None, callback_no: Optional[str] = None) -> bool:
         """
         停卡
         """
         pass
 
     @abstractmethod
-    async def resume_card(self, iccid: str) -> bool:
+    async def resume_card(self, iccid: str, callback_no: Optional[str] = None) -> bool:
         """
         复机
         """
@@ -206,11 +206,11 @@ class MockSupplierAPIClient(SupplierAPIClient):
             for iccid in iccid_list
         ]
 
-    async def suspend_card(self, iccid: str, reason: Optional[str] = None) -> bool:
+    async def suspend_card(self, iccid: str, reason: Optional[str] = None, callback_no: Optional[str] = None) -> bool:
         """模拟停卡"""
         return True
 
-    async def resume_card(self, iccid: str) -> bool:
+    async def resume_card(self, iccid: str, callback_no: Optional[str] = None) -> bool:
         """模拟复机"""
         return True
 
@@ -255,7 +255,6 @@ def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret
         f"api_key={'yes' if normalized_key else 'no'}, "
         f"api_secret={'yes' if normalized_secret else 'no'})"
     )
-
 
 
 

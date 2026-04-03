@@ -64,15 +64,15 @@ async def sync_lifecycle(
     return ResponseModel(data=result, msg=f"同步完成: 成功 {result['success']} 张，失败 {result['failed']} 张")
 
 
-@router.post("/cards/{iccid}", summary="同步单卡信息", response_model=ResponseModel)
+@router.post("/cards/{iccid}", summary="同步单卡用量", response_model=ResponseModel)
 async def sync_single_card(
     iccid: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
-    同步单卡信息 (流量+生命周期)
-    
+    同步单卡用量
+
     - 超级管理员可同步所有卡片
     - 普通用户只能同步自己的卡片
     """
@@ -82,7 +82,7 @@ async def sync_single_card(
         triggered_by=current_user.id,
         current_user=current_user
     )
-    return ResponseModel(data=result, msg="同步成功")
+    return ResponseModel(data=result, msg="用量同步成功")
 
 
 # ============ 同步日志 ============
@@ -184,7 +184,6 @@ async def delete_sync_task(
     """删除同步任务"""
     await sync_service.delete_sync_task(db, task_id)
     return ResponseModel(msg="任务删除成功")
-
 
 
 

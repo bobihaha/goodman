@@ -106,7 +106,14 @@ class PurchaseBatchCRUD:
 
         return items, total
 
-    async def update_counts(self, db: AsyncSession, batch_id: int, stocked_delta: int = 0, out_delta: int = 0):
+    async def update_counts(
+        self,
+        db: AsyncSession,
+        batch_id: int,
+        stocked_delta: int = 0,
+        out_delta: int = 0,
+        commit: bool = True
+    ):
         """更新批次计数"""
         batch = await self.get_by_id(db, batch_id)
         if batch:
@@ -120,7 +127,8 @@ class PurchaseBatchCRUD:
                 # 全部出库完成
                 if batch.out_count >= batch.stocked_count:
                     batch.status = BatchStatus.completed
-            await db.commit()
+            if commit:
+                await db.commit()
 
 
 class StockInCRUD:
@@ -137,7 +145,8 @@ class StockInCRUD:
         """创建入库记录并导入卡片"""
         from app.db.models.stock import StockInRecordCardModel
         from sqlalchemy import text
-        
+        from app.utils.const import validate_iccid
+
         # 获取批次信息
         batch_query = select(PurchaseBatchModel).where(PurchaseBatchModel.id == batch_id)
         batch_result = await db.execute(batch_query)
@@ -160,33 +169,45 @@ class StockInCRUD:
         success_count = 0
         fail_details = []
         created_card_ids = []
+        valid_cards = []
+        seen_iccids = set()
 
-        # 预验证所有卡片
-        for card_data in cards:
-            iccid = card_data.get("iccid", "").strip()
-            from app.utils.const import validate_iccid
-            if not validate_iccid(iccid):
-                fail_details.append({"iccid": iccid, "reason": "ICCID格式错误(需19-20位字母或数字)"})
-            else:
-                exist_query = select(IotCardModel).where(IotCardModel.iccid == iccid)
-                exist_result = await db.execute(exist_query)
-                if exist_result.scalar_one_or_none():
-                    fail_details.append({"iccid": iccid, "reason": "ICCID已存在"})
-
-        # 如果有验证失败，记录并返回
-        if fail_details:
-            record.success_count = 0
-            record.fail_count = len(fail_details)
-            record.fail_reason = json.dumps(fail_details, ensure_ascii=False)
-            db.add(record)
-            await db.commit()
-            return record, fail_details
-
-        # 所有验证通过，批量创建
+        # 预验证所有卡片，允许部分成功并记录失败明细
         for card_data in cards:
             iccid = card_data.get("iccid", "").strip()
             imsi = card_data.get("imsi", "").strip() if card_data.get("imsi") else None
             msisdn = card_data.get("msisdn", "").strip() if card_data.get("msisdn") else None
+
+            if not iccid:
+                fail_details.append({"iccid": iccid, "reason": "ICCID不能为空"})
+                continue
+
+            if iccid in seen_iccids:
+                fail_details.append({"iccid": iccid, "reason": "导入列表中存在重复ICCID"})
+                continue
+            seen_iccids.add(iccid)
+
+            if not validate_iccid(iccid):
+                fail_details.append({"iccid": iccid, "reason": "ICCID格式错误(需19-20位字母或数字)"})
+                continue
+
+            exist_query = select(IotCardModel.id).where(IotCardModel.iccid == iccid)
+            exist_result = await db.execute(exist_query)
+            if exist_result.scalar_one_or_none():
+                fail_details.append({"iccid": iccid, "reason": "ICCID已存在"})
+                continue
+
+            valid_cards.append({
+                "iccid": iccid,
+                "imsi": imsi,
+                "msisdn": msisdn
+            })
+
+        # 批量创建有效卡片
+        for card_data in valid_cards:
+            iccid = card_data["iccid"]
+            imsi = card_data["imsi"]
+            msisdn = card_data["msisdn"]
 
             # 创建卡片
             card = IotCardModel(
@@ -213,7 +234,7 @@ class StockInCRUD:
             success_count += 1
 
         record.success_count = success_count
-        record.fail_count = len(cards) - success_count
+        record.fail_count = len(fail_details)
         record.fail_reason = json.dumps(fail_details, ensure_ascii=False) if fail_details else None
 
         db.add(record)
@@ -239,7 +260,7 @@ class StockInCRUD:
             "batch_id": batch_id,
             "card_count": len(cards),
             "success_count": success_count,
-            "failed_count": len(cards) - success_count,
+            "failed_count": len(fail_details),
             "remark": remark,
             "operator_id": created_by
         })
@@ -271,7 +292,8 @@ class StockInCRUD:
             db.add(relation)
 
         # 更新批次计数（在同一事务内）
-        await batch_crud.update_counts(db, batch_id, stocked_delta=success_count)
+        if success_count > 0:
+            await batch_crud.update_counts(db, batch_id, stocked_delta=success_count, commit=False)
 
         await db.commit()
         await db.refresh(record)

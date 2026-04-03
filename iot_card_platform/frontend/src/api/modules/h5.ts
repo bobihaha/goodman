@@ -50,6 +50,17 @@ export interface H5CardQueryResponse {
   items: Array<H5CardDetail | H5CardCandidate>
 }
 
+export interface H5CardActionResult {
+  card_id: number
+  iccid: string
+  action: 'suspend' | 'resume' | 'refresh'
+  status: 'processing' | 'success' | 'failed'
+  callback_no?: string
+  suspend_callback_no?: string
+  resume_callback_no?: string
+  message?: string
+}
+
 export const h5Api = {
   getConfig(slug: string): Promise<H5PortalConfig> {
     return get<H5PortalConfig>(`/h5/${slug}/config`)
@@ -63,12 +74,18 @@ export const h5Api = {
     return get<H5CardDetail>(`/h5/${slug}/card/${cardId}`)
   },
 
-  suspendCard(slug: string, cardId: number, reason?: string): Promise<any> {
-    return post(`/h5/${slug}/card/${cardId}/suspend`, { reason })
+  suspendCard(slug: string, cardId: number, reason?: string): Promise<H5CardActionResult> {
+    return post<H5CardActionResult>(`/h5/${slug}/card/${cardId}/suspend`, { reason })
   },
 
-  resumeCard(slug: string, cardId: number): Promise<any> {
-    return post(`/h5/${slug}/card/${cardId}/resume`, {})
+  resumeCard(slug: string, cardId: number): Promise<H5CardActionResult> {
+    return post<H5CardActionResult>(`/h5/${slug}/card/${cardId}/resume`, {})
+  },
+
+  refreshCard(slug: string, cardId: number): Promise<H5CardActionResult> {
+    return post<H5CardActionResult>(`/h5/${slug}/card/${cardId}/refresh`, {}, {
+      timeout: 180000
+    })
   },
 
   updateRemark(slug: string, cardId: number, remark: string, operatorName?: string, operatorPhone?: string): Promise<Card> {

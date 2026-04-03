@@ -1,18 +1,19 @@
 """
 物联网卡服务层
 """
+import asyncio
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, bindparam
 from app.crud.iot_card_crud import iot_card_crud, card_transfer_crud
 from app.crud.package_crud import sale_package_crud
-from app.db.models.iot_card import IotCardModel
+from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.sys_user import UserLevel, SysUserModel
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.crud.system_crud import SysOperationLogCRUD
 from app.services.suspend_service import SuspendActionService
-from app.schemas.suspend import ManualResume
+from app.schemas.suspend import ManualResume, ManualSuspend
 from app.config import settings
 from app.flow_packages import (
     FLOW_PACKAGE_LABELS,
@@ -27,6 +28,20 @@ from app.clients.supplier_api import get_supplier_client
 
 class IotCardService:
     """物联网卡服务"""
+
+    RESTART_ACTIVE_STATUSES = {
+        CardStatus.activated.value,
+        CardStatus.testing.value,
+        CardStatus.silent.value,
+    }
+    RESTART_ALLOWED_STATUSES = RESTART_ACTIVE_STATUSES | {
+        CardStatus.suspended.value,
+    }
+    RESTART_PROTECTED_SUSPEND_TYPES = {
+        SuspendType.expired,
+        SuspendType.card_exceed,
+        SuspendType.pool_exceed,
+    }
 
     async def _get_stock_out_no_map(
         self,
@@ -179,6 +194,46 @@ class IotCardService:
         )
         return [row[0] for row in result.all()]
 
+    async def _get_supplier_lifecycle_status(
+        self,
+        card: IotCardModel,
+        supplier
+    ) -> str:
+        supplier_client = get_supplier_client(
+            supplier_id=card.supplier_id,
+            api_url=supplier.api_url or "",
+            api_key=supplier.api_key or "",
+            api_secret=supplier.api_secret or ""
+        )
+        lifecycle = await supplier_client.get_card_lifecycle(card.iccid)
+        return str(lifecycle.get("status") or "").strip()
+
+    async def _wait_for_supplier_status(
+        self,
+        db: AsyncSession,
+        card: IotCardModel,
+        supplier,
+        expected_statuses: set[str],
+        timeout_seconds: int
+    ) -> Optional[str]:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        latest_status = None
+
+        while True:
+            latest_status = await self._get_supplier_lifecycle_status(card, supplier)
+            if latest_status:
+                SuspendActionService.normalize_card_suspend_state(card, latest_status)
+                await db.commit()
+                await db.refresh(card)
+
+            if latest_status in expected_statuses:
+                return latest_status
+
+            if asyncio.get_running_loop().time() >= deadline:
+                return latest_status
+
+            await asyncio.sleep(settings.refresh_status_poll_interval_seconds)
+
     async def get_cards(
         self,
         db: AsyncSession,
@@ -324,6 +379,95 @@ class IotCardService:
             "supplier_id": card.supplier_id,
             "supplier_name": supplier.name,
             **result
+        }
+
+    async def restart_card(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        current_user_id: int,
+        user_level: int
+    ) -> dict:
+        user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
+        card = await iot_card_crud.get_by_id_in_scope(db, card_id, user_ids)
+        if not card:
+            raise BusinessException(code=404, msg="卡片不存在或无权访问")
+
+        current_card_status = card.status.value if card.status else None
+        if current_card_status not in self.RESTART_ALLOWED_STATUSES:
+            raise BusinessException(code=400, msg=f"当前卡片状态不支持重启: {current_card_status or '-'}")
+
+        if card.suspend_type in self.RESTART_PROTECTED_SUSPEND_TYPES:
+            raise BusinessException(code=400, msg="当前卡片处于业务停卡状态，不支持重启")
+
+        supplier_map = await SuspendActionService._load_supplier_map(db, [card])
+        supplier = supplier_map.get(card.supplier_id)
+        if not supplier:
+            raise BusinessException(code=404, msg="供应商不存在")
+
+        current_supplier_status = await self._get_supplier_lifecycle_status(card, supplier)
+        if current_supplier_status not in self.RESTART_ALLOWED_STATUSES:
+            raise BusinessException(code=400, msg=f"当前供应商状态不支持重启: {current_supplier_status or current_card_status}")
+
+        suspend_callback_no = None
+        if current_supplier_status in self.RESTART_ACTIVE_STATUSES:
+            suspend_success, suspend_callback_no, _ = await SuspendActionService._call_supplier_suspend(
+                db=db,
+                card=card,
+                supplier=supplier,
+                reason="网页端重启操作-停机",
+                operator_id=current_user_id
+            )
+            if not suspend_success:
+                raise BusinessException(code=502, msg="供应商停机请求提交失败")
+
+            suspended_status = await self._wait_for_supplier_status(
+                db=db,
+                card=card,
+                supplier=supplier,
+                expected_statuses={CardStatus.suspended.value},
+                timeout_seconds=settings.refresh_suspend_confirm_timeout_seconds
+            )
+            if suspended_status != CardStatus.suspended.value:
+                raise BusinessException(code=502, msg="重启失败：停机状态未在规定时间内生效")
+        elif current_supplier_status != CardStatus.suspended.value:
+            raise BusinessException(code=400, msg=f"当前卡片状态不支持重启: {current_supplier_status or current_card_status}")
+
+        resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+            db=db,
+            card=card,
+            supplier=supplier,
+            operator_id=current_user_id
+        )
+        if not resume_success:
+            raise BusinessException(code=502, msg="供应商复机请求提交失败")
+
+        resumed_status = await self._wait_for_supplier_status(
+            db=db,
+            card=card,
+            supplier=supplier,
+            expected_statuses=self.RESTART_ACTIVE_STATUSES,
+            timeout_seconds=settings.refresh_resume_confirm_timeout_seconds
+        )
+        if resumed_status not in self.RESTART_ACTIVE_STATUSES:
+            return {
+                "card_id": card.id,
+                "iccid": card.iccid,
+                "action": "restart",
+                "status": "processing",
+                "suspend_callback_no": suspend_callback_no,
+                "resume_callback_no": resume_callback_no,
+                "message": "重启请求已提交，复机处理中，请稍后刷新页面查看状态"
+            }
+
+        return {
+            "card_id": card.id,
+            "iccid": card.iccid,
+            "action": "restart",
+            "status": "success",
+            "suspend_callback_no": suspend_callback_no,
+            "resume_callback_no": resume_callback_no,
+            "message": "重启完成，卡片已恢复激活"
         }
 
     async def search_cards(
@@ -869,10 +1013,11 @@ class IotCardService:
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
                     card.expired_at = calculate_expiry_date(
-                        base_date,
+                        base_date + timedelta(days=1) if card.expired_at else base_date,
                         package.period_type.value,
                         package.period_months,
-                        package.period_days
+                        package.period_days,
+                        card.carrier.value if card.carrier else None
                     )
                 else:
                     # 兼容旧逻辑：无套餐信息时按30天/月计算
@@ -907,49 +1052,36 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量停机"""
-        from sqlalchemy import select
-        from datetime import datetime
-        from app.db.models.iot_card import CardStatus, SuspendType
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
+        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
+
+        result = await SuspendActionService.manual_suspend(
+            db=db,
+            data=ManualSuspend(card_ids=found_card_ids, reason=reason),
+            operator_id=current_user_id,
+            user_id=current_user_id,
+            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
+            is_admin=user_level == UserLevel.SUPER_ADMIN.value
         )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
+
         success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.status = CardStatus.suspended
-                card.suspend_type = SuspendType.manual
-                card.suspend_at = datetime.now()
-                card.suspend_reason = reason or "手动停机"
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": "停机成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
+        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
+
+        for iccid in result.success_cards:
+            card = card_map.get(iccid)
+            success_list.append({
+                "iccid": iccid,
+                "msisdn": card.msisdn if card else None,
+                "message": "停机成功"
+            })
+
+        for item in result.fail_cards:
+            failed_list.append({
+                "iccid": item.get("iccid", "未知"),
+                "error": item.get("reason", "停机失败")
+            })
+
         return {
             "success": len(success_list),
             "failed": len(failed_list),
@@ -1257,10 +1389,11 @@ class IotCardService:
         if package:
             base_date = card.expired_at if card.expired_at else date.today()
             card.expired_at = calculate_expiry_date(
-                base_date,
+                base_date + timedelta(days=1) if card.expired_at else base_date,
                 package.period_type.value,
                 package.period_months * renew_months if package.period_months else None,
-                package.period_days * renew_months if package.period_days else None
+                package.period_days * renew_months if package.period_days else None,
+                card.carrier.value if card.carrier else None
             )
         else:
             if card.expired_at:
@@ -1523,10 +1656,11 @@ class IotCardService:
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
                     card.expired_at = calculate_expiry_date(
-                        base_date,
+                        base_date + timedelta(days=1) if card.expired_at else base_date,
                         package.period_type.value,
                         package.period_months,
-                        package.period_days
+                        package.period_days,
+                        card.carrier.value if card.carrier else None
                     )
                 else:
                     # 兼容旧逻辑：无套餐信息时按30天/月计算
@@ -1856,10 +1990,11 @@ class IotCardService:
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
                     card.expired_at = calculate_expiry_date(
-                        base_date,
+                        base_date + timedelta(days=1) if card.expired_at else base_date,
                         package.period_type.value,
                         package.period_months,
-                        package.period_days
+                        package.period_days,
+                        card.carrier.value if card.carrier else None
                     )
                 else:
                     # 兼容旧逻辑：无套餐信息时按30天/月计算
@@ -1894,49 +2029,36 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量停机"""
-        from sqlalchemy import select
-        from datetime import datetime
-        from app.db.models.iot_card import CardStatus, SuspendType
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
+        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
+
+        result = await SuspendActionService.manual_suspend(
+            db=db,
+            data=ManualSuspend(card_ids=found_card_ids, reason=reason),
+            operator_id=current_user_id,
+            user_id=current_user_id,
+            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
+            is_admin=user_level == UserLevel.SUPER_ADMIN.value
         )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
+
         success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.status = CardStatus.suspended
-                card.suspend_type = SuspendType.manual
-                card.suspend_at = datetime.now()
-                card.suspend_reason = reason or "手动停机"
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": "停机成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
+        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
+
+        for iccid in result.success_cards:
+            card = card_map.get(iccid)
+            success_list.append({
+                "iccid": iccid,
+                "msisdn": card.msisdn if card else None,
+                "message": "停机成功"
+            })
+
+        for item in result.fail_cards:
+            failed_list.append({
+                "iccid": item.get("iccid", "未知"),
+                "error": item.get("reason", "停机失败")
+            })
+
         return {
             "success": len(success_list),
             "failed": len(failed_list),
@@ -2203,10 +2325,11 @@ class IotCardService:
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
                     card.expired_at = calculate_expiry_date(
-                        base_date,
+                        base_date + timedelta(days=1) if card.expired_at else base_date,
                         package.period_type.value,
                         package.period_months,
-                        package.period_days
+                        package.period_days,
+                        card.carrier.value if card.carrier else None
                     )
                 else:
                     # 兼容旧逻辑：无套餐信息时按30天/月计算
@@ -2241,49 +2364,36 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量停机"""
-        from sqlalchemy import select
-        from datetime import datetime
-        from app.db.models.iot_card import CardStatus, SuspendType
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
+        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
+
+        result = await SuspendActionService.manual_suspend(
+            db=db,
+            data=ManualSuspend(card_ids=found_card_ids, reason=reason),
+            operator_id=current_user_id,
+            user_id=current_user_id,
+            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
+            is_admin=user_level == UserLevel.SUPER_ADMIN.value
         )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
+
         success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.status = CardStatus.suspended
-                card.suspend_type = SuspendType.manual
-                card.suspend_at = datetime.now()
-                card.suspend_reason = reason or "手动停机"
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": "停机成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
+        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
+
+        for iccid in result.success_cards:
+            card = card_map.get(iccid)
+            success_list.append({
+                "iccid": iccid,
+                "msisdn": card.msisdn if card else None,
+                "message": "停机成功"
+            })
+
+        for item in result.fail_cards:
+            failed_list.append({
+                "iccid": item.get("iccid", "未知"),
+                "error": item.get("reason", "停机失败")
+            })
+
         return {
             "success": len(success_list),
             "failed": len(failed_list),
@@ -2299,48 +2409,36 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量复机"""
-        from sqlalchemy import select
-        from app.db.models.iot_card import CardStatus, SuspendType
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
+        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        card_map = {card.iccid: card for card in cards}
+        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
+
+        result = await SuspendActionService.manual_resume(
+            db=db,
+            data=ManualResume(card_ids=found_card_ids),
+            operator_id=current_user_id,
+            user_id=current_user_id,
+            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
+            is_admin=user_level == UserLevel.SUPER_ADMIN.value
         )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
+
         success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.status = CardStatus.activated
-                card.suspend_type = SuspendType.none
-                card.suspend_at = None
-                card.suspend_reason = None
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": "复机成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
+        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
+
+        for iccid in result.success_cards:
+            card = card_map.get(iccid)
+            success_list.append({
+                "iccid": iccid,
+                "msisdn": card.msisdn if card else None,
+                "message": "复机成功"
+            })
+
+        for item in result.fail_cards:
+            failed_list.append({
+                "iccid": item.get("iccid", "未知"),
+                "error": item.get("reason", "复机失败")
+            })
+
         return {
             "success": len(success_list),
             "failed": len(failed_list),
