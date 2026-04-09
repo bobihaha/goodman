@@ -2,7 +2,7 @@
 物联网卡模型
 包含: 卡片表、采购批次表、流量池表、划拨记录表
 """
-from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL, UniqueConstraint
+from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel, Base
@@ -63,6 +63,12 @@ SUSPEND_TYPE_NAMES = {
 class IotCardModel(BaseModel):
     """物联网卡模型"""
     __tablename__ = "iot_cards"
+    __table_args__ = (
+        Index("idx_iot_cards_user_deleted_id", "user_id", "is_deleted", "id"),
+        Index("idx_iot_cards_user_status_deleted_id", "user_id", "status", "is_deleted", "id"),
+        Index("idx_iot_cards_user_project_deleted_id", "user_id", "project_id", "is_deleted", "id"),
+        Index("idx_iot_cards_user_pool_deleted_id", "user_id", "pool_id", "is_deleted", "id"),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="卡片ID")
     
@@ -293,6 +299,7 @@ class CardUserRemarkModel(BaseModel):
     __tablename__ = "card_user_remarks"
     __table_args__ = (
         UniqueConstraint("card_id", "user_id", name="uk_card_user_remark_card_user"),
+        Index("idx_card_user_remarks_user_deleted_card", "user_id", "is_deleted", "card_id"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)

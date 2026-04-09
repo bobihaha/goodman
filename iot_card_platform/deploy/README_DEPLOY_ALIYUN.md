@@ -1,6 +1,6 @@
 # 阿里云部署说明
 
-本项目当前推荐采用单机低成本部署：
+本项目当前推荐采用单机 Docker 部署：
 
 - 前端：独立构建静态资源，由 Nginx 提供服务
 - 后端：FastAPI 容器单独运行
@@ -26,7 +26,7 @@
 
 ## 服务器建议
 
-- ECS: 2C4G 起步，系统盘 SSD 40GB+
+- ECS: 8C16G 推荐，系统盘 SSD 80GB+
 - 操作系统：Alibaba Cloud Linux 3 / Ubuntu 22.04 LTS
 - 安全组：
   - `80/tcp`
@@ -37,14 +37,28 @@
 
 ## 资源建议
 
-针对你的 `2核4G / 80GB` ECS，建议这样控制资源：
+针对你现在的 `8核16G / 80GB` ECS，建议这样控制资源：
 
-- MySQL：`innodb_buffer_pool_size=512M`
-- Redis：最大内存 `256MB`
-- 后端：单实例运行
-- 不要同时跑太多构建任务
+- `mysql`
+  - CPU 上限：`4`
+  - 内存上限：`8G`
+  - `innodb_buffer_pool_size=4G`
+- `backend`
+  - CPU 上限：`2`
+  - 内存上限：`3G`
+  - `BACKEND_WORKERS=1`
+- `redis`
+  - CPU 上限：`1`
+  - 内存上限：`1G`
+  - `maxmemory=768MB`
+- `nginx`
+  - CPU 上限：`0.5`
+  - 内存上限：`256MB`
+- `frontend`
+  - CPU 上限：`0.5`
+  - 内存上限：`256MB`
 
-这样更适合前期项目，能减少内存打满和 OOM 风险。
+这样总共给业务容器预留大约 `12.5G` 内存和 `8` 核上限，仍然给系统、Docker、自身缓存和临时构建保留余量，能明显降低 MySQL 抢内存和整机 OOM 的风险。
 
 ## 首次部署
 
@@ -61,10 +75,13 @@ cp .env.production.example .env.production
 - `SECRET_KEY`
 - `ALLOW_ORIGINS`
 
-默认模板已经是单机 ECS 自建 MySQL/Redis：
+默认模板已经是单机 ECS 自建 MySQL/Redis，并带了 8C16G 的默认资源参数：
 
 - `DB_HOST=mysql`
 - `REDIS_URL=redis://redis:6379/0`
+- `BACKEND_WORKERS=1`
+- `MYSQL_INNODB_BUFFER_POOL_SIZE=4G`
+- `REDIS_MAXMEMORY=768mb`
 
 ### 2. 构建并启动
 
@@ -131,7 +148,7 @@ bash deploy/scripts/predeploy_check.sh
 
 ### 2. 后端先保持单实例
 
-项目在应用启动时会自动加载 APScheduler 定时任务。如果同时启动多个应用实例，可能重复执行同步任务。
+项目在应用启动时会自动加载 APScheduler 定时任务。如果同时启动多个应用实例或多个 worker，可能重复执行同步任务。
 
 正式扩容前，建议把调度器拆成独立 worker。
 

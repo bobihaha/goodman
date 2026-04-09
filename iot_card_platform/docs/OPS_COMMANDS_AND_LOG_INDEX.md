@@ -16,6 +16,7 @@
 - [稳定上线操作手册](/Users/renhui/Documents/GitHub/goodman/iot_card_platform/docs/STABLE_RELEASE_RUNBOOK.md)
 - [常见故障定位路径](/Users/renhui/Documents/GitHub/goodman/iot_card_platform/docs/TROUBLESHOOTING_GUIDE.md)
 - [数据库迁移规范](/Users/renhui/Documents/GitHub/goodman/iot_card_platform/docs/DATABASE_MIGRATION_GUIDE.md)
+- [系统巡检脚本说明](/Users/renhui/Documents/GitHub/goodman/iot_card_platform/docs/SYSTEM_CHECK_RUNBOOK.md)
 
 ## 1. 当前生产容器约定
 
