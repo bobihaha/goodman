@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     # Redis 配置
     redis_url: str = "redis://localhost:6379/0"
 
+    # SMTP 邮件配置
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "IoT Card Platform"
+    smtp_use_tls: bool = False
+    smtp_use_ssl: bool = True
+    smtp_timeout: int = 30
+
     # CORS 配置
     allow_origins: List[str] = ["http://localhost:3000", "http://localhost:8080"]
 

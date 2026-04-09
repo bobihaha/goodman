@@ -83,6 +83,16 @@ const configKeyLabels: Record<string, string> = {
   alert_expired_days: '到期预警天数',
   alert_auto_suspend: '告警自动停卡',
   alert_auto_notify: '告警自动通知',
+  notify_email_enabled: '启用邮件通知',
+  notify_email_smtp_host: 'SMTP 服务器',
+  notify_email_smtp_port: 'SMTP 端口',
+  notify_email_smtp_username: 'SMTP 用户名',
+  notify_email_smtp_password: 'SMTP 密码',
+  notify_email_from_email: '发件邮箱',
+  notify_email_from_name: '发件人名称',
+  notify_email_use_tls: 'SMTP TLS',
+  notify_email_use_ssl: 'SMTP SSL',
+  notify_email_timeout: 'SMTP 超时时间（秒）',
 }
 
 const fetchConfigs = async () => {

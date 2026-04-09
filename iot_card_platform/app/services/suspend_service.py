@@ -24,6 +24,7 @@ from app.schemas.suspend import (
 from app.config import settings
 from app.clients.supplier_api import get_supplier_client
 from app.clients.upiot_client import UPIOT_STATUS_MAP
+from app.services.notification_service import NotificationService
 from sqlalchemy import select
 from app.db.database import AsyncSessionLocal
 
@@ -102,6 +103,38 @@ class SuspendPolicyService:
 
 class SuspendActionService:
     """停卡/复机操作服务"""
+
+    @staticmethod
+    async def _create_alert_and_notify(
+        db: AsyncSession,
+        target_type: AlertTargetType,
+        target_id: int,
+        target_name: str,
+        alert_level: AlertLevel,
+        usage_percent: int,
+        threshold: int,
+        policy_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        extra_context: Optional[Dict[str, Any]] = None
+    ) -> AlertLogModel:
+        """创建告警后尝试发送通知邮件"""
+        alert = await AlertLogCRUD.create(
+            db=db,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            alert_level=alert_level,
+            usage_percent=usage_percent,
+            threshold=threshold,
+            policy_id=policy_id,
+            user_id=user_id
+        )
+        await NotificationService.send_alert_email(
+            db=db,
+            alert=alert,
+            extra_context=extra_context
+        )
+        return alert
 
     @staticmethod
     def _check_card_not_expired(card: IotCardModel) -> Tuple[bool, Optional[str]]:
@@ -953,7 +986,7 @@ class SuspendActionService:
                     db, AlertTargetType.card, card.id, AlertLevel.warning
                 )
                 if not exists:
-                    await AlertLogCRUD.create(
+                    await SuspendActionService._create_alert_and_notify(
                         db=db,
                         target_type=AlertTargetType.card,
                         target_id=card.id,
@@ -962,7 +995,10 @@ class SuspendActionService:
                         usage_percent=int(usage_percent),
                         threshold=policy.warning_threshold,
                         policy_id=policy.id,
-                        user_id=card.user_id
+                        user_id=card.user_id,
+                        extra_context={
+                            "reason": "单卡流量达到预警阈值"
+                        }
                     )
                     alerts_created += 1
 
@@ -972,7 +1008,7 @@ class SuspendActionService:
                     db, AlertTargetType.card, card.id, AlertLevel.critical
                 )
                 if not exists:
-                    await AlertLogCRUD.create(
+                    await SuspendActionService._create_alert_and_notify(
                         db=db,
                         target_type=AlertTargetType.card,
                         target_id=card.id,
@@ -981,7 +1017,10 @@ class SuspendActionService:
                         usage_percent=int(usage_percent),
                         threshold=policy.critical_threshold,
                         policy_id=policy.id,
-                        user_id=card.user_id
+                        user_id=card.user_id,
+                        extra_context={
+                            "reason": "单卡流量达到紧急阈值"
+                        }
                     )
                     alerts_created += 1
 
@@ -1021,7 +1060,7 @@ class SuspendActionService:
                     db, AlertTargetType.card, card.id, AlertLevel.exceed
                 )
                 if not exists:
-                    await AlertLogCRUD.create(
+                    await SuspendActionService._create_alert_and_notify(
                         db=db,
                         target_type=AlertTargetType.card,
                         target_id=card.id,
@@ -1030,7 +1069,10 @@ class SuspendActionService:
                         usage_percent=int(usage_percent),
                         threshold=policy.stop_threshold,
                         policy_id=policy.id,
-                        user_id=card.user_id
+                        user_id=card.user_id,
+                        extra_context={
+                            "reason": f"单卡流量超限({usage_percent}%)"
+                        }
                     )
                     alerts_created += 1
 

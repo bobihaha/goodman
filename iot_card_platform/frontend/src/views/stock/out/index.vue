@@ -5,6 +5,9 @@
         <div class="card-header">
           <span class="title">卡片出库</span>
           <div class="header-actions">
+            <el-button type="primary" @click="showBatchQueryDialog = true">
+              批量出库
+            </el-button>
             <el-button type="success" @click="showBatchImportDialog = true">
               <el-icon><Upload /></el-icon>
               Excel批量出库
@@ -277,6 +280,54 @@
 
     <!-- Excel批量出库对话框 -->
     <el-dialog
+      v-model="showBatchQueryDialog"
+      title="批量出库"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        title="批量出库说明"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 20px"
+      >
+        <div>1. 每行输入一个ICCID，或使用逗号分隔</div>
+        <div>2. 系统会从当前库存中查询可出库卡片并加入已选列表</div>
+        <div>3. 单次最多查询10000个ICCID</div>
+      </el-alert>
+
+      <el-input
+        v-model="batchQueryText"
+        type="textarea"
+        :rows="8"
+        placeholder="请输入ICCID，每行一个或使用逗号分隔"
+      />
+
+      <div style="margin-top: 10px; color: #909399; font-size: 12px">
+        已输入 {{ batchQueryCount }} 个ICCID
+      </div>
+
+      <div v-if="batchQueryNotFound.length > 0" style="margin-top: 16px">
+        <div style="font-weight: 600; margin-bottom: 10px">未找到的ICCID：</div>
+        <el-tag
+          v-for="iccid in batchQueryNotFound"
+          :key="iccid"
+          type="danger"
+          style="margin: 0 8px 8px 0"
+        >
+          {{ iccid }}
+        </el-tag>
+      </div>
+
+      <template #footer>
+        <el-button @click="showBatchQueryDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleBatchSelectCards" :loading="batchQuerying">
+          加入待出库列表
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="showBatchImportDialog"
       title="Excel批量出库"
       width="600px"
@@ -386,6 +437,10 @@ const loading = ref(false)
 
 // 选中的卡片
 const selectedCards = ref<any[]>([])
+const showBatchQueryDialog = ref(false)
+const batchQueryText = ref('')
+const batchQuerying = ref(false)
+const batchQueryNotFound = ref<string[]>([])
 
 // 供应商、用户、套餐列表
 const suppliers = ref<any[]>([])
@@ -456,6 +511,15 @@ const selectedUser = computed(() => {
 // 选中的套餐
 const selectedPackage = computed(() => {
   return salePackages.value.find((p: any) => p.id === outForm.sale_package_id)
+})
+
+const batchQueryCount = computed(() => {
+  if (!batchQueryText.value) return 0
+  return batchQueryText.value
+    .split(/[\n,，]/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .length
 })
 
 // 获取库存卡片
@@ -534,6 +598,58 @@ const handleReset = () => {
 // 选择变化
 const handleSelectionChange = (selection: any[]) => {
   selectedCards.value = selection
+}
+
+const handleBatchSelectCards = async () => {
+  if (!batchQueryText.value.trim()) {
+    ElMessage.warning('请输入要出库的ICCID')
+    return
+  }
+
+  const iccids = batchQueryText.value
+    .split(/[\n,，]/)
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  if (iccids.length === 0) {
+    ElMessage.warning('请输入有效的ICCID')
+    return
+  }
+
+  if (iccids.length > 10000) {
+    ElMessage.warning('单次最多查询10000个ICCID')
+    return
+  }
+
+  batchQuerying.value = true
+  try {
+    const res = await stockApi.batchQuery({ iccids })
+    const found = res.found || []
+    batchQueryNotFound.value = res.not_found || []
+
+    if (found.length === 0) {
+      ElMessage.warning('未找到可出库的库存卡片')
+      return
+    }
+
+    const merged = new Map<number, any>()
+    selectedCards.value.forEach(card => merged.set(card.id, card))
+    found.forEach((card: any) => merged.set(card.id, card))
+    selectedCards.value = Array.from(merged.values())
+
+    showBatchQueryDialog.value = false
+    batchQueryText.value = ''
+
+    if (batchQueryNotFound.value.length > 0) {
+      ElMessage.warning(`已加入 ${found.length} 张卡片，未找到 ${batchQueryNotFound.value.length} 个ICCID`)
+    } else {
+      ElMessage.success(`已加入 ${found.length} 张卡片到待出库列表`)
+    }
+  } catch (error: any) {
+    ElMessage.error(error.message || '批量查询失败')
+  } finally {
+    batchQuerying.value = false
+  }
 }
 
 // 套餐变化处理

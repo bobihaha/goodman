@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, or_
 from app.db.models.pool import TrafficPoolModel, PoolCardLogModel, PoolStatus
 from app.db.models.iot_card import IotCardModel, CardStatus
+from app.db.models.suspend import AlertLevel, AlertTargetType
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 
 
@@ -202,10 +203,76 @@ class TrafficPoolCRUD:
         await db.commit()
         await db.refresh(pool)
 
+        await self._check_pool_alert_thresholds(db, pool)
         # 检查是否需要根据用户设置的停卡阈值进行停卡
         await self._check_pool_stop_threshold(db, pool)
 
         return pool
+
+    async def _check_pool_alert_thresholds(self, db: AsyncSession, pool: TrafficPoolModel) -> None:
+        """检查流量池预警阈值，记录告警并发送通知"""
+        if not pool.user_id or not pool.data_total:
+            return
+
+        usage_percent = pool.get_usage_percent()
+        if usage_percent <= 0:
+            return
+
+        from app.crud.suspend_crud import AlertLogCRUD
+        from app.services.notification_service import NotificationService
+
+        alert_rules = [
+            (
+                pool.alert_threshold_1,
+                AlertLevel.warning,
+                "流量池达到一级预警阈值"
+            ),
+            (
+                pool.alert_threshold_2,
+                AlertLevel.critical,
+                "流量池达到二级预警阈值"
+            ),
+            (
+                pool.alert_threshold_3,
+                AlertLevel.exceed,
+                "流量池达到停卡预警阈值"
+            ),
+        ]
+
+        for threshold, alert_level, reason in alert_rules:
+            if not threshold or usage_percent < threshold:
+                continue
+
+            exists = await AlertLogCRUD.check_exists(
+                db,
+                AlertTargetType.pool,
+                pool.id,
+                alert_level
+            )
+            if exists:
+                continue
+
+            alert = await AlertLogCRUD.create(
+                db=db,
+                target_type=AlertTargetType.pool,
+                target_id=pool.id,
+                target_name=pool.name,
+                alert_level=alert_level,
+                usage_percent=int(usage_percent),
+                threshold=threshold,
+                user_id=pool.user_id
+            )
+            await NotificationService.send_alert_email(
+                db=db,
+                alert=alert,
+                extra_context={
+                    "pool_name": pool.name,
+                    "reason": reason,
+                    "card_count": pool.card_count,
+                    "data_used": pool.data_used,
+                    "data_total": pool.data_total,
+                }
+            )
 
     async def _check_pool_stop_threshold(self, db: AsyncSession, pool: TrafficPoolModel) -> None:
         """检查流量池是否超过用户设置的停卡阈值，超过则全池停卡"""
