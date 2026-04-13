@@ -9,7 +9,9 @@ import type {
   UserUpdateRequest,
   UserListParams,
   UserH5Config,
-  UserH5ConfigUpdateRequest
+  UserH5ConfigUpdateRequest,
+  UserOpenApiCredential,
+  UserOpenApiCredentialResetResponse
 } from '@/types/user'
 import type { PaginationResponse } from '@/types/common'
 
@@ -95,5 +97,13 @@ export const userApi = {
 
   updateH5Status(id: number, status: 'enabled' | 'disabled' | 'expired'): Promise<UserH5Config> {
     return request.put<UserH5Config>(`/users/${id}/h5/status`, { status })
+  },
+
+  getOpenApiCredentials(id: number): Promise<UserOpenApiCredential> {
+    return request.get<UserOpenApiCredential>(`/users/${id}/api-credentials`)
+  },
+
+  resetOpenApiCredentials(id: number): Promise<UserOpenApiCredentialResetResponse> {
+    return request.post<UserOpenApiCredentialResetResponse>(`/users/${id}/api-credentials/reset`)
   }
 }

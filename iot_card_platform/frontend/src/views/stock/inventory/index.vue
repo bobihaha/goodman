@@ -73,11 +73,17 @@
           </el-select>
         </el-form-item>
         <el-form-item label="套餐">
-          <el-select v-model="queryParams.package_id" placeholder="请选择套餐" clearable style="width: 200px">
+          <el-select
+            v-model="queryParams.package_id"
+            placeholder="请选择底层套餐"
+            clearable
+            filterable
+            style="width: 280px"
+          >
             <el-option
               v-for="pkg in packages"
               :key="pkg.id"
-              :label="pkg.name"
+              :label="`${pkg.name}${pkg.code ? ` (${pkg.code})` : ''}`"
               :value="pkg.id"
             />
           </el-select>
@@ -94,6 +100,24 @@
             <el-option label="升序" value="asc" />
             <el-option label="降序" value="desc" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="入库时间">
+          <el-button-group>
+            <el-button
+              size="small"
+              :type="queryParams.sort_by === 'stock_in_at' && queryParams.sort_order === 'desc' ? 'primary' : 'default'"
+              @click="handleStockInSort('desc')"
+            >
+              最新优先
+            </el-button>
+            <el-button
+              size="small"
+              :type="queryParams.sort_by === 'stock_in_at' && queryParams.sort_order === 'asc' ? 'primary' : 'default'"
+              @click="handleStockInSort('asc')"
+            >
+              最早优先
+            </el-button>
+          </el-button-group>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleQuery">查询</el-button>
@@ -263,7 +287,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Sell, Refresh, Search, Download, RefreshLeft } from '@element-plus/icons-vue'
 import { stockApi } from '@/api/modules/stock'
 import { supplierApi } from '@/api/modules/supplier'
-import { packageApi } from '@/api/modules/package'
+import { supplierPackageApi } from '@/api/modules/package'
 import { useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 
@@ -347,8 +371,8 @@ const fetchSuppliers = async () => {
 // 获取套餐列表
 const fetchPackages = async () => {
   try {
-    const res = await packageApi.getSalePackages({ page: 1, page_size: 100, status: 'enable' })
-    packages.value = res.items || res.list || []
+    const res = await supplierPackageApi.getEnabled()
+    packages.value = Array.isArray(res) ? res : []
   } catch (error) {
     console.error('获取套餐列表失败', error)
   }
@@ -367,6 +391,14 @@ const handleReset = () => {
   queryParams.package_id = undefined
   queryParams.sort_by = 'stock_in_at'
   queryParams.sort_order = 'desc'
+  queryParams.page = 1
+  fetchInventory()
+}
+
+// 入库时间快捷排序
+const handleStockInSort = (sortOrder: 'asc' | 'desc') => {
+  queryParams.sort_by = 'stock_in_at'
+  queryParams.sort_order = sortOrder
   queryParams.page = 1
   fetchInventory()
 }

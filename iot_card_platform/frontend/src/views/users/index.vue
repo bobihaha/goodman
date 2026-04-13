@@ -41,6 +41,13 @@
       <el-button type="primary" :icon="Plus" @click="handleCreate">
         新增用户
       </el-button>
+      <el-button
+        v-if="canManageOwnApiCredentials"
+        type="success"
+        @click="handleManageOwnApiCredentials"
+      >
+        我的API凭证
+      </el-button>
     </el-card>
 
     <!-- 用户列表 -->
@@ -94,7 +101,7 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="620" fixed="right">
+        <el-table-column label="操作" width="720" fixed="right">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -120,6 +127,14 @@
               @click="handleGrantBalance(row)"
             >
               分配余额
+            </el-button>
+            <el-button
+              v-if="canManageApiCredentials(row)"
+              type="success"
+              link
+              @click="handleManageApiCredentials(row)"
+            >
+              API凭证
             </el-button>
             <el-button
               v-if="canManageH5(row) && !row.h5?.slug"
@@ -231,11 +246,17 @@
       :user="currentUser"
       @success="handleH5Success"
     />
+
+    <UserApiCredentialDialog
+      v-model="apiCredentialDialogVisible"
+      :user="currentUser"
+      @success="handleApiCredentialSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock, SwitchButton, Setting } from '@element-plus/icons-vue'
 import { userApi } from '@/api/modules/user'
@@ -246,6 +267,7 @@ import ResetPasswordDialog from './components/ResetPasswordDialog.vue'
 import UserPermissionDialog from './components/UserPermissionDialog.vue'
 import GrantBalanceDialog from './components/GrantBalanceDialog.vue'
 import UserH5ConfigDialog from './components/UserH5ConfigDialog.vue'
+import UserApiCredentialDialog from './components/UserApiCredentialDialog.vue'
 import { useAuthStore } from '@/stores/modules/auth'
 import { useRouter } from 'vue-router'
 
@@ -275,7 +297,9 @@ const passwordDialogVisible = ref(false)
 const permissionDialogVisible = ref(false)
 const grantBalanceDialogVisible = ref(false)
 const h5DialogVisible = ref(false)
+const apiCredentialDialogVisible = ref(false)
 const currentUser = ref<User | null>(null)
+const canManageOwnApiCredentials = computed(() => authStore.userInfo?.user_level === 2)
 
 /**
  * 获取用户列表
@@ -352,6 +376,15 @@ const canManageH5 = (user: User): boolean => {
     }
   }
   return false
+}
+
+const canManageApiCredentials = (user: User): boolean => {
+  const currentUser = authStore.userInfo
+  if (!currentUser) return false
+  if (currentUser.user_level === 1) {
+    return user.user_level === 2
+  }
+  return currentUser.user_level === 2 && currentUser.id === user.id
 }
 
 const getH5StatusLabel = (status?: string) => {
@@ -492,6 +525,20 @@ const handleGrantBalance = (user: User) => {
   grantBalanceDialogVisible.value = true
 }
 
+const handleManageApiCredentials = (user: User) => {
+  currentUser.value = user
+  apiCredentialDialogVisible.value = true
+}
+
+const handleManageOwnApiCredentials = async () => {
+  if (!authStore.userInfo?.id) {
+    return
+  }
+  const selfUser = await userApi.getDetail(authStore.userInfo.id)
+  currentUser.value = selfUser
+  apiCredentialDialogVisible.value = true
+}
+
 const handleGenerateH5 = async (user: User) => {
   await userApi.generateH5(user.id)
   ElMessage.success('H5地址已生成')
@@ -589,6 +636,10 @@ const handleGrantBalanceSuccess = () => {
 
 const handleH5Success = () => {
   h5DialogVisible.value = false
+  fetchUserList()
+}
+
+const handleApiCredentialSuccess = () => {
   fetchUserList()
 }
 

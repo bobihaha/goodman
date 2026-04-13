@@ -22,6 +22,21 @@ export interface UserH5Config {
   last_reset_at?: string
 }
 
+export interface UserOpenApiCredential {
+  enabled: boolean
+  app_id?: string
+  app_secret_masked?: string
+  has_app_secret: boolean
+  last_reset_at?: string
+}
+
+export interface UserOpenApiCredentialResetResponse {
+  enabled: boolean
+  app_id: string
+  app_secret: string
+  last_reset_at: string
+}
+
 // 用户信息（与后端数据库字段对应）
 export interface User {
   id: number
@@ -49,6 +64,7 @@ export interface User {
   }
   permissions?: string[]     // 用户权限列表
   h5?: UserH5Config
+  open_api?: UserOpenApiCredential
   is_super_login?: boolean   // 是否超级登录模式
   original_user_id?: number  // 原用户ID（超级登录时）
   created_at: string

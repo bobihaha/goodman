@@ -132,6 +132,8 @@ async def get_login_logs(
     """获取登录日志"""
     logs, total = await LoginLogService.get_logs(
         db=db,
+        current_user_id=current_user.id,
+        current_user_level=current_user.user_level,
         user_id=user_id,
         account=account,
         is_success=is_success,

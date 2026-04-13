@@ -12,19 +12,42 @@ from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
 from app.crud.sys_user_crud import sys_user_crud
 from app.schemas.sys_user import (
     UserCreate, UserUpdate, UserInfo, UserQuery, UserPasswordUpdate,
-    UserPasswordReset, UserH5Config, UserH5ConfigUpdate
+    UserPasswordReset, UserH5Config, UserH5ConfigUpdate,
+    UserOpenApiCredential, UserOpenApiCredentialResetResponse
 )
 from app.schemas.auth import CurrentUser
 from app.services.auth_service import AuthService
 from app.services.account_balance_service import account_balance_service
 from app.utils.exceptions import BusinessException, PermissionDeniedException, UserNotFoundException
-from app.utils.const import validate_account, validate_password, validate_phone, validate_email
+from app.utils.const import validate_account, validate_password, validate_phone, validate_email, encrypt_secret
 
 # 常量定义
 UNLIMITED_QUOTA = -1
 
 
 class SysUserService:
+    @staticmethod
+    def _mask_open_api_secret(secret: Optional[str]) -> Optional[str]:
+        if not secret:
+            return None
+        if len(secret) <= 8:
+            return "*" * len(secret)
+        return f"{secret[:4]}{'*' * (len(secret) - 8)}{secret[-4:]}"
+
+    @classmethod
+    def _build_open_api_config(cls, user: SysUserModel) -> UserOpenApiCredential:
+        secret_value = None
+        if user.open_api_app_secret:
+            from app.utils.const import decrypt_secret
+            secret_value = decrypt_secret(user.open_api_app_secret)
+        return UserOpenApiCredential(
+            enabled=bool(user.open_api_enabled),
+            app_id=user.open_api_app_id,
+            app_secret_masked=cls._mask_open_api_secret(secret_value),
+            has_app_secret=bool(secret_value),
+            last_reset_at=user.open_api_last_reset_at
+        )
+
     @staticmethod
     def _build_h5_config(user: SysUserModel) -> UserH5Config:
         return UserH5Config(
@@ -62,7 +85,8 @@ class SysUserService:
             "status": user.status.value if hasattr(user.status, "value") else user.status,
             "last_login_at": user.last_login_at,
             "created_at": user.created_at,
-            "h5": cls._build_h5_config(user)
+            "h5": cls._build_h5_config(user),
+            "open_api": cls._build_open_api_config(user)
         }
         return UserInfo.model_validate(payload)
 
@@ -73,6 +97,49 @@ class SysUserService:
             if slug and not await sys_user_crud.check_h5_slug_exists(db, slug, exclude_id=exclude_id):
                 return slug
         raise BusinessException(code=500, msg="生成H5地址失败，请重试")
+
+    @staticmethod
+    async def _generate_unique_open_api_app_id(db: AsyncSession, exclude_id: Optional[int] = None) -> str:
+        for _ in range(10):
+            app_id = f"APP{secrets.token_hex(8).upper()}"
+            if not await sys_user_crud.check_open_api_app_id_exists(db, app_id, exclude_id=exclude_id):
+                return app_id
+        raise BusinessException(code=500, msg="生成APPID失败，请重试")
+
+    @staticmethod
+    def _generate_open_api_secret() -> str:
+        return secrets.token_urlsafe(24).replace("-", "").replace("_", "")
+
+    @classmethod
+    async def _ensure_open_api_credentials(
+        cls,
+        db: AsyncSession,
+        user: SysUserModel
+    ) -> tuple[SysUserModel, Optional[str]]:
+        if user.user_level != UserLevel.USER.value:
+            return user, None
+        if user.open_api_app_id and user.open_api_app_secret:
+            return user, None
+
+        secret = cls._generate_open_api_secret()
+        update_data = {
+            "open_api_app_id": user.open_api_app_id or await cls._generate_unique_open_api_app_id(db, exclude_id=user.id),
+            "open_api_app_secret": encrypt_secret(secret),
+            "open_api_enabled": 1,
+            "open_api_last_reset_at": datetime.now()
+        }
+        updated_user = await sys_user_crud.update(db, id=user.id, obj_in=update_data)
+        return updated_user, secret
+
+    @staticmethod
+    def _check_open_api_manage_permission(operator: CurrentUser, target: SysUserModel):
+        if target.user_level != UserLevel.USER.value:
+            raise BusinessException(code=400, msg="仅一级用户支持开放API凭证")
+        if operator.id == target.id:
+            return
+        if operator.is_super_admin():
+            return
+        raise PermissionDeniedException()
 
     @classmethod
     async def create_user(cls, db: AsyncSession, operator: CurrentUser, user_data: UserCreate) -> UserInfo:
@@ -117,6 +184,7 @@ class SysUserService:
         if new_level == UserLevel.USER.value:
             await cls._assign_default_permissions_for_user(db, user.id)
             await cls._assign_default_menus_for_user(db, user.id)
+            user, _ = await cls._ensure_open_api_credentials(db, user)
         # 如果是三级用户，自动继承父用户菜单并添加项目管理菜单
         elif new_level == UserLevel.SUB_USER.value:
             await cls._assign_default_menus_for_sub_user(db, user.id, parent_id)
@@ -320,6 +388,52 @@ class SysUserService:
             obj_in={"h5_status": status, "h5_enabled": 1 if status == "enabled" else 0}
         )
         return cls._build_h5_config(user)
+
+    @classmethod
+    async def get_open_api_credentials(
+        cls,
+        db: AsyncSession,
+        operator: CurrentUser,
+        user_id: int
+    ) -> UserOpenApiCredential:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_open_api_manage_permission(operator, target_user)
+        target_user, _ = await cls._ensure_open_api_credentials(db, target_user)
+        return cls._build_open_api_config(target_user)
+
+    @classmethod
+    async def reset_open_api_credentials(
+        cls,
+        db: AsyncSession,
+        operator: CurrentUser,
+        user_id: int
+    ) -> UserOpenApiCredentialResetResponse:
+        target_user = await sys_user_crud.get_by_id(db, user_id)
+        if not target_user:
+            raise UserNotFoundException()
+        cls._check_open_api_manage_permission(operator, target_user)
+
+        app_id = target_user.open_api_app_id or await cls._generate_unique_open_api_app_id(db, exclude_id=target_user.id)
+        secret = cls._generate_open_api_secret()
+        reset_at = datetime.now()
+        await sys_user_crud.update(
+            db,
+            id=user_id,
+            obj_in={
+                "open_api_app_id": app_id,
+                "open_api_app_secret": encrypt_secret(secret),
+                "open_api_enabled": 1,
+                "open_api_last_reset_at": reset_at
+            }
+        )
+        return UserOpenApiCredentialResetResponse(
+            enabled=True,
+            app_id=app_id,
+            app_secret=secret,
+            last_reset_at=reset_at
+        )
 
     @classmethod
     async def grant_balance(

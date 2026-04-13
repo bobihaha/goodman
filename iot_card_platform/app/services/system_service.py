@@ -255,6 +255,8 @@ class LoginLogService:
     @staticmethod
     async def get_logs(
         db: AsyncSession,
+        current_user_id: int,
+        current_user_level: int,
         user_id: Optional[int] = None,
         account: Optional[str] = None,
         is_success: Optional[bool] = None,
@@ -264,9 +266,15 @@ class LoginLogService:
         page_size: int = 20
     ) -> Tuple[List[dict], int]:
         """获取登录日志列表"""
+        scoped_user_id = user_id
+
+        # 登录日志属于账户安全审计信息，非超管只能查看自己的登录记录。
+        if current_user_level != UserLevel.SUPER_ADMIN.value:
+            scoped_user_id = current_user_id
+
         logs, total = await SysLoginLogCRUD.get_list(
             db=db,
-            user_id=user_id,
+            user_id=scoped_user_id,
             account=account,
             is_success=is_success,
             start_time=start_time,

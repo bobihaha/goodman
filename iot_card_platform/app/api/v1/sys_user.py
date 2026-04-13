@@ -137,6 +137,26 @@ async def update_user_h5_status(
     return ResponseModel(data=config.model_dump(), msg="H5状态更新成功")
 
 
+@router.get("/{user_id}/api-credentials", summary="获取开放API凭证", response_model=ResponseModel)
+async def get_user_open_api_credentials(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.get_open_api_credentials(db, current_user, user_id)
+    return ResponseModel(data=config.model_dump())
+
+
+@router.post("/{user_id}/api-credentials/reset", summary="重置开放API凭证", response_model=ResponseModel)
+async def reset_user_open_api_credentials(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    config = await sys_user_service.reset_open_api_credentials(db, current_user, user_id)
+    return ResponseModel(data=config.model_dump(), msg="开放API凭证已重置")
+
+
 @router.put("/password/change", summary="修改密码", response_model=ResponseModel)
 async def change_password(password_data: UserPasswordUpdate = Body(...), db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
     await sys_user_service.change_password(db, current_user, password_data)

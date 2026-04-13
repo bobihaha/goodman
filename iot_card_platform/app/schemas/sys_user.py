@@ -83,6 +83,21 @@ class UserH5StatusUpdate(BaseModel):
     status: str = Field(..., pattern=r"^(enabled|disabled|expired)$")
 
 
+class UserOpenApiCredential(BaseModel):
+    enabled: bool = False
+    app_id: Optional[str] = None
+    app_secret_masked: Optional[str] = None
+    has_app_secret: bool = False
+    last_reset_at: Optional[datetime] = None
+
+
+class UserOpenApiCredentialResetResponse(BaseModel):
+    enabled: bool = True
+    app_id: str
+    app_secret: str
+    last_reset_at: datetime
+
+
 class UserInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
@@ -98,6 +113,7 @@ class UserInfo(BaseModel):
     quota: Optional[Dict[str, Any]] = None
     remark: Optional[str] = None
     h5: Optional[UserH5Config] = None
+    open_api: Optional[UserOpenApiCredential] = None
     status: str
     last_login_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
