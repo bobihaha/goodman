@@ -133,33 +133,13 @@
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item
-            v-if="formData.period_type === 'monthly'"
-            label="套餐周期"
-            prop="period_months"
-          >
-            <el-input-number
-              v-model="formData.period_months"
-              :min="1"
-              :max="120"
-              :precision="0"
-              style="width: 100%"
-            />
-            <span style="font-size: 12px; color: #909399">个月</span>
-          </el-form-item>
-          <el-form-item
-            v-else
-            label="套餐周期"
-            prop="period_days"
-          >
-            <el-input-number
-              v-model="formData.period_days"
-              :min="1"
-              :max="3650"
-              :precision="0"
-              style="width: 100%"
-            />
-            <span style="font-size: 12px; color: #909399">天</span>
+          <el-form-item label="周期规则">
+            <div class="readonly-period">
+              <span>{{ formData.period_type === 'yearly' ? '按年包基础周期处理' : '按月包基础周期处理' }}</span>
+              <div class="form-tip">
+                销售套餐不再单独设置套餐周期，具体开通时长以出库时选择的套餐周期为准
+              </div>
+            </div>
           </el-form-item>
         </el-col>
       </el-row>
@@ -298,6 +278,16 @@ const submitting = ref(false)
 const customerList = ref<any[]>([])
 const customerLoading = ref(false)
 
+const syncSalePackagePeriod = () => {
+  if (formData.period_type === 'yearly') {
+    formData.period_days = 360
+    formData.period_months = undefined
+    return
+  }
+  formData.period_months = 1
+  formData.period_days = undefined
+}
+
 // 搜索客户
 const searchCustomers = async (keyword: string) => {
   customerLoading.value = true
@@ -353,6 +343,7 @@ const resetForm = () => {
     status: 'enable',
     remark: ''
   })
+  syncSalePackagePeriod()
   selectedSupplierPackage.value = null
   customerList.value = []
   formRef.value?.clearValidate()
@@ -407,9 +398,8 @@ const handleSupplierPackageChange = (id: number | undefined) => {
       formData.carrier = found.carrier
       formData.flow_size = found.flow_size
       formData.period_type = found.period_type
-      formData.period_months = found.period_months
-      formData.period_days = found.period_days
       formData.price_cost = found.price_cost
+      syncSalePackagePeriod()
 
       // 计算流量单位
       if (found.flow_size >= 1024 && found.flow_size % 1024 === 0) {
@@ -430,13 +420,8 @@ const handleSupplierPackageChange = (id: number | undefined) => {
 
 // 监听周期类型变化
 watch(() => formData.period_type, (newType) => {
-  if (newType === 'monthly') {
-    formData.period_months = formData.period_months || 1
-    formData.period_days = undefined
-  } else {
-    formData.period_days = formData.period_days || 360
-    formData.period_months = undefined
-  }
+  if (!newType) return
+  syncSalePackagePeriod()
 })
 
 // 监听 supplierPackageList 变化
@@ -495,6 +480,8 @@ watch(
         selectedSupplierPackage.value = found || null
       }
 
+      syncSalePackagePeriod()
+
       // 加载专属客户信息
       if (data.user_id) {
         await loadCustomerInfo(data.user_id)
@@ -526,30 +513,6 @@ const rules: FormRules = {
   ],
   period_type: [
     { required: true, message: '请选择周期类型', trigger: 'change' }
-  ],
-  period_months: [
-    {
-      validator: (_rule, value, callback) => {
-        if (formData.period_type === 'monthly' && !value) {
-          callback(new Error('请输入套餐周期（月）'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
-  ],
-  period_days: [
-    {
-      validator: (_rule, value, callback) => {
-        if (formData.period_type === 'yearly' && !value) {
-          callback(new Error('请输入套餐周期（天）'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
   ],
   price_cost: [
     { required: true, message: '请输入成本价', trigger: 'blur' },
@@ -588,6 +551,7 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     
     submitting.value = true
+    syncSalePackagePeriod()
     
     if (isEdit.value && props.packageData) {
       // 编辑
@@ -622,6 +586,15 @@ const handleSubmit = async () => {
 
 .package-info {
   margin-top: 10px;
+}
+
+.readonly-period {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+  line-height: 1.6;
 }
 
 .profit-info {

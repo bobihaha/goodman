@@ -13,6 +13,7 @@ export type CardType = 'single' | 'pool'
 
 // 卡片状态
 export type CardStatus = 'stock' | 'testing' | 'silent' | 'activated' | 'expired' | 'suspended' | 'cancelled'
+export type SortOrder = 'asc' | 'desc'
 
 // 停卡类型
 export type SuspendType = 'none' | 'manual' | 'expired' | 'pool_exceed' | 'card_exceed'
@@ -65,6 +66,7 @@ export interface Card {
   // 前端计算字段
   usage_percent?: number
   pool_name?: string
+  related_user_name?: string
 }
 
 // 卡片列表查询参数
@@ -91,6 +93,8 @@ export interface CardListParams {
   activated_end?: string
   expired_start?: string
   expired_end?: string
+  sort_by?: string
+  sort_order?: SortOrder
 }
 
 // 卡片统计

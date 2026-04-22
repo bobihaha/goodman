@@ -1,6 +1,7 @@
 """
 系统设置服务层
 """
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime
@@ -288,6 +289,9 @@ class LoginLogService:
 class OperationLogService:
     """操作日志服务"""
 
+    CARD_RENEW_ACTIONS = ["card_renew_purchase", "renew"]
+    CARD_TOPUP_ACTIONS = ["card_topup_purchase", "add_flow"]
+
     @staticmethod
     async def log_operation(
         db: AsyncSession,
@@ -363,3 +367,88 @@ class OperationLogService:
             page_size=page_size
         )
         return [log.to_dict() for log in logs], total
+
+    @staticmethod
+    def _parse_renew_period(detail: Optional[str]) -> Optional[str]:
+        if not detail:
+            return None
+        match = re.search(r"续费\s*(\d+)\s*个?月", detail)
+        if match:
+            return f"{match.group(1)}个月"
+        return None
+
+    @staticmethod
+    def _parse_topup_detail(detail: Optional[str]) -> Optional[str]:
+        if not detail:
+            return None
+
+        match = re.search(r"加油包\s*([^，。,；;]+)", detail)
+        if match:
+            return match.group(1).strip()
+
+        match = re.search(r"补量\s*([0-9]+(?:\.[0-9]+)?\s*(?:MB|GB|M|G))", detail, re.IGNORECASE)
+        if match:
+            value = re.sub(r"\s+", "", match.group(1).upper())
+            return value
+
+        return None
+
+    @staticmethod
+    def _build_card_record(log: dict, record_type: str) -> dict:
+        return {
+            "id": log["id"],
+            "record_type": record_type,
+            "action": log["action"],
+            "operation_time": log["created_at"],
+            "card_no": log.get("target_name"),
+            "operator_name": log.get("user_name"),
+            "renew_period": OperationLogService._parse_renew_period(log.get("detail")),
+            "topup_detail": OperationLogService._parse_topup_detail(log.get("detail")),
+            "detail": log.get("detail"),
+            "is_success": log.get("is_success", False),
+        }
+
+    @staticmethod
+    async def get_card_records(
+        db: AsyncSession,
+        current_user_id: int,
+        current_user_level: int,
+        record_type: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[dict], int]:
+        scoped_user_ids: Optional[List[int]] = None
+        if current_user_level != UserLevel.SUPER_ADMIN.value:
+            if current_user_level == UserLevel.SUB_USER.value:
+                scoped_user_ids = [current_user_id]
+            else:
+                sys_user_crud = SysUserCRUDEnhanced()
+                child_ids = await sys_user_crud.get_children_ids(db, current_user_id)
+                scoped_user_ids = [current_user_id, *child_ids]
+
+        if record_type == "renew":
+            actions = OperationLogService.CARD_RENEW_ACTIONS
+        elif record_type == "topup":
+            actions = OperationLogService.CARD_TOPUP_ACTIONS
+        else:
+            raise ValueError(f"不支持的记录类型: {record_type}")
+
+        logs, total = await SysOperationLogCRUD.get_list(
+            db=db,
+            user_ids=scoped_user_ids,
+            modules=["orders", "cards"],
+            actions=actions,
+            target_type="card",
+            is_success=True,
+            start_time=start_time,
+            end_time=end_time,
+            page=page,
+            page_size=page_size
+        )
+
+        return [
+            OperationLogService._build_card_record(log.to_dict(), record_type)
+            for log in logs
+        ], total

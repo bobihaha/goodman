@@ -5,13 +5,13 @@ from typing import Optional, List, Tuple
 from datetime import datetime
 import json
 import uuid
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.stock import (
     PurchaseBatchModel, StockInRecordModel, StockOutRecordModel,
     BatchStatus, StockInStatus, StockOutStatus
 )
-from app.db.models.iot_card import IotCardModel, CardStatus
+from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.package import SupplierPackageModel
 
 
@@ -28,6 +28,31 @@ def generate_stock_in_no() -> str:
 def generate_stock_out_no() -> str:
     """生成出库单号: OUT + 日期 + 8位随机"""
     return f"OUT{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:8].upper()}"
+
+
+def _format_package_period(period_type: Optional[str], period_months: Optional[int] = None, period_days: Optional[int] = None) -> Optional[str]:
+    """格式化套餐定义周期展示。"""
+    if period_type == "monthly":
+        if period_months:
+            return f"{int(period_months)}个月"
+        return "月包"
+    if period_type == "yearly":
+        if period_days and int(period_days) % 360 == 0:
+            years = int(period_days) // 360
+            return f"{years}年"
+        if period_days:
+            return f"{int(period_days)}天"
+        return "年包"
+    return None
+
+
+def _format_period_count(period_type: Optional[str], period_count: Optional[int]) -> Optional[str]:
+    """格式化出库选择的成交周期展示。"""
+    if not period_count:
+        return None
+    if period_type == "yearly":
+        return f"{int(period_count)}年"
+    return f"{int(period_count)}个月"
 
 
 class PurchaseBatchCRUD:
@@ -391,6 +416,12 @@ class StockOutCRUD:
                 card.user_id = to_user_id
                 card.sale_package_id = sale_package_id
                 card.period_count = period_count
+                # 重新出库时重置上一轮生命周期，避免沿用历史激活/到期状态
+                card.activated_at = None
+                card.expired_at = None
+                card.suspend_type = SuspendType.none
+                card.suspend_at = None
+                card.suspend_reason = None
                 # 出库后规格以销售套餐为准，而不是采购入库规格
                 card.flow_size = sale_pkg.flow_size
                 card.period_type = sale_pkg.period_type
@@ -804,6 +835,9 @@ class StockInRecordCRUD:
                 sir.remark, sir.operator_id, sir.created_at,
                 s.name as supplier_name,
                 sp.name as package_name,
+                sp.period_type,
+                sp.period_months,
+                sp.period_days,
                 u.name as operator_name
             FROM stock_in_records sir
             LEFT JOIN suppliers s ON sir.supplier_id = s.id
@@ -825,6 +859,7 @@ class StockInRecordCRUD:
                 "supplier_name": row.supplier_name,
                 "package_id": row.package_id,
                 "package_name": row.package_name,
+                "package_period": _format_package_period(row.period_type, row.period_months, row.period_days),
                 "test_expire_date": row.test_expire_date.strftime("%Y-%m-%d") if row.test_expire_date else None,
                 "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
                 "card_count": row.card_count,
@@ -851,6 +886,9 @@ class StockInRecordCRUD:
                 sir.remark, sir.operator_id, sir.created_at,
                 s.name as supplier_name,
                 sp.name as package_name,
+                sp.period_type,
+                sp.period_months,
+                sp.period_days,
                 u.name as operator_name
             FROM stock_in_records sir
             LEFT JOIN suppliers s ON sir.supplier_id = s.id
@@ -893,6 +931,7 @@ class StockInRecordCRUD:
             "supplier_name": row.supplier_name,
             "package_id": row.package_id,
             "package_name": row.package_name,
+            "package_period": _format_package_period(row.period_type, row.period_months, row.period_days),
             "test_expire_date": row.test_expire_date.strftime("%Y-%m-%d") if row.test_expire_date else None,
             "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
             "card_count": row.card_count,
@@ -979,10 +1018,19 @@ class StockOutRecordCRUD:
                 sor.remark, sor.operator_id, sor.created_at,
                 u.name as user_name,
                 sp.name as sale_package_name,
+                sp.period_type,
+                period_stats.period_count,
                 op.name as operator_name
             FROM stock_out_records sor
             LEFT JOIN sys_users u ON sor.user_id = u.id
             LEFT JOIN sale_packages sp ON sor.sale_package_id = sp.id
+            LEFT JOIN (
+                SELECT rc.record_id, MIN(c.period_count) AS period_count
+                FROM stock_out_record_cards rc
+                LEFT JOIN iot_cards c ON rc.card_id = c.id
+                WHERE rc.is_deleted = 0
+                GROUP BY rc.record_id
+            ) period_stats ON period_stats.record_id = sor.id
             LEFT JOIN sys_users op ON sor.operator_id = op.id
             WHERE {where_clause}
             ORDER BY sor.id DESC
@@ -1002,6 +1050,8 @@ class StockOutRecordCRUD:
                 "user_name": row.user_name,
                 "sale_package_id": row.sale_package_id,
                 "sale_package_name": row.sale_package_name,
+                "package_period": _format_package_period(row.period_type),
+                "actual_period": _format_period_count(row.period_type, row.period_count),
                 "card_count": row.card_count,
                 "success_count": row.success_count,
                 "failed_count": row.failed_count,
@@ -1028,10 +1078,19 @@ class StockOutRecordCRUD:
                 sor.remark, sor.operator_id, sor.created_at,
                 u.name as user_name,
                 sp.name as sale_package_name,
+                sp.period_type,
+                period_stats.period_count,
                 op.name as operator_name
             FROM stock_out_records sor
             LEFT JOIN sys_users u ON sor.user_id = u.id
             LEFT JOIN sale_packages sp ON sor.sale_package_id = sp.id
+            LEFT JOIN (
+                SELECT rc.record_id, MIN(c.period_count) AS period_count
+                FROM stock_out_record_cards rc
+                LEFT JOIN iot_cards c ON rc.card_id = c.id
+                WHERE rc.is_deleted = 0
+                GROUP BY rc.record_id
+            ) period_stats ON period_stats.record_id = sor.id
             LEFT JOIN sys_users op ON sor.operator_id = op.id
             WHERE sor.id = :record_id AND sor.is_deleted = 0
         """
@@ -1072,6 +1131,8 @@ class StockOutRecordCRUD:
             "user_name": row.user_name,
             "sale_package_id": row.sale_package_id,
             "sale_package_name": row.sale_package_name,
+            "package_period": _format_package_period(row.period_type),
+            "actual_period": _format_period_count(row.period_type, row.period_count),
             "card_count": row.card_count,
             "success_count": row.success_count,
             "failed_count": row.failed_count,
@@ -1110,6 +1171,52 @@ class StockOutRecordCRUD:
 class StockRecycleCRUD:
     """卡片回收 CRUD"""
 
+    async def _get_recycle_relation_columns(self, db: AsyncSession) -> set[str]:
+        """读取回收关联表当前实际列，兼容未跑完整迁移的库。"""
+        result = await db.execute(text("""
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'stock_recycle_record_cards'
+        """))
+        return {row[0] for row in result.fetchall()}
+
+    async def _insert_recycle_relations(
+        self,
+        db: AsyncSession,
+        record_id: int,
+        recycled_cards: List[dict]
+    ) -> None:
+        """按数据库实际列插入回收关联记录，避免旧表结构导致 500。"""
+        if not recycled_cards:
+            return
+
+        available_columns = await self._get_recycle_relation_columns(db)
+        insert_columns = ["record_id", "card_id", "iccid"]
+
+        optional_columns = [
+            "original_user_id",
+            "original_status",
+            "original_sale_package_id"
+        ]
+        insert_columns.extend(
+            column for column in optional_columns if column in available_columns
+        )
+
+        column_sql = ", ".join(insert_columns)
+        value_sql = ", ".join(f":{column}" for column in insert_columns)
+        insert_sql = text(
+            f"INSERT INTO stock_recycle_record_cards ({column_sql}) VALUES ({value_sql})"
+        )
+
+        rows = []
+        for card_info in recycled_cards:
+            row = {column: card_info.get(column) for column in insert_columns}
+            row["record_id"] = record_id
+            rows.append(row)
+
+        await db.execute(insert_sql, rows)
+
     async def recycle_cards(
         self,
         db: AsyncSession,
@@ -1119,75 +1226,75 @@ class StockRecycleCRUD:
         remark: Optional[str] = None
     ) -> dict:
         """回收卡片"""
-        from app.db.models.stock import StockRecycleRecordModel, StockRecycleRecordCardModel
-        
-        success_count = 0
-        failed_count = 0
-        recycled_cards = []
+        from app.db.models.stock import StockRecycleRecordModel
 
-        for card_id in card_ids:
-            # 获取卡片
-            card_query = select(IotCardModel).where(
-                IotCardModel.id == card_id,
-                IotCardModel.user_id.isnot(None),  # 只能回收已出库的卡
-                IotCardModel.is_deleted == 0
+        try:
+            success_count = 0
+            failed_count = 0
+            recycled_cards = []
+
+            for card_id in card_ids:
+                card_query = select(IotCardModel).where(
+                    IotCardModel.id == card_id,
+                    IotCardModel.user_id.isnot(None),  # 只能回收已出库的卡
+                    IotCardModel.is_deleted == 0
+                )
+                card_result = await db.execute(card_query)
+                card = card_result.scalar_one_or_none()
+
+                if card:
+                    original_user_id = card.user_id
+                    original_status = card.status.value if hasattr(card.status, 'value') else card.status
+                    original_sale_package_id = card.sale_package_id
+
+                    card.user_id = None
+                    card.sale_package_id = None
+                    card.status = CardStatus.stock
+                    card.stock_out_at = None
+                    card.stock_out_date = None
+                    card.activated_at = None
+                    card.expired_at = None
+                    card.suspend_type = SuspendType.none
+                    card.suspend_at = None
+                    card.suspend_reason = None
+                    success_count += 1
+                    recycled_cards.append({
+                        "card_id": card.id,
+                        "iccid": card.iccid,
+                        "original_user_id": original_user_id,
+                        "original_status": original_status,
+                        "original_sale_package_id": original_sale_package_id
+                    })
+                else:
+                    failed_count += 1
+
+            record = StockRecycleRecordModel(
+                card_count=len(card_ids),
+                success_count=success_count,
+                failed_count=failed_count,
+                recycle_reason=recycle_reason,
+                remark=remark,
+                operator_id=operator_id
             )
-            card_result = await db.execute(card_query)
-            card = card_result.scalar_one_or_none()
+            db.add(record)
+            await db.flush()
 
-            if card:
-                # 保存原始状态
-                original_user_id = card.user_id
-                original_status = card.status.value if hasattr(card.status, 'value') else card.status
-                original_sale_package_id = card.sale_package_id
-
-                # 回收：恢复为库存状态
-                card.user_id = None
-                card.sale_package_id = None
-                card.status = CardStatus.stock
-                card.stock_out_at = None
-                success_count += 1
-                recycled_cards.append({
-                    "card_id": card.id,
-                    "iccid": card.iccid,
-                    "original_user_id": original_user_id,
-                    "original_status": original_status,
-                    "original_sale_package_id": original_sale_package_id
-                })
-            else:
-                failed_count += 1
-
-        # 创建回收记录
-        record = StockRecycleRecordModel(
-            card_count=len(card_ids),
-            success_count=success_count,
-            failed_count=failed_count,
-            recycle_reason=recycle_reason,
-            remark=remark,
-            operator_id=operator_id
-        )
-        db.add(record)
-        await db.flush()  # 获取record.id
-        
-        # 创建关联记录
-        for card_info in recycled_cards:
-            relation = StockRecycleRecordCardModel(
+            await self._insert_recycle_relations(
+                db=db,
                 record_id=record.id,
-                card_id=card_info["card_id"],
-                iccid=card_info["iccid"],
-                original_user_id=card_info["original_user_id"],
-                original_status=card_info["original_status"],
-                original_sale_package_id=card_info["original_sale_package_id"]
+                recycled_cards=recycled_cards
             )
-            db.add(relation)
-        
-        await db.commit()
 
-        return {
-            "success": success_count,
-            "failed": failed_count,
-            "record_id": record.id
-        }
+            await db.commit()
+
+            return {
+                "success": success_count,
+                "failed": failed_count,
+                "record_id": record.id
+            }
+        except Exception:
+            await db.rollback()
+            raise
 
     async def recycle_by_iccids(
         self,
@@ -1198,64 +1305,81 @@ class StockRecycleCRUD:
         remark: Optional[str] = None
     ) -> dict:
         """通过ICCID批量回收卡片"""
-        from app.db.models.stock import StockRecycleRecordModel, StockRecycleRecordCardModel
+        from app.db.models.stock import StockRecycleRecordModel
 
-        success_count = 0
-        failed_count = 0
-        not_found = []
-        recycled_cards = []
+        try:
+            success_count = 0
+            failed_count = 0
+            not_found = []
+            recycled_cards = []
 
-        for iccid in iccids:
-            iccid = iccid.strip()
-            if not iccid:
-                continue
-            card_query = select(IotCardModel).where(
-                IotCardModel.iccid == iccid,
-                IotCardModel.user_id.isnot(None),
-                IotCardModel.is_deleted == 0
+            for iccid in iccids:
+                iccid = iccid.strip()
+                if not iccid:
+                    continue
+                card_query = select(IotCardModel).where(
+                    IotCardModel.iccid == iccid,
+                    IotCardModel.user_id.isnot(None),
+                    IotCardModel.is_deleted == 0
+                )
+                card_result = await db.execute(card_query)
+                card = card_result.scalar_one_or_none()
+
+                if card:
+                    original_user_id = card.user_id
+                    original_status = card.status.value if hasattr(card.status, 'value') else card.status
+                    original_sale_package_id = card.sale_package_id
+
+                    card.user_id = None
+                    card.sale_package_id = None
+                    card.status = CardStatus.stock
+                    card.stock_out_at = None
+                    card.stock_out_date = None
+                    card.activated_at = None
+                    card.expired_at = None
+                    card.suspend_type = SuspendType.none
+                    card.suspend_at = None
+                    card.suspend_reason = None
+                    success_count += 1
+                    recycled_cards.append({
+                        "card_id": card.id,
+                        "iccid": card.iccid,
+                        "original_user_id": original_user_id,
+                        "original_status": original_status,
+                        "original_sale_package_id": original_sale_package_id
+                    })
+                else:
+                    failed_count += 1
+                    not_found.append(iccid)
+
+            record = StockRecycleRecordModel(
+                card_count=len(iccids),
+                success_count=success_count,
+                failed_count=failed_count,
+                recycle_reason=recycle_reason,
+                remark=remark,
+                operator_id=operator_id
             )
-            card_result = await db.execute(card_query)
-            card = card_result.scalar_one_or_none()
+            db.add(record)
+            await db.flush()
 
-            if card:
-                card.user_id = None
-                card.sale_package_id = None
-                card.status = CardStatus.stock
-                card.stock_out_at = None
-                success_count += 1
-                recycled_cards.append({"card_id": card.id, "iccid": card.iccid})
-            else:
-                failed_count += 1
-                not_found.append(iccid)
-
-        # 创建回收记录
-        record = StockRecycleRecordModel(
-            card_count=len(iccids),
-            success_count=success_count,
-            failed_count=failed_count,
-            recycle_reason=recycle_reason,
-            remark=remark,
-            operator_id=operator_id
-        )
-        db.add(record)
-        await db.flush()
-
-        for card_info in recycled_cards:
-            relation = StockRecycleRecordCardModel(
+            await self._insert_recycle_relations(
+                db=db,
                 record_id=record.id,
-                card_id=card_info["card_id"],
-                iccid=card_info["iccid"]
+                recycled_cards=recycled_cards
             )
-            db.add(relation)
 
-        await db.commit()
+            await db.commit()
 
-        return {
-            "success": success_count,
-            "failed": failed_count,
-            "record_id": record.id,
-            "not_found": not_found
-        }
+            return {
+                "success": success_count,
+                "failed": failed_count,
+                "record_id": record.id,
+                "not_found": not_found
+            }
+        except Exception:
+            await db.rollback()
+            raise
 
     async def get_records_list(
         self,
@@ -1345,9 +1469,11 @@ class CardStockRecordCRUD:
             SELECT 'in' as record_type, sirc.record_id, sirc.iccid, sirc.created_at,
                    sirc.test_expire_date, sirc.silent_expire_date,
                    sirc.supplier_name, sirc.base_package_name,
+                   sp.period_type, sp.period_months, sp.period_days,
                    u.name as operator_name
             FROM stock_in_record_cards sirc
             LEFT JOIN stock_in_records sir ON sirc.record_id = sir.id
+            LEFT JOIN supplier_packages sp ON sir.package_id = sp.id
             LEFT JOIN sys_users u ON sir.operator_id = u.id
             WHERE sirc.iccid = :iccid
         """)
@@ -1360,9 +1486,12 @@ class CardStockRecordCRUD:
                    sorc.test_expire_date, sorc.silent_expire_date,
                    sorc.supplier_name, sorc.base_package_name,
                    sorc.sale_package_name, sorc.target_user_name,
+                   sp.period_type, c.period_count,
                    u.name as operator_name
             FROM stock_out_record_cards sorc
             LEFT JOIN stock_out_records sor ON sorc.record_id = sor.id
+            LEFT JOIN sale_packages sp ON sor.sale_package_id = sp.id
+            LEFT JOIN iot_cards c ON sorc.card_id = c.id
             LEFT JOIN sys_users u ON sor.operator_id = u.id
             WHERE sorc.iccid = :iccid
         """)
@@ -1382,6 +1511,7 @@ class CardStockRecordCRUD:
                 "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
                 "supplier_name": row.supplier_name,
                 "base_package_name": row.base_package_name,
+                "package_period": _format_package_period(row.period_type, row.period_months, row.period_days),
                 "sale_package_name": None,
                 "target_user_name": None
             })
@@ -1398,6 +1528,7 @@ class CardStockRecordCRUD:
                 "supplier_name": row.supplier_name,
                 "base_package_name": row.base_package_name,
                 "sale_package_name": row.sale_package_name,
+                "package_period": _format_period_count(row.period_type, row.period_count),
                 "target_user_name": row.target_user_name
             })
 

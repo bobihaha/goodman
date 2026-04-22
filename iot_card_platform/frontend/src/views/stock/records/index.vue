@@ -50,6 +50,9 @@
               <el-table-column prop="id" label="记录ID" width="80" />
               <el-table-column prop="supplier_name" label="供应商" width="120" />
               <el-table-column prop="package_name" label="套餐" width="200" />
+              <el-table-column prop="package_period" label="套餐周期" width="120">
+                <template #default="{ row }">{{ row.package_period || '-' }}</template>
+              </el-table-column>
               <el-table-column prop="card_count" label="入库数量" width="100">
                 <template #default="{ row }">
                   <el-tag type="success">{{ row.card_count }} 张</el-tag>
@@ -126,6 +129,9 @@
               <el-table-column prop="record_no" label="出库单号" width="190" />
               <el-table-column prop="user_name" label="目标用户" width="120" />
               <el-table-column prop="sale_package_name" label="销售套餐" width="200" />
+              <el-table-column prop="actual_period" label="开通周期" width="120">
+                <template #default="{ row }">{{ row.actual_period || row.package_period || '-' }}</template>
+              </el-table-column>
               <el-table-column prop="card_count" label="出库数量" width="100">
                 <template #default="{ row }">
                   <el-tag type="warning">{{ row.card_count }} 张</el-tag>
@@ -192,6 +198,9 @@
               <el-table-column prop="supplier_name" label="供应商" width="120" />
               <el-table-column prop="base_package_name" label="底层套餐" width="150" />
               <el-table-column prop="sale_package_name" label="销售套餐" width="150" />
+              <el-table-column prop="package_period" label="套餐周期" width="120">
+                <template #default="{ row }">{{ row.package_period || '-' }}</template>
+              </el-table-column>
               <el-table-column prop="target_user_name" label="目标用户" width="120" />
               <el-table-column prop="test_expire_date" label="测试期" width="110" />
               <el-table-column prop="silent_expire_date" label="沉默期" width="110" />
@@ -213,6 +222,7 @@
         <el-descriptions-item label="记录ID">{{ currentInRecord.id }}</el-descriptions-item>
         <el-descriptions-item label="供应商">{{ currentInRecord.supplier_name }}</el-descriptions-item>
         <el-descriptions-item label="套餐">{{ currentInRecord.package_name }}</el-descriptions-item>
+        <el-descriptions-item label="套餐周期">{{ currentInRecord.package_period || '-' }}</el-descriptions-item>
         <el-descriptions-item label="入库数量">
           <el-tag type="success">{{ currentInRecord.card_count }} 张</el-tag>
         </el-descriptions-item>
@@ -254,6 +264,7 @@
         <el-descriptions-item label="出库单号">{{ currentOutRecord.record_no || '-' }}</el-descriptions-item>
         <el-descriptions-item label="目标用户">{{ currentOutRecord.user_name }}</el-descriptions-item>
         <el-descriptions-item label="销售套餐">{{ currentOutRecord.sale_package_name }}</el-descriptions-item>
+        <el-descriptions-item label="开通周期">{{ currentOutRecord.actual_period || currentOutRecord.package_period || '-' }}</el-descriptions-item>
         <el-descriptions-item label="出库数量">
           <el-tag type="warning">{{ currentOutRecord.card_count }} 张</el-tag>
         </el-descriptions-item>

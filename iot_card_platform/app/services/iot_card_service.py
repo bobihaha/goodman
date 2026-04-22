@@ -9,6 +9,7 @@ from sqlalchemy import select, text, bindparam
 from app.crud.iot_card_crud import iot_card_crud, card_transfer_crud
 from app.crud.package_crud import sale_package_crud
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
+from app.db.models.package import PeriodType
 from app.db.models.sys_user import UserLevel, SysUserModel
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.crud.system_crud import SysOperationLogCRUD
@@ -80,13 +81,34 @@ class IotCardService:
             return card_dicts
 
         card_ids = [item["id"] for item in card_dicts if item.get("id") is not None]
+        card_user_ids = {
+            item["user_id"] for item in card_dicts
+            if item.get("user_id") is not None
+        }
         remark_map = await iot_card_crud.get_user_remark_map(db, card_ids, current_user_id)
         stock_out_no_map = await self._get_stock_out_no_map(db, card_ids)
+        user_ids_for_display = list(card_user_ids | {current_user_id})
+        user_result = await db.execute(
+            select(SysUserModel).where(SysUserModel.id.in_(user_ids_for_display))
+        )
+        user_map = {
+            user.id: user
+            for user in user_result.scalars().all()
+        }
+        current_user = user_map.get(current_user_id)
+        current_user_display_name = None
+        if current_user:
+            current_user_display_name = current_user.name or current_user.account
 
         for item in card_dicts:
             card_id = item.get("id")
             item["remark"] = remark_map.get(card_id)
             item["stock_out_no"] = stock_out_no_map.get(card_id)
+            related_user = user_map.get(item.get("user_id"))
+            if related_user:
+                item["related_user_name"] = related_user.name or related_user.account
+            else:
+                item["related_user_name"] = current_user_display_name
 
         return card_dicts
 
@@ -135,6 +157,29 @@ class IotCardService:
             return Decimal(str(package.price_sale))
 
         return None
+
+    @staticmethod
+    def _resolve_renew_period(
+        card: IotCardModel,
+        package,
+        renew_cycles: int
+    ) -> tuple[str, Optional[int], Optional[int]]:
+        """解析续费周期，按用户选择的续费月数/年数计算。"""
+        if package and package.period_type:
+            period_type = package.period_type.value if hasattr(package.period_type, "value") else str(package.period_type)
+        else:
+            period_type = card.period_type.value if hasattr(card.period_type, "value") else str(card.period_type)
+
+        if period_type == PeriodType.monthly.value:
+            base_months = 1
+            if package and getattr(package, "period_months", None):
+                base_months = int(package.period_months)
+            return period_type, (base_months or 1) * renew_cycles, None
+
+        base_days = 360
+        if package and getattr(package, "period_days", None):
+            base_days = int(package.period_days)
+        return period_type, None, (base_days or 360) * renew_cycles
 
     async def _get_accessible_user_ids(
         self,
@@ -259,7 +304,9 @@ class IotCardService:
         expired_start: Optional[str] = None,
         expired_end: Optional[str] = None,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None
     ) -> Tuple[List[dict], int]:
         """获取卡片列表 (根据用户权限过滤)"""
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
@@ -288,7 +335,9 @@ class IotCardService:
             expired_end=expired_end,
             page=page,
             page_size=page_size,
-            remark_user_id=current_user_id
+            remark_user_id=current_user_id,
+            sort_by=sort_by,
+            sort_order=sort_order
         )
 
         card_dicts = [item.to_dict() for item in items]
@@ -882,12 +931,14 @@ class IotCardService:
         
         result = await db.execute(query)
         cards = list(result.scalars().all())
+        card_map = {card.iccid: card for card in cards}
         
         success_list = []
         failed_list = []
+        renewed_cards = []
         
         for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
+            card = card_map.get(iccid)
             if not card:
                 failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
                 continue
@@ -997,12 +1048,14 @@ class IotCardService:
         
         result = await db.execute(query)
         cards = list(result.scalars().all())
-        
+        card_map = {card.iccid: card for card in cards}
+
         success_list = []
         failed_list = []
-        
+        renewed_cards = []
+
         for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
+            card = card_map.get(iccid)
             if not card:
                 failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
                 continue
@@ -1012,11 +1065,12 @@ class IotCardService:
                 package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
+                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
                     card.expired_at = calculate_expiry_date(
                         base_date + timedelta(days=1) if card.expired_at else base_date,
-                        package.period_type.value,
-                        package.period_months,
-                        package.period_days,
+                        period_type,
+                        period_months,
+                        period_days,
                         card.carrier.value if card.carrier else None
                     )
                 else:
@@ -1031,10 +1085,23 @@ class IotCardService:
                     "msisdn": card.msisdn,
                     "message": f"续费{renew_months}个月成功"
                 })
+                renewed_cards.append(card)
             except Exception as e:
                 failed_list.append({"iccid": iccid, "error": str(e)})
         
         await db.commit()
+
+        for card in renewed_cards:
+            await SysOperationLogCRUD.create(
+                db=db,
+                module="cards",
+                action="renew",
+                user_id=current_user_id,
+                target_type="card",
+                target_id=card.id,
+                target_name=card.iccid,
+                detail=f"批量续费 {renew_months} 个月"
+            )
         
         return {
             "success": len(success_list),
@@ -1388,11 +1455,12 @@ class IotCardService:
         package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
         if package:
             base_date = card.expired_at if card.expired_at else date.today()
+            period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
             card.expired_at = calculate_expiry_date(
                 base_date + timedelta(days=1) if card.expired_at else base_date,
-                package.period_type.value,
-                package.period_months * renew_months if package.period_months else None,
-                package.period_days * renew_months if package.period_days else None,
+                period_type,
+                period_months,
+                period_days,
                 card.carrier.value if card.carrier else None
             )
         else:
@@ -1655,11 +1723,12 @@ class IotCardService:
                 package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
+                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
                     card.expired_at = calculate_expiry_date(
                         base_date + timedelta(days=1) if card.expired_at else base_date,
-                        package.period_type.value,
-                        package.period_months,
-                        package.period_days,
+                        period_type,
+                        period_months,
+                        period_days,
                         card.carrier.value if card.carrier else None
                     )
                 else:
@@ -1674,10 +1743,23 @@ class IotCardService:
                     "msisdn": card.msisdn,
                     "message": f"续费{renew_months}个月成功"
                 })
+                renewed_cards.append(card)
             except Exception as e:
                 failed_list.append({"iccid": iccid, "error": str(e)})
         
         await db.commit()
+
+        for card in renewed_cards:
+            await SysOperationLogCRUD.create(
+                db=db,
+                module="cards",
+                action="renew",
+                user_id=current_user_id,
+                target_type="card",
+                target_id=card.id,
+                target_name=card.iccid,
+                detail=f"批量续费 {renew_months} 个月"
+            )
         
         return {
             "success": len(success_list),
@@ -1989,11 +2071,12 @@ class IotCardService:
                 package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
+                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
                     card.expired_at = calculate_expiry_date(
                         base_date + timedelta(days=1) if card.expired_at else base_date,
-                        package.period_type.value,
-                        package.period_months,
-                        package.period_days,
+                        period_type,
+                        period_months,
+                        period_days,
                         card.carrier.value if card.carrier else None
                     )
                 else:
@@ -2324,11 +2407,12 @@ class IotCardService:
                 package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
                 if package:
                     base_date = card.expired_at if card.expired_at else date.today()
+                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
                     card.expired_at = calculate_expiry_date(
                         base_date + timedelta(days=1) if card.expired_at else base_date,
-                        package.period_type.value,
-                        package.period_months,
-                        package.period_days,
+                        period_type,
+                        period_months,
+                        period_days,
                         card.carrier.value if card.carrier else None
                     )
                 else:

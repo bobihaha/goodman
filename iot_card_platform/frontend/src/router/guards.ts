@@ -76,7 +76,8 @@ export function setupRouterGuards(router: Router): void {
  */
 const DETAIL_TO_LIST_MAP: Record<string, string[]> = {
   '/cards/detail': ['/cards/list', '/card/list', '/card'],
-  '/pools/detail': ['/pools/list', '/pool/list', '/pool']
+  '/pools/detail': ['/pools/list', '/pool/list', '/pool'],
+  '/records/purchases': ['/renewal/management']
 }
 
 /**

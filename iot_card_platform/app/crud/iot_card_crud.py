@@ -12,6 +12,28 @@ from app.db.models.stock import StockOutRecordCardModel, StockOutRecordModel
 class IotCardCRUD:
     """物联网卡 CRUD"""
 
+    SORT_FIELD_MAP = {
+        "iccid": IotCardModel.iccid,
+        "imsi": IotCardModel.imsi,
+        "msisdn": IotCardModel.msisdn,
+        "card_type": IotCardModel.card_type,
+        "carrier": IotCardModel.carrier,
+        "status": IotCardModel.status,
+        "data_used_month": IotCardModel.data_used_month,
+        "data_total": IotCardModel.data_total,
+        "data_used": IotCardModel.data_used,
+        "flow_size": IotCardModel.flow_size,
+        "test_expire_date": IotCardModel.test_expire_date,
+        "silent_expire_date": IotCardModel.silent_expire_date,
+        "activated_at": IotCardModel.activated_at,
+        "stock_out_date": IotCardModel.stock_out_date,
+        "expired_at": IotCardModel.expired_at,
+        "is_pool_member": IotCardModel.is_pool_member,
+        "remark": IotCardModel.remark,
+        "created_at": IotCardModel.created_at,
+        "updated_at": IotCardModel.updated_at,
+    }
+
     @staticmethod
     def _build_short_iccid_keyword_filter(keyword: str):
         """短关键字查询:
@@ -99,7 +121,9 @@ class IotCardCRUD:
         expired_end: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
-        remark_user_id: Optional[int] = None
+        remark_user_id: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None
     ) -> Tuple[List[IotCardModel], int]:
         """获取卡片列表"""
         query = select(IotCardModel).where(IotCardModel.is_deleted == 0)
@@ -257,9 +281,17 @@ class IotCardCRUD:
         total_result = await db.execute(count_query)
         total = total_result.scalar() or 0
 
+        sort_column = self.SORT_FIELD_MAP.get(sort_by or "", IotCardModel.id)
+        sort_direction = (sort_order or "desc").lower()
+        sort_expression = sort_column.asc() if sort_direction == "asc" else sort_column.desc()
+
         # 分页
         offset = (page - 1) * page_size
-        query = query.order_by(IotCardModel.id.desc()).offset(offset).limit(page_size)
+        query = query.order_by(
+            sort_column.is_(None).asc(),
+            sort_expression,
+            IotCardModel.id.desc()
+        ).offset(offset).limit(page_size)
 
         result = await db.execute(query)
         items = list(result.scalars().all())

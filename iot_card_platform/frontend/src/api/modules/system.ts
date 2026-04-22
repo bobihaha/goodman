@@ -65,6 +65,17 @@ export const systemApi = {
     })
   },
 
+  /** 获取卡片续费/补量记录 */
+  getCardRecords(params: {
+    record_type: 'renew' | 'topup'
+    start_time?: string
+    end_time?: string
+    page?: number
+    page_size?: number
+  }) {
+    return request.get('/system/logs/card-records', { params })
+  },
+
   /** 获取余额变动记录 */
   getBalanceLogs(params: any) {
     return request.get('/system/logs/operation', {

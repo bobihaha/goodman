@@ -288,6 +288,43 @@
             <el-icon><Download /></el-icon>
             导出历史用量
           </el-button>
+          <el-popover
+            placement="bottom-end"
+            :width="300"
+            trigger="click"
+            popper-class="column-settings-popover"
+          >
+            <template #reference>
+              <el-button>
+                <el-icon><Setting /></el-icon>
+                设置列
+              </el-button>
+            </template>
+            <div class="column-settings">
+              <div class="column-settings-header">
+                <span class="column-settings-title">卡片列表显示列</span>
+                <el-button link type="primary" @click="resetVisibleColumns">
+                  恢复默认
+                </el-button>
+              </div>
+              <div class="column-settings-tip">
+                ICCID 和操作列固定显示，其他列可自由勾选
+              </div>
+              <el-checkbox-group
+                v-model="visibleColumnKeys"
+                class="column-checkbox-group"
+                @change="handleVisibleColumnsChange"
+              >
+                <el-checkbox
+                  v-for="column in allDraggableColumns"
+                  :key="column.key"
+                  :label="column.key"
+                >
+                  {{ column.label }}
+                </el-checkbox>
+              </el-checkbox-group>
+            </div>
+          </el-popover>
           <el-button @click="fetchCardList">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -322,7 +359,16 @@
       >
         <el-table-column type="selection" width="55" />
         
-        <el-table-column prop="iccid" label="ICCID" width="200" fixed>
+        <el-table-column prop="iccid" width="200" fixed>
+          <template #header>
+            <div class="sortable-header">
+              <span>ICCID</span>
+              <span class="sort-buttons">
+                <el-icon class="sort-icon" :class="{ active: isSortActive('iccid', 'asc') }" @click="handleColumnSort('iccid', 'asc')"><ArrowUp /></el-icon>
+                <el-icon class="sort-icon" :class="{ active: isSortActive('iccid', 'desc') }" @click="handleColumnSort('iccid', 'desc')"><ArrowDown /></el-icon>
+              </span>
+            </div>
+          </template>
           <template #default="{ row }">
             <el-link type="primary" @click="viewDetail(row.id)">
               {{ row.iccid }}
@@ -330,146 +376,143 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="imsi" label="IMSI" width="180" />
-
-        <el-table-column prop="msisdn" label="号码" width="130" />
-
-        <el-table-column label="诊断" width="90" align="center">
-          <template #default="{ row }">
-            <el-button type="primary" link @click="showDiagnosticsDialog(row)">
-              诊断
-            </el-button>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="刷新" width="90" align="center">
-          <template #default="{ row }">
-            <el-button
-              type="primary"
-              link
-              :loading="refreshingMap[row.id]"
-              @click="handleRowRefresh(row)"
-            >
-              刷新
-            </el-button>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="card_type" label="卡片类型" width="110">
-          <template #default="{ row }">
-            <el-tag v-if="row.card_type === 'pool'" type="success" size="small">
-              流量池卡
-            </el-tag>
-            <el-tag v-else type="info" size="small">
-              单卡
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="carrier" label="运营商" width="100">
-          <template #default="{ row }">
-            {{ getCarrierLabel(row.carrier) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getStatusMeta(row.status).type">
-              {{ getStatusMeta(row.status).label }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="本月用量" width="120">
-          <template #default="{ row }">
-            {{ formatFlowValue(row.data_used_month) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="套餐总量" width="120">
-          <template #default="{ row }">
-            {{ formatFlowValue(getDisplayTotal(row)) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="已用量" width="120">
-          <template #default="{ row }">
-            {{ formatFlowValue(row.data_used) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="流量使用" width="200">
-          <template #default="{ row }">
-            <div class="flow-usage">
-              <div class="flow-progress-row">
-                <el-progress
-                  :percentage="Math.min(formatUsagePercent(row.data_used, getDisplayTotal(row)), 100)"
-                  :color="getProgressColor(formatUsagePercent(row.data_used, getDisplayTotal(row)))"
-                  :show-text="false"
-                />
-                <span class="flow-percent">{{ formatUsagePercent(row.data_used, getDisplayTotal(row)).toFixed(2) }}%</span>
+        <template v-for="column in orderedColumns" :key="column.key">
+          <el-table-column
+            :prop="column.prop"
+            :label="column.label"
+            :width="column.width"
+            :min-width="column.minWidth"
+            :align="column.align"
+            :show-overflow-tooltip="column.showOverflowTooltip"
+          >
+            <template #header>
+              <div
+                class="draggable-header"
+                :class="{
+                  dragging: dragState.draggingKey === column.key,
+                  'drag-over-before': dragState.overKey === column.key && dragState.dropPosition === 'before',
+                  'drag-over-after': dragState.overKey === column.key && dragState.dropPosition === 'after'
+                }"
+                draggable="true"
+                @dragstart="handleColumnDragStart(column.key, $event)"
+                @dragover="handleColumnDragOver(column.key, $event)"
+                @drop="handleColumnDrop(column.key, $event)"
+                @dragend="handleColumnDragEnd"
+              >
+                <div class="sortable-header">
+                  <span class="drag-handle" title="拖动调整列顺序">⋮⋮</span>
+                  <span>{{ column.label }}</span>
+                  <span v-if="column.sortField" class="sort-buttons">
+                    <el-icon class="sort-icon" :class="{ active: isSortActive(column.sortField, 'asc') }" @click.stop="handleColumnSort(column.sortField, 'asc')"><ArrowUp /></el-icon>
+                    <el-icon class="sort-icon" :class="{ active: isSortActive(column.sortField, 'desc') }" @click.stop="handleColumnSort(column.sortField, 'desc')"><ArrowDown /></el-icon>
+                  </span>
+                </div>
               </div>
-              <div class="flow-text">
-                {{ formatFlowValue(row.data_used) }} / {{ formatFlowValue(getDisplayTotal(row)) }}
-              </div>
-            </div>
-          </template>
-        </el-table-column>
+            </template>
 
-        <el-table-column label="套餐规格" width="120">
-          <template #default="{ row }">
-            {{ formatFlow(row.flow_size) }}/{{ getPeriodLabel(row.period_type) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="test_expire_date" label="测试期" width="110">
-          <template #default="{ row }">
-            <span v-if="row.test_expire_date">{{ formatDate(row.test_expire_date) }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="silent_expire_date" label="沉默期" width="110">
-          <template #default="{ row }">
-            <span v-if="row.silent_expire_date">{{ formatDate(row.silent_expire_date) }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="activated_at" label="激活日期" width="110">
-          <template #default="{ row }">
-            <span v-if="row.activated_at">{{ formatDate(row.activated_at) }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="stock_out_at" label="出库日期" width="110">
-          <template #default="{ row }">
-            <span v-if="row.stock_out_date || row.stock_out_at">{{ formatDate(row.stock_out_date || row.stock_out_at) }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="expired_at" label="到期日期" width="110">
-          <template #default="{ row }">
-            <span :class="{ 'text-danger': isExpired(row.expired_at) }">
-              {{ formatDate(row.expired_at) }}
-            </span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="流量池" width="100">
-          <template #default="{ row }">
-            <el-tag v-if="row.is_pool_member" type="success" size="small">
-              在池中
-            </el-tag>
-            <el-tag v-else type="info" size="small">
-              未入池
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="remark" label="备注" min-width="150" show-overflow-tooltip />
+            <template #default="{ row }">
+              <template v-if="column.key === 'imsi'">
+                {{ row.imsi || '-' }}
+              </template>
+              <template v-else-if="column.key === 'msisdn'">
+                {{ row.msisdn || '-' }}
+              </template>
+              <template v-else-if="column.key === 'diagnostic'">
+                <el-button type="primary" link @click="showDiagnosticsDialog(row)">
+                  诊断
+                </el-button>
+              </template>
+              <template v-else-if="column.key === 'refresh'">
+                <el-button
+                  type="primary"
+                  link
+                  :loading="refreshingMap[row.id]"
+                  @click="handleRowRefresh(row)"
+                >
+                  刷新
+                </el-button>
+              </template>
+              <template v-else-if="column.key === 'card_type'">
+                <el-tag v-if="row.card_type === 'pool'" type="success" size="small">
+                  流量池卡
+                </el-tag>
+                <el-tag v-else type="info" size="small">
+                  单卡
+                </el-tag>
+              </template>
+              <template v-else-if="column.key === 'carrier'">
+                {{ getCarrierLabel(row.carrier) }}
+              </template>
+              <template v-else-if="column.key === 'status'">
+                <el-tag :type="getStatusMeta(row.status).type">
+                  {{ getStatusMeta(row.status).label }}
+                </el-tag>
+              </template>
+              <template v-else-if="column.key === 'data_used_month'">
+                {{ formatFlowValue(row.data_used_month) }}
+              </template>
+              <template v-else-if="column.key === 'data_total'">
+                {{ formatFlowValue(getDisplayTotal(row)) }}
+              </template>
+              <template v-else-if="column.key === 'data_used'">
+                {{ formatFlowValue(row.data_used) }}
+              </template>
+              <template v-else-if="column.key === 'flow_usage'">
+                <div class="flow-usage">
+                  <div class="flow-progress-row">
+                    <el-progress
+                      :percentage="Math.min(formatUsagePercent(row.data_used, getDisplayTotal(row)), 100)"
+                      :color="getProgressColor(formatUsagePercent(row.data_used, getDisplayTotal(row)))"
+                      :show-text="false"
+                    />
+                    <span class="flow-percent">{{ formatUsagePercent(row.data_used, getDisplayTotal(row)).toFixed(2) }}%</span>
+                  </div>
+                  <div class="flow-text">
+                    {{ formatFlowValue(row.data_used) }} / {{ formatFlowValue(getDisplayTotal(row)) }}
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="column.key === 'flow_size'">
+                {{ formatFlow(row.flow_size) }}/{{ getPeriodLabel(row.period_type) }}
+              </template>
+              <template v-else-if="column.key === 'test_expire_date'">
+                <span v-if="row.test_expire_date">{{ formatDate(row.test_expire_date) }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+              <template v-else-if="column.key === 'silent_expire_date'">
+                <span v-if="row.silent_expire_date">{{ formatDate(row.silent_expire_date) }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+              <template v-else-if="column.key === 'activated_at'">
+                <span v-if="row.activated_at">{{ formatDate(row.activated_at) }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+              <template v-else-if="column.key === 'stock_out_date'">
+                <span v-if="row.stock_out_date || row.stock_out_at">{{ formatDate(row.stock_out_date || row.stock_out_at) }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+              <template v-else-if="column.key === 'expired_at'">
+                <span :class="{ 'text-danger': isExpired(row.expired_at) }">
+                  {{ formatDate(row.expired_at) }}
+                </span>
+              </template>
+              <template v-else-if="column.key === 'is_pool_member'">
+                <el-tag v-if="row.is_pool_member" type="success" size="small">
+                  在池中
+                </el-tag>
+                <el-tag v-else type="info" size="small">
+                  未入池
+                </el-tag>
+              </template>
+              <template v-else-if="column.key === 'related_user_name'">
+                <span>{{ row.related_user_name || '-' }}</span>
+              </template>
+              <template v-else-if="column.key === 'remark'">
+                <span>{{ row.remark || '-' }}</span>
+              </template>
+            </template>
+          </el-table-column>
+        </template>
 
         <el-table-column label="操作" width="64" fixed="right" align="center">
           <template #default="{ row }">
@@ -627,6 +670,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { CheckboxValueType } from 'element-plus'
 import {
   CreditCard,
   CircleCheck,
@@ -643,12 +687,13 @@ import {
   Filter,
   ArrowDown,
   ArrowUp,
-  MoreFilled
+  MoreFilled,
+  Setting
 } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
 import { userApi } from '@/api'
 import { useAuthStore } from '@/stores/modules/auth'
-import type { Card, CardListParams, CardStats } from '@/types/card'
+import type { Card, CardListParams, CardStats, SortOrder } from '@/types/card'
 import type { User } from '@/types/user'
 import {
   CARRIER_MAP,
@@ -673,6 +718,87 @@ import RemarkDialog from './components/RemarkDialog.vue'
 import ExportHistoryDialog from './components/ExportHistoryDialog.vue'
 import CardDiagnosticsDialog from './components/CardDiagnosticsDialog.vue'
 
+type DraggableColumnKey =
+  | 'imsi'
+  | 'msisdn'
+  | 'diagnostic'
+  | 'refresh'
+  | 'card_type'
+  | 'carrier'
+  | 'status'
+  | 'data_used_month'
+  | 'data_total'
+  | 'data_used'
+  | 'flow_usage'
+  | 'flow_size'
+  | 'test_expire_date'
+  | 'silent_expire_date'
+  | 'activated_at'
+  | 'stock_out_date'
+  | 'expired_at'
+  | 'is_pool_member'
+  | 'related_user_name'
+  | 'remark'
+
+interface DraggableColumnConfig {
+  key: DraggableColumnKey
+  label: string
+  prop?: string
+  width?: number
+  minWidth?: number
+  align?: 'left' | 'center' | 'right'
+  showOverflowTooltip?: boolean
+  sortField?: string
+}
+
+const COLUMN_ORDER_STORAGE_KEY = 'card-list-column-order'
+const COLUMN_VISIBILITY_STORAGE_KEY = 'card-list-visible-columns'
+const DEFAULT_DRAGGABLE_COLUMN_ORDER: DraggableColumnKey[] = [
+  'imsi',
+  'msisdn',
+  'diagnostic',
+  'refresh',
+  'card_type',
+  'carrier',
+  'status',
+  'data_used_month',
+  'data_total',
+  'data_used',
+  'flow_usage',
+  'flow_size',
+  'test_expire_date',
+  'silent_expire_date',
+  'activated_at',
+  'stock_out_date',
+  'expired_at',
+  'is_pool_member',
+  'related_user_name',
+  'remark'
+]
+
+const DRAGGABLE_COLUMN_MAP: Record<DraggableColumnKey, DraggableColumnConfig> = {
+  imsi: { key: 'imsi', label: 'IMSI', prop: 'imsi', width: 180, sortField: 'imsi' },
+  msisdn: { key: 'msisdn', label: '号码', prop: 'msisdn', width: 130, sortField: 'msisdn' },
+  diagnostic: { key: 'diagnostic', label: '诊断', width: 90, align: 'center' },
+  refresh: { key: 'refresh', label: '刷新', width: 90, align: 'center' },
+  card_type: { key: 'card_type', label: '卡片类型', prop: 'card_type', width: 110, sortField: 'card_type' },
+  carrier: { key: 'carrier', label: '运营商', prop: 'carrier', width: 100, sortField: 'carrier' },
+  status: { key: 'status', label: '状态', prop: 'status', width: 100, sortField: 'status' },
+  data_used_month: { key: 'data_used_month', label: '本月用量', width: 120, sortField: 'data_used_month' },
+  data_total: { key: 'data_total', label: '套餐总量', width: 120, sortField: 'data_total' },
+  data_used: { key: 'data_used', label: '已用量', width: 120, sortField: 'data_used' },
+  flow_usage: { key: 'flow_usage', label: '流量使用', width: 200 },
+  flow_size: { key: 'flow_size', label: '套餐规格', width: 120, sortField: 'flow_size' },
+  test_expire_date: { key: 'test_expire_date', label: '测试期', prop: 'test_expire_date', width: 110, sortField: 'test_expire_date' },
+  silent_expire_date: { key: 'silent_expire_date', label: '沉默期', prop: 'silent_expire_date', width: 110, sortField: 'silent_expire_date' },
+  activated_at: { key: 'activated_at', label: '激活日期', prop: 'activated_at', width: 110, sortField: 'activated_at' },
+  stock_out_date: { key: 'stock_out_date', label: '出库日期', prop: 'stock_out_at', width: 110, sortField: 'stock_out_date' },
+  expired_at: { key: 'expired_at', label: '到期日期', prop: 'expired_at', width: 110, sortField: 'expired_at' },
+  is_pool_member: { key: 'is_pool_member', label: '流量池', width: 100, sortField: 'is_pool_member' },
+  related_user_name: { key: 'related_user_name', label: '关联用户', prop: 'related_user_name', width: 140, showOverflowTooltip: true },
+  remark: { key: 'remark', label: '备注', prop: 'remark', minWidth: 150, showOverflowTooltip: true, sortField: 'remark' }
+}
+
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -691,6 +817,24 @@ const customerList = ref<User[]>([])
 const stockOutRange = ref<string[]>([])
 const activatedRange = ref<string[]>([])
 const expiredRange = ref<string[]>([])
+const columnOrder = ref<DraggableColumnKey[]>([...DEFAULT_DRAGGABLE_COLUMN_ORDER])
+const visibleColumnKeys = ref<DraggableColumnKey[]>([...DEFAULT_DRAGGABLE_COLUMN_ORDER])
+const sortState = reactive<{
+  sort_by?: string
+  sort_order: SortOrder
+}>({
+  sort_by: undefined,
+  sort_order: 'desc'
+})
+const dragState = reactive<{
+  draggingKey: DraggableColumnKey | ''
+  overKey: DraggableColumnKey | ''
+  dropPosition: 'before' | 'after'
+}>({
+  draggingKey: '',
+  overKey: '',
+  dropPosition: 'before'
+})
 
 // 统计数据
 const stats = ref<CardStats>({
@@ -785,6 +929,14 @@ const exportHistoryFilterParams = computed(() => ({
   expired_start: expiredRange.value?.[0] || undefined,
   expired_end: expiredRange.value?.[1] || undefined
 }))
+const allDraggableColumns = computed(() =>
+  columnOrder.value
+    .map(key => DRAGGABLE_COLUMN_MAP[key])
+    .filter(Boolean)
+)
+const orderedColumns = computed(() =>
+  allDraggableColumns.value.filter(column => visibleColumnKeys.value.includes(column.key))
+)
 
 const getDisplayTotal = (card: Card) => {
   const total = Number(card.data_total || 0)
@@ -793,6 +945,200 @@ const getDisplayTotal = (card: Card) => {
     return specTotal
   }
   return total
+}
+
+const normalizeCardList = (cards: Card[]) =>
+  cards.map((card: Card) => ({
+    ...card,
+    usage_percent: formatUsagePercent(card.data_used, getDisplayTotal(card))
+  }))
+
+const getSortComparableValue = (card: Card, sortBy: string) => {
+  switch (sortBy) {
+    case 'data_total':
+      return getDisplayTotal(card)
+    case 'stock_out_date':
+      return card.stock_out_at || card.stock_out_date || ''
+    case 'is_pool_member':
+      return card.is_pool_member ? 1 : 0
+    default:
+      return (card as Record<string, any>)[sortBy]
+  }
+}
+
+const sortBatchQueryList = () => {
+  if (!isBatchQueryMode.value || !sortState.sort_by) {
+    return
+  }
+
+  const sortBy = sortState.sort_by
+  const order = sortState.sort_order
+  const multiplier = order === 'asc' ? 1 : -1
+
+  cardList.value = [...cardList.value].sort((a, b) => {
+    const aValue = getSortComparableValue(a, sortBy)
+    const bValue = getSortComparableValue(b, sortBy)
+
+    if (aValue == null || aValue === '') {
+      return bValue == null || bValue === '' ? 0 : 1
+    }
+    if (bValue == null || bValue === '') {
+      return -1
+    }
+
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return (aValue - bValue) * multiplier
+    }
+
+    return String(aValue).localeCompare(String(bValue), 'zh-CN', { numeric: true }) * multiplier
+  })
+}
+
+const isSortActive = (field: string, order: SortOrder) => (
+  sortState.sort_by === field && sortState.sort_order === order
+)
+
+const saveColumnOrder = () => {
+  localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder.value))
+}
+
+const saveVisibleColumns = () => {
+  localStorage.setItem(COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify(visibleColumnKeys.value))
+}
+
+const loadColumnOrder = () => {
+  const saved = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)
+  if (!saved) {
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(saved)
+    if (!Array.isArray(parsed)) {
+      return
+    }
+
+    const valid = parsed.filter((key): key is DraggableColumnKey =>
+      DEFAULT_DRAGGABLE_COLUMN_ORDER.includes(key as DraggableColumnKey)
+    )
+
+    if (!valid.length) {
+      return
+    }
+
+    const missing = DEFAULT_DRAGGABLE_COLUMN_ORDER.filter(key => !valid.includes(key))
+    columnOrder.value = [...valid, ...missing]
+  } catch (error) {
+    console.error('加载列顺序失败:', error)
+  }
+}
+
+const loadVisibleColumns = () => {
+  const saved = localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY)
+  if (!saved) {
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(saved)
+    if (!Array.isArray(parsed)) {
+      return
+    }
+
+    const valid = parsed.filter((key): key is DraggableColumnKey =>
+      DEFAULT_DRAGGABLE_COLUMN_ORDER.includes(key as DraggableColumnKey)
+    )
+
+    visibleColumnKeys.value = valid
+  } catch (error) {
+    console.error('加载显示列配置失败:', error)
+  }
+}
+
+const handleVisibleColumnsChange = (value: CheckboxValueType[]) => {
+  visibleColumnKeys.value = value.filter((key): key is DraggableColumnKey =>
+    DEFAULT_DRAGGABLE_COLUMN_ORDER.includes(key as DraggableColumnKey)
+  )
+  saveVisibleColumns()
+}
+
+const resetVisibleColumns = () => {
+  visibleColumnKeys.value = [...DEFAULT_DRAGGABLE_COLUMN_ORDER]
+  saveVisibleColumns()
+}
+
+const handleColumnDragStart = (key: DraggableColumnKey, event: DragEvent) => {
+  dragState.draggingKey = key
+  dragState.overKey = ''
+  dragState.dropPosition = 'before'
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', key)
+  }
+}
+
+const handleColumnDragOver = (targetKey: DraggableColumnKey, event: DragEvent) => {
+  if (!dragState.draggingKey || dragState.draggingKey === targetKey) {
+    return
+  }
+
+  event.preventDefault()
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) {
+    return
+  }
+
+  const rect = target.getBoundingClientRect()
+  const midpoint = rect.left + rect.width / 2
+  dragState.overKey = targetKey
+  dragState.dropPosition = event.clientX < midpoint ? 'before' : 'after'
+}
+
+const handleColumnDrop = (targetKey: DraggableColumnKey, event: DragEvent) => {
+  event.preventDefault()
+  const draggingKey = dragState.draggingKey
+  if (!draggingKey || draggingKey === targetKey) {
+    handleColumnDragEnd()
+    return
+  }
+
+  const currentOrder = [...columnOrder.value]
+  const fromIndex = currentOrder.indexOf(draggingKey)
+  const targetIndex = currentOrder.indexOf(targetKey)
+
+  if (fromIndex === -1 || targetIndex === -1) {
+    handleColumnDragEnd()
+    return
+  }
+
+  currentOrder.splice(fromIndex, 1)
+  let insertIndex = currentOrder.indexOf(targetKey)
+  if (dragState.dropPosition === 'after') {
+    insertIndex += 1
+  }
+  currentOrder.splice(insertIndex, 0, draggingKey)
+  columnOrder.value = currentOrder
+  saveColumnOrder()
+  handleColumnDragEnd()
+}
+
+const handleColumnDragEnd = () => {
+  dragState.draggingKey = ''
+  dragState.overKey = ''
+  dragState.dropPosition = 'before'
+}
+
+const handleColumnSort = (field: string, order: SortOrder) => {
+  sortState.sort_by = field
+  sortState.sort_order = order
+  pagination.page = 1
+
+  if (isBatchQueryMode.value) {
+    sortBatchQueryList()
+    return
+  }
+
+  fetchCardList()
 }
 
 // 获取卡片列表
@@ -808,16 +1154,14 @@ const fetchCardList = async () => {
       activated_start: activatedRange.value?.[0] || undefined,
       activated_end: activatedRange.value?.[1] || undefined,
       expired_start: expiredRange.value?.[0] || undefined,
-      expired_end: expiredRange.value?.[1] || undefined
+      expired_end: expiredRange.value?.[1] || undefined,
+      sort_by: sortState.sort_by,
+      sort_order: sortState.sort_order
     }
     
     const response: any = await cardApi.getList(params)
     
-    // 计算使用率
-    cardList.value = (response.items || []).map((card: Card) => ({
-      ...card,
-      usage_percent: formatUsagePercent(card.data_used, getDisplayTotal(card))
-    }))
+    cardList.value = normalizeCardList(response.items || [])
     
     pagination.total = response.total
   } catch (error) {
@@ -1174,12 +1518,10 @@ const handleRowForceResume = async (card: Card) => {
 const handleBatchQuerySuccess = (data: { found: Card[]; not_found: string[] }) => {
   isBatchQueryMode.value = true
   batchQueryNotFound.value = data.not_found
-  cardList.value = data.found.map(card => ({
-    ...card,
-    usage_percent: formatUsagePercent(card.data_used, card.data_total)
-  }))
+  cardList.value = normalizeCardList(data.found)
   pagination.total = data.found.length
   pagination.page = 1
+  sortBatchQueryList()
 }
 
 // 清除批量查询筛选
@@ -1259,6 +1601,9 @@ const getProgressColor = (percent: number) => {
 
 // 初始化
 onMounted(() => {
+  loadColumnOrder()
+  loadVisibleColumns()
+
   // 读取 URL 参数
   const carrierParam = route.query.carrier as string
   if (carrierParam) {
@@ -1422,6 +1767,37 @@ onMounted(() => {
   }
 }
 
+.column-settings {
+  .column-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .column-settings-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d2129;
+  }
+
+  .column-settings-tip {
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: #86909c;
+  }
+
+  .column-checkbox-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+  }
+
+  :deep(.el-checkbox) {
+    margin-right: 0;
+  }
+}
+
 .selection-info {
   padding: 10px 14px;
   background: #e8f3ff;
@@ -1531,6 +1907,73 @@ onMounted(() => {
 
     .el-tag {
       font-size: 12px;
+    }
+  }
+
+  .sortable-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+  }
+
+  .draggable-header {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    cursor: move;
+    user-select: none;
+    position: relative;
+
+    &.dragging {
+      opacity: 0.45;
+    }
+
+    &.drag-over-before::before,
+    &.drag-over-after::after {
+      content: '';
+      position: absolute;
+      top: -8px;
+      bottom: -8px;
+      width: 2px;
+      background: #409eff;
+    }
+
+    &.drag-over-before::before {
+      left: -6px;
+    }
+
+    &.drag-over-after::after {
+      right: -6px;
+    }
+  }
+
+  .drag-handle {
+    color: #c0c4cc;
+    font-size: 12px;
+    letter-spacing: -1px;
+  }
+
+  .sort-buttons {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+  }
+
+  .sort-icon {
+    font-size: 12px;
+    color: #c0c4cc;
+    cursor: pointer;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: #409eff;
+    }
+
+    &.active {
+      color: #409eff;
     }
   }
 

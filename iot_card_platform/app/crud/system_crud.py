@@ -252,7 +252,9 @@ class SysOperationLogCRUD:
         user_id: Optional[int] = None,
         user_ids: Optional[List[int]] = None,
         module: Optional[str] = None,
+        modules: Optional[List[str]] = None,
         action: Optional[str] = None,
+        actions: Optional[List[str]] = None,
         target_type: Optional[str] = None,
         target_id: Optional[int] = None,
         is_success: Optional[bool] = None,
@@ -277,9 +279,17 @@ class SysOperationLogCRUD:
             query = query.where(SysOperationLogModel.module == module)
             count_query = count_query.where(SysOperationLogModel.module == module)
 
+        if modules:
+            query = query.where(SysOperationLogModel.module.in_(modules))
+            count_query = count_query.where(SysOperationLogModel.module.in_(modules))
+
         if action:
             query = query.where(SysOperationLogModel.action == action)
             count_query = count_query.where(SysOperationLogModel.action == action)
+
+        if actions:
+            query = query.where(SysOperationLogModel.action.in_(actions))
+            count_query = count_query.where(SysOperationLogModel.action.in_(actions))
 
         if target_type:
             query = query.where(SysOperationLogModel.target_type == target_type)

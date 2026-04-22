@@ -193,6 +193,36 @@ async def get_operation_logs(
     )
 
 
+@router.get("/logs/card-records", summary="获取卡片续费/补量记录")
+async def get_card_records(
+    record_type: str = Query(..., description="记录类型: renew/topup"),
+    start_time: Optional[datetime] = Query(None, description="开始时间"),
+    end_time: Optional[datetime] = Query(None, description="结束时间"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """获取卡片续费/补量记录"""
+    logs, total = await OperationLogService.get_card_records(
+        db=db,
+        current_user_id=current_user.id,
+        current_user_level=current_user.user_level,
+        record_type=record_type,
+        start_time=start_time,
+        end_time=end_time,
+        page=page,
+        page_size=page_size
+    )
+
+    return PageResponseModel(
+        data=logs,
+        total=total,
+        page=page,
+        page_size=page_size
+    )
+
+
 # ============ 告警规则 ============
 
 @router.get("/alerts/rules", summary="获取告警规则")
