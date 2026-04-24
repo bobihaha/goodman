@@ -11,7 +11,7 @@
 5. 本地或测试环境用 Docker 构建生产镜像验证
 6. 上线前备份生产数据库
 7. 先执行兼容型 SQL
-8. 再用 `docker-compose.prod.yml` 发布线上
+8. 再用当前生产编排文件发布线上
 9. 执行健康检查
 10. 做业务验收
 11. 观察日志 30 到 60 分钟
@@ -82,8 +82,8 @@
 ~~~bash
 bash deploy/scripts/backup_mysql.sh
 python scripts/run_migration.py app/db/migrations/xxx.sql
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+docker compose build
+docker compose up -d
 bash deploy/scripts/health_check.sh
 ~~~
 
@@ -114,10 +114,10 @@ bash deploy/scripts/health_check.sh
 bash deploy/scripts/backup_mysql.sh
 
 # 2. 构建镜像
-docker compose -f docker-compose.prod.yml build
+docker compose build
 
 # 3. 启动新版本
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 
 # 4. 健康检查
 bash deploy/scripts/health_check.sh
@@ -133,10 +133,10 @@ bash deploy/scripts/backup_mysql.sh
 python scripts/run_migration.py app/db/migrations/xxx.sql
 
 # 3. 构建镜像
-docker compose -f docker-compose.prod.yml build
+docker compose build
 
 # 4. 启动新版本
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 
 # 5. 健康检查
 bash deploy/scripts/health_check.sh

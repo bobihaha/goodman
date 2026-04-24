@@ -42,6 +42,7 @@ class IotCardService:
         SuspendType.expired,
         SuspendType.card_exceed,
         SuspendType.pool_exceed,
+        SuspendType.device_separation,
     }
 
     async def _get_stock_out_no_map(
@@ -469,6 +470,9 @@ class IotCardService:
             )
             if not suspend_success:
                 raise BusinessException(code=502, msg="供应商停机请求提交失败")
+            if suspend_callback_no:
+                await SuspendActionService.mark_refresh_resume_pending(db, suspend_callback_no)
+                SuspendActionService.schedule_refresh_resume_fallback(suspend_callback_no)
 
             suspended_status = await self._wait_for_supplier_status(
                 db=db,
@@ -478,7 +482,15 @@ class IotCardService:
                 timeout_seconds=settings.refresh_suspend_confirm_timeout_seconds
             )
             if suspended_status != CardStatus.suspended.value:
-                raise BusinessException(code=502, msg="重启失败：停机状态未在规定时间内生效")
+                return {
+                    "card_id": card.id,
+                    "iccid": card.iccid,
+                    "action": "restart",
+                    "status": "processing",
+                    "suspend_callback_no": suspend_callback_no,
+                    "resume_callback_no": None,
+                    "message": "重启请求已提交，停机处理中，请稍后刷新页面查看状态"
+                }
         elif current_supplier_status != CardStatus.suspended.value:
             raise BusinessException(code=400, msg=f"当前卡片状态不支持重启: {current_supplier_status or current_card_status}")
 
@@ -490,6 +502,13 @@ class IotCardService:
         )
         if not resume_success:
             raise BusinessException(code=502, msg="供应商复机请求提交失败")
+        if suspend_callback_no:
+            await SuspendActionService.mark_refresh_resume_submitted(
+                db=db,
+                suspend_callback_no=suspend_callback_no,
+                resume_callback_no=resume_callback_no,
+                submitted=resume_success
+            )
 
         resumed_status = await self._wait_for_supplier_status(
             db=db,
@@ -758,6 +777,7 @@ class IotCardService:
                 "ICCID": d["iccid"],
                 "IMSI": d["imsi"] or "",
                 "号码": d["msisdn"] or "",
+                "材质": d.get("material_name") or "",
                 "运营商": d["carrier_name"] or "",
                 "套餐规格": d["spec_name"] or "",
                 "状态": d["status_name"] or "",
@@ -2653,36 +2673,49 @@ class IotCardService:
                 history_map[h.card_id] = []
             history_map[h.card_id].append(h)
 
+        month_labels: List[str] = []
+        if start and end:
+            cursor_year = start.year
+            cursor_month = start.month
+            while (cursor_year, cursor_month) <= (end.year, end.month):
+                month_labels.append(f"{cursor_year:04d}-{cursor_month:02d}")
+                if cursor_month == 12:
+                    cursor_year += 1
+                    cursor_month = 1
+                else:
+                    cursor_month += 1
+        else:
+            month_labels = sorted({
+                (h.snapshot_month or h.snapshot_date.strftime("%Y-%m"))
+                for h in history_records
+            })
+
         export_data = []
         for card in cards:
             d = card.to_dict()
             histories = history_map.get(card.id, [])
+            month_history_map = {}
+            for h in histories:
+                month_key = h.snapshot_month or h.snapshot_date.strftime("%Y-%m")
+                existing = month_history_map.get(month_key)
+                if existing is None or h.snapshot_date > existing.snapshot_date:
+                    month_history_map[month_key] = h
 
-            if histories:
-                for h in histories:
-                    export_data.append({
-                        "ICCID": d["iccid"],
-                        "运营商": d["carrier_name"],
-                        "套餐规格": d["spec_name"],
-                        "快照日期": h.snapshot_date.strftime("%Y-%m-%d"),
-                        "快照类型": "月末" if h.snapshot_type == "month_end" else "周期末",
-                        "快照月份": h.snapshot_month or "",
-                        "已用流量(MB)": h.data_used,
-                        "总流量(MB)": h.data_total,
-                        "使用率(%)": round((h.data_used / h.data_total * 100), 2) if h.data_total else 0,
-                    })
-            else:
-                export_data.append({
-                    "ICCID": d["iccid"],
-                    "运营商": d["carrier_name"],
-                    "套餐规格": d["spec_name"],
-                    "快照日期": "当前",
-                    "快照类型": "",
-                    "快照月份": "",
-                    "已用流量(MB)": d["data_used"],
-                    "总流量(MB)": d["data_total"],
-                    "使用率(%)": d["data_usage_percent"],
-                })
+            row = {
+                "ICCID": d["iccid"],
+                "号码": d["msisdn"] or "",
+                "IMSI": d["imsi"] or "",
+                "运营商": d["carrier_name"],
+                "套餐规格": d["spec_name"],
+                "状态": d["status_name"],
+                "总流量(GB)": round((d["data_total"] or 0) / 1024, 2),
+            }
+
+            for month_label in month_labels:
+                record = month_history_map.get(month_label)
+                row[f"{month_label}用量(GB)"] = round((record.data_used or 0) / 1024, 2) if record else ""
+
+            export_data.append(row)
 
         return export_data
 

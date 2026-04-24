@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS `stock_in_records` (
     -- 生命周期配置
     `test_expire_date` DATE DEFAULT NULL COMMENT '测试期到期日',
     `silent_expire_date` DATE NOT NULL COMMENT '沉默期到期日',
+    `package_period_count` INT DEFAULT NULL COMMENT '入库套餐周期数量',
     
     `card_count` INT NOT NULL DEFAULT 0 COMMENT '卡片数量',
     `success_count` INT NOT NULL DEFAULT 0 COMMENT '成功数量',
@@ -107,7 +108,6 @@ CREATE TABLE IF NOT EXISTS `stock_recycle_record_cards` (
     KEY `idx_record_id` (`record_id`),
     KEY `idx_card_id` (`card_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='回收记录卡片关联表';
-
 
 
 

@@ -165,6 +165,69 @@ frontend/src/
 - 进度条颜色根据使用率动态变化
 - 操作成功后自动刷新数据
 
+## 2026-04 最近需求补充
+
+### 1. 卡片列表支持自定义显示列
+
+- 工具栏新增“设置列”按钮
+- 用户可以勾选或取消勾选列表显示列，例如隐藏 `IMSI`
+- 列显示配置会持久化到浏览器本地，下次进入页面仍保持上次选择
+- 与列表原有的拖拽列顺序持久化互不冲突
+
+涉及位置：
+
+- `frontend/src/views/cards/list/index.vue`
+
+### 2. 卡片列表导出改为真正可打开的 Excel
+
+- 普通“导出”按钮不再把 JSON 结果直接按 `.xlsx` 下载
+- 前端改为按二进制 Blob 下载后端返回的文件
+- 后端接口 `/api/v1/cards/export` 直接生成真实的 XLSX 文件
+- 运维或联调时，如果用户反馈“文件格式无效、无法打开”，优先检查接口返回头和文件内容是否为 Excel 二进制
+
+涉及位置：
+
+- `frontend/src/api/modules/card.ts`
+- `frontend/src/views/cards/list/index.vue`
+- `app/api/v1/iot_card.py`
+
+### 3. 历史用量导出改为按月份展开列
+
+- 选择时间范围后，导出表会按月份分别输出用量列
+- 例如选择 `2026-02` 到 `2026-04`，表头会出现：
+  - `2026-02用量(GB)`
+  - `2026-03用量(GB)`
+  - `2026-04用量(GB)`
+- 每个月取该卡当月最新快照作为导出口径
+- 月份范围按自然月起止时间处理，避免跨月边界导致某月导出为 `0`
+
+涉及位置：
+
+- `frontend/src/views/cards/list/components/ExportHistoryDialog.vue`
+- `app/services/iot_card_service.py`
+
+### 4. 超级管理员手动停卡后，普通用户不可复机
+
+- 后端会检查最近一次手动停卡日志的操作人
+- 如果该次停卡人为超级管理员，则普通用户复机会被拦截
+- 超级管理员仍可复机
+- 前端在单卡复机和批量复机场景都补了明确提示
+
+涉及位置：
+
+- `app/crud/suspend_crud.py`
+- `app/services/suspend_service.py`
+- `frontend/src/views/cards/list/index.vue`
+- `frontend/src/views/cards/detail/index.vue`
+- `frontend/src/views/pools/detail/index.vue`
+- `frontend/src/views/cards/list/components/BatchResumeDialog.vue`
+
+### 5. 超流量停卡但供应商实际未停时的复机兼容
+
+- 如果本地因超量被标记停卡，但供应商侧实际上已是激活状态
+- 用户点击复机时，系统会根据供应商返回结果自动纠正本地状态
+- 这类问题排查时，不要只看本地卡状态，还要同时看供应商接口回包和停复机日志
+
 ## 📝 类型定义更新
 
 ```typescript
@@ -239,7 +302,6 @@ export interface CardBatchSuspendRequest {
 
 **开发完成时间**：2026-02-08  
 **开发者**：AI Assistant (Gemini 3 Pro)
-
 
 
 

@@ -32,8 +32,33 @@
                 <el-option
                   v-for="pkg in supplierPackages"
                   :key="pkg.id"
-                  :label="`${pkg.name} - ${pkg.carrier_name}/${formatFlow(pkg.flow_size)}/${pkg.period_name}`"
+                  :label="`${pkg.name} - ${pkg.carrier_name}/${formatFlow(pkg.flow_size)}/${pkg.period_name}${formatPackagePeriod(pkg) ? ` - ${formatPackagePeriod(pkg)}` : ''}`"
                   :value="pkg.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="套餐周期" prop="package_period_count">
+              <el-select
+                v-model="formData.package_period_count"
+                :disabled="!selectedPackage"
+                placeholder="请选择套餐周期"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="period in stockPeriodOptions"
+                  :key="period.value"
+                  :label="period.label"
+                  :value="period.value"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="材质" prop="material">
+              <el-select v-model="formData.material" placeholder="请选择卡片材质" style="width: 100%">
+                <el-option
+                  v-for="item in CARD_MATERIAL_OPTIONS"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
                 />
               </el-select>
             </el-form-item>
@@ -161,6 +186,12 @@
             <el-descriptions-item label="底层套餐">
               {{ selectedPackage?.name || '-' }}
             </el-descriptions-item>
+            <el-descriptions-item label="套餐周期">
+              {{ formatSelectedPeriod(formData.package_period_count, selectedPackage?.period_type) || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="材质">
+              {{ selectedMaterialLabel || '-' }}
+            </el-descriptions-item>
             <el-descriptions-item label="测试期截止日期">
               {{ formData.test_expire_date || '-' }}
             </el-descriptions-item>
@@ -199,12 +230,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UploadFilled, Download } from '@element-plus/icons-vue'
 import { stockApi } from '@/api/modules/stock'
 import { supplierApi } from '@/api/modules/supplier'
 import { packageApi } from '@/api/modules/package'
+import { CARD_MATERIAL_OPTIONS } from '@/constants/card'
 import * as XLSX from 'xlsx'
 
 // 当前步骤
@@ -214,6 +246,8 @@ const currentStep = ref(0)
 const formData = reactive({
   supplier_id: undefined as number | undefined,
   package_id: undefined as number | undefined,
+  package_period_count: undefined as number | undefined,
+  material: '',
   test_expire_date: '',
   silent_expire_date: '',
   remark: ''
@@ -223,6 +257,8 @@ const formData = reactive({
 const formRules = {
   supplier_id: [{ required: true, message: '请选择供应商', trigger: 'change' }],
   package_id: [{ required: true, message: '请选择底层套餐', trigger: 'change' }],
+  package_period_count: [{ required: true, message: '请选择套餐周期', trigger: 'change' }],
+  material: [{ required: true, message: '请选择卡片材质', trigger: 'change' }],
   silent_expire_date: [{ required: true, message: '请选择沉默期截止日期', trigger: 'change' }]
 }
 
@@ -256,6 +292,47 @@ const selectedSupplier = computed(() => {
 // 选中的套餐
 const selectedPackage = computed(() => {
   return supplierPackages.value.find((p: any) => p.id === formData.package_id)
+})
+
+const selectedMaterialLabel = computed(() => {
+  return CARD_MATERIAL_OPTIONS.find(item => item.value === formData.material)?.label
+})
+
+const getDefaultPackagePeriodCount = (pkg?: any) => {
+  if (!pkg) return undefined
+  if (pkg.period_type === 'monthly') {
+    return Number(pkg.period_months || 1)
+  }
+  if (pkg.period_type === 'yearly') {
+    if (pkg.period_days && Number(pkg.period_days) % 360 === 0) {
+      return Number(pkg.period_days) / 360
+    }
+    return 1
+  }
+  return undefined
+}
+
+const formatSelectedPeriod = (count?: number, periodType?: string) => {
+  if (!count) return ''
+  return periodType === 'yearly' ? `${count}年` : `${count}个月`
+}
+
+const stockPeriodOptions = computed(() => {
+  const pkg = selectedPackage.value
+  if (!pkg) return []
+
+  const presetValues = pkg.period_type === 'yearly' ? [1, 2, 3, 5, 6] : [1, 3, 6, 12, 24, 36, 50, 60]
+  const defaultValue = getDefaultPackagePeriodCount(pkg)
+  const values = Array.from(new Set(defaultValue ? [...presetValues, defaultValue] : presetValues)).sort((a, b) => a - b)
+
+  return values.map(value => ({
+    value,
+    label: formatSelectedPeriod(value, pkg.period_type)
+  }))
+})
+
+watch(selectedPackage, (pkg) => {
+  formData.package_period_count = getDefaultPackagePeriodCount(pkg)
 })
 
 // 获取供应商列表
@@ -324,6 +401,20 @@ const formatFlow = (mb: number) => {
     return `${(mb / 1024).toFixed(0)}GB`
   }
   return `${mb}MB`
+}
+
+const formatPackagePeriod = (pkg?: any) => {
+  if (!pkg) return ''
+  if (pkg.period_type === 'monthly') {
+    return pkg.period_months ? `${pkg.period_months}个月` : '月包'
+  }
+  if (pkg.period_type === 'yearly') {
+    if (pkg.period_days && Number(pkg.period_days) % 360 === 0) {
+      return `${Number(pkg.period_days) / 360}年`
+    }
+    return pkg.period_days ? `${pkg.period_days}天` : '年包'
+  }
+  return ''
 }
 
 // 上一步
@@ -500,6 +591,8 @@ const handleSubmit = async () => {
     const batch = await stockApi.createBatch({
       supplier_id: formData.supplier_id!,
       package_id: formData.package_id!,
+      package_period_count: formData.package_period_count!,
+      material: formData.material,
       test_expire_date: formData.test_expire_date || undefined,
       silent_expire_date: formData.silent_expire_date,
       purchase_date: new Date().toISOString().split('T')[0], // 当前日期
@@ -528,6 +621,8 @@ const handleSubmit = async () => {
       cardList.value = []
       formData.supplier_id = undefined
       formData.package_id = undefined
+      formData.package_period_count = undefined
+      formData.material = ''
       formData.test_expire_date = ''
       formData.silent_expire_date = ''
       formData.remark = ''

@@ -50,13 +50,34 @@ export const PERIOD_TYPE_OPTIONS = [
   { label: '年包', value: 'yearly' }
 ]
 
+// 卡片材质映射
+export const CARD_MATERIAL_MAP = {
+  plastic_plug: '塑料插拔卡',
+  industrial_plug_large: '工业插拔大卡',
+  industrial_plug_medium: '工业插拔中卡',
+  industrial_plug_small: '工业插拔小卡',
+  standard_smd_5_6: '普通5*6贴片卡',
+  industrial_smd_5_6: '工业5*6贴片卡'
+} as const
+
+// 卡片材质选项
+export const CARD_MATERIAL_OPTIONS = [
+  { label: '塑料插拔卡', value: 'plastic_plug' },
+  { label: '工业插拔大卡', value: 'industrial_plug_large' },
+  { label: '工业插拔中卡', value: 'industrial_plug_medium' },
+  { label: '工业插拔小卡', value: 'industrial_plug_small' },
+  { label: '普通5*6贴片卡', value: 'standard_smd_5_6' },
+  { label: '工业5*6贴片卡', value: 'industrial_smd_5_6' }
+]
+
 // 停卡类型映射
 export const SUSPEND_TYPE_MAP = {
   none: '未停卡',
   manual: '手动停卡',
   expired: '到期停卡',
   pool_exceed: '流量池超限',
-  card_exceed: '单卡超量'
+  card_exceed: '单卡超量',
+  device_separation: '机卡分离锁卡'
 } as const
 
 // 续费周期选项
@@ -72,8 +93,6 @@ export const BATCH_QUERY_MAX_COUNT = 10000
 
 // 流量单位转换阈值（MB）
 export const FLOW_UNIT_THRESHOLD = 1024
-
-
 
 
 

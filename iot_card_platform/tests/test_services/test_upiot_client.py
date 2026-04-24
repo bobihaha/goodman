@@ -248,6 +248,52 @@ class TestGetCardUsage:
         assert result["iccid"] == "898600000000001"
 
 
+class TestGetCardImeiInfo:
+    @pytest.mark.asyncio
+    async def test_returns_imei_payload_and_lock_status(self, client):
+        with patch.object(
+            client,
+            "_get",
+            AsyncMock(side_effect=[
+                {"code": 200, "data": {"imei": "868327073452754", "device": "Communication Technology"}},
+                {"code": 200, "data": {"status": "bind_support", "triggered": False}},
+            ])
+        ), patch.object(
+            client,
+            "_get_with_business_code",
+            AsyncMock(return_value={"code": 200, "msg": "否"})
+        ):
+            result = await client.get_card_imei_info("898600000000001")
+
+        assert result["iccid"] == "898600000000001"
+        assert result["imei"] == "868327073452754"
+        assert result["device_name"] == "Communication Technology"
+        assert result["bind_status"] == "bind_support"
+        assert result["lock_triggered"] is False
+        assert result["separation_stop_msg"] == "否"
+
+    @pytest.mark.asyncio
+    async def test_lock_status_failure_does_not_break_query(self, client):
+        with patch.object(
+            client,
+            "_get",
+            AsyncMock(side_effect=[
+                {"code": 200, "data": {"imei": "868327073452754", "device": "Communication Technology"}},
+                Exception("lock status unsupported"),
+            ])
+        ), patch.object(
+            client,
+            "_get_with_business_code",
+            AsyncMock(side_effect=Exception("stop_reason unsupported"))
+        ):
+            result = await client.get_card_imei_info("898600000000001")
+
+        assert result["imei"] == "868327073452754"
+        assert result["device_name"] == "Communication Technology"
+        assert result["bind_status"] is None
+        assert result["lock_triggered"] is None
+
+
 class TestGetBatchUsage:
     @pytest.mark.asyncio
     async def test_single_batch(self, client):

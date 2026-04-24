@@ -11,13 +11,88 @@ from app.crud.stock_crud import (
 )
 from app.db.models.stock import PurchaseBatchModel
 from app.db.models.package import SupplierPackageModel
+from app.db.models.iot_card import IotCardModel
 from app.db.models.supplier import SupplierModel
 from app.db.models.sys_user import UserLevel
 from app.utils.exceptions import BusinessException
 
 
+def _format_package_period(period_type: Optional[str], period_months: Optional[int] = None, period_days: Optional[int] = None) -> Optional[str]:
+    """格式化底层套餐定义周期。"""
+    if period_type == "monthly":
+        if period_months:
+            return f"{int(period_months)}个月"
+        return "月包"
+    if period_type == "yearly":
+        if period_days and int(period_days) % 360 == 0:
+            return f"{int(period_days) // 360}年"
+        if period_days:
+            return f"{int(period_days)}天"
+        return "年包"
+    return None
+
+
+def _format_period_count(period_type: Optional[str], period_count: Optional[int]) -> Optional[str]:
+    """格式化按周期类型录入的周期数量。"""
+    if not period_count:
+        return None
+    if period_type == "yearly":
+        return f"{int(period_count)}年"
+    return f"{int(period_count)}个月"
+
+
 class StockService:
     """出入库服务"""
+
+    async def _enrich_stock_card(self, db: AsyncSession, item) -> dict:
+        """补充库存卡片关联的供应商、批次、底层套餐周期信息。"""
+        data = item.to_dict()
+
+        if item.supplier_id:
+            supplier_query = select(SupplierModel.name).where(
+                SupplierModel.id == item.supplier_id,
+                SupplierModel.is_deleted == 0
+            )
+            supplier_result = await db.execute(supplier_query)
+            data["supplier_name"] = supplier_result.scalar_one_or_none()
+        else:
+            data["supplier_name"] = None
+
+        data["batch_no"] = None
+        data["base_package_id"] = None
+        data["base_package_name"] = None
+        data["package_period"] = None
+
+        if item.batch_id:
+            batch_query = select(PurchaseBatchModel).where(
+                PurchaseBatchModel.id == item.batch_id,
+                PurchaseBatchModel.is_deleted == 0
+            )
+            batch_result = await db.execute(batch_query)
+            batch = batch_result.scalar_one_or_none()
+            if batch:
+                data["batch_no"] = batch.batch_no
+                data["base_package_id"] = batch.package_id
+                data["package_period_count"] = batch.package_period_count
+
+                package_query = select(SupplierPackageModel).where(
+                    SupplierPackageModel.id == batch.package_id,
+                    SupplierPackageModel.is_deleted == 0
+                )
+                package_result = await db.execute(package_query)
+                package = package_result.scalar_one_or_none()
+                if package:
+                    data["base_package_name"] = package.name
+                data["package_period"] = _format_period_count(
+                    batch.period_type.value if batch.period_type else None,
+                    batch.package_period_count
+                ) or _format_package_period(
+                    package.period_type.value if package and package.period_type else None,
+                    package.period_months if package else None,
+                    package.period_days if package else None
+                )
+
+        return data
 
     # ============ 采购批次 ============
 
@@ -26,6 +101,8 @@ class StockService:
         db: AsyncSession,
         supplier_id: int,
         package_id: int,
+        package_period_count: int,
+        material: str,
         test_expire_date,
         silent_expire_date,
         purchase_date,
@@ -42,6 +119,8 @@ class StockService:
         if not package:
             raise BusinessException(code=404, msg="底层套餐不存在")
 
+        material_value = material.value if hasattr(material, "value") else material
+
         batch = await batch_crud.create(
             db=db,
             supplier_id=supplier_id,
@@ -49,6 +128,8 @@ class StockService:
             carrier=package.carrier.value,
             flow_size=package.flow_size,
             period_type=package.period_type.value,
+            package_period_count=package_period_count,
+            material=material_value,
             test_expire_date=test_expire_date,
             silent_expire_date=silent_expire_date,
             purchase_date=purchase_date,
@@ -238,29 +319,7 @@ class StockService:
 
         result = []
         for item in items:
-            data = item.to_dict()
-
-            if item.supplier_id:
-                supplier_query = select(SupplierModel.name).where(
-                    SupplierModel.id == item.supplier_id,
-                    SupplierModel.is_deleted == 0
-                )
-                supplier_result = await db.execute(supplier_query)
-                data["supplier_name"] = supplier_result.scalar_one_or_none()
-            else:
-                data["supplier_name"] = None
-
-            if item.batch_id:
-                batch_query = select(PurchaseBatchModel.batch_no).where(
-                    PurchaseBatchModel.id == item.batch_id,
-                    PurchaseBatchModel.is_deleted == 0
-                )
-                batch_result = await db.execute(batch_query)
-                data["batch_no"] = batch_result.scalar_one_or_none()
-            else:
-                data["batch_no"] = None
-
-            result.append(data)
+            result.append(await self._enrich_stock_card(db, item))
 
         return result, total
 
@@ -419,7 +478,27 @@ class StockService:
         MAX_BATCH_SIZE = 10000
         if len(iccids) > MAX_BATCH_SIZE:
             raise BusinessException(code=400, msg=f"单次最多查询{MAX_BATCH_SIZE}张卡片")
-        return await stock_summary_crud.batch_query_cards(db, iccids)
+        query_result = await stock_summary_crud.batch_query_cards(db, iccids)
+
+        found_items = []
+        for item in query_result["found"]:
+            card_id = item.get("id")
+            if not card_id:
+                found_items.append(item)
+                continue
+
+            card_query = select(IotCardModel).where(
+                IotCardModel.id == card_id,
+                IotCardModel.is_deleted == 0
+            )
+            card_result = await db.execute(card_query)
+            card = card_result.scalar_one_or_none()
+            found_items.append(await self._enrich_stock_card(db, card) if card else item)
+
+        return {
+            "found": found_items,
+            "not_found": query_result["not_found"]
+        }
 
     async def export_inventory(
         self,
@@ -431,7 +510,7 @@ class StockService:
         sort_order: str = "desc"
     ) -> List[dict]:
         """导出库存数据"""
-        return await stock_summary_crud.export_inventory(
+        items = await stock_summary_crud.export_inventory(
             db=db,
             supplier_id=supplier_id,
             carrier=carrier,
@@ -439,6 +518,21 @@ class StockService:
             sort_by=sort_by,
             sort_order=sort_order
         )
+        export_items = []
+        for item in items:
+            card_id = item.get("id")
+            if not card_id:
+                export_items.append(item)
+                continue
+
+            card_query = select(IotCardModel).where(
+                IotCardModel.id == card_id,
+                IotCardModel.is_deleted == 0
+            )
+            card_result = await db.execute(card_query)
+            card = card_result.scalar_one_or_none()
+            export_items.append(await self._enrich_stock_card(db, card) if card else item)
+        return export_items
 
     # ============ Excel批量出库 ============
 

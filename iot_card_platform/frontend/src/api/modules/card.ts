@@ -55,6 +55,8 @@ export const cardApi = {
     status: string
     changed: boolean
     changed_fields: string[]
+    device_separation_detection_status?: 'detected' | 'clear' | 'pending' | 'unsupported' | 'unknown'
+    device_separation_detection_message?: string
   }> {
     return post(`/sync/cards/${iccid}`)
   },

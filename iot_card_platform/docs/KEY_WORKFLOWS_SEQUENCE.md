@@ -163,7 +163,55 @@ sequenceDiagram
 - 同步成功更新卡片后，流量池统计没有刷新
 - 状态被同步更新后，前端页面仍显示旧数据
 
-## 4. 手动停复机与供应商回调链路
+## 4. 单卡 / 批量续费链路
+
+适用场景：
+
+- 续费成功但到期日没变
+- 续费记录页没有对应记录
+- 点“续费 1 个月”却被延长 3 个月
+
+```mermaid
+sequenceDiagram
+    participant U as "运营人员/客户"
+    participant FE as "卡片列表续费弹窗"
+    participant API as "iot_card API"
+    participant SVC as "IotCardService"
+    participant PKG as "sale_package_crud"
+    participant DB as "MySQL"
+    participant LOG as "sys_operation_logs"
+    participant RPT as "续费记录页"
+
+    U->>FE: 选择续费月数(1/3/6/12)
+    FE->>API: POST /api/v1/cards/{id}/renew 或 /batch/renew-by-iccids
+    API->>SVC: purchase_card_renew(...) / batch_renew_by_iccids(...)
+    SVC->>DB: 查询卡片当前 expired_at / sale_package_id / period_type
+    SVC->>PKG: 查询销售套餐基础周期
+    PKG-->>SVC: period_type + 基础周期字段
+    SVC->>SVC: 以“本次选择的续费月数/年数”为准计算新到期日
+    SVC->>DB: 更新 iot_cards.expired_at
+    SVC->>LOG: 写 cards/renew 操作日志
+    DB-->>SVC: 提交成功
+    SVC-->>API: 续费结果
+    API-->>FE: 续费成功
+    RPT->>LOG: 聚合 renew 操作日志
+    LOG-->>RPT: 操作时间 + 卡号 + 具体续费周期
+```
+
+### 关键节点
+
+- 续费接口参数语义是“续费月数”，不是“续几个出库周期”
+- 到期日更新在 `app/services/iot_card_service.py`
+- 续费记录页当前基于 `sys_operation_logs` 聚合
+- 如果日志漏写，页面会显示“续费成功但续费记录为空”
+
+### 容易出问题的点
+
+- 错把 `iot_cards.period_count` 当成本次续费时长，导致“续费 1 个月”被放大
+- 历史销售套餐 `period_months / period_days` 缺失，导致旧逻辑算不出新到期日
+- 批量续费路径漏写操作日志，导致记录页查不到
+
+## 5. 手动停复机与供应商回调链路
 
 适用场景：
 
@@ -221,7 +269,7 @@ sequenceDiagram
 - 回调异常被吞掉，接口仍返回 `success`
 - 同步任务或回调把手工状态再次覆盖
 
-## 5. 模块联动总览
+## 6. 模块联动总览
 
 ### 登录与鉴权链路会影响
 
@@ -256,7 +304,7 @@ sequenceDiagram
 - H5 操作结果
 - 后续同步纠偏
 
-## 6. 使用建议
+## 7. 使用建议
 
 当你准备修改某条链路时，建议做这三件事：
 

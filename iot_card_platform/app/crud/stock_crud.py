@@ -47,7 +47,7 @@ def _format_package_period(period_type: Optional[str], period_months: Optional[i
 
 
 def _format_period_count(period_type: Optional[str], period_count: Optional[int]) -> Optional[str]:
-    """格式化出库选择的成交周期展示。"""
+    """格式化按周期类型记录的周期数量展示。"""
     if not period_count:
         return None
     if period_type == "yearly":
@@ -66,6 +66,8 @@ class PurchaseBatchCRUD:
         carrier: str,
         flow_size: int,
         period_type: str,
+        package_period_count: Optional[int],
+        material: Optional[str],
         test_expire_date,
         silent_expire_date,
         purchase_date,
@@ -80,6 +82,8 @@ class PurchaseBatchCRUD:
             carrier=carrier,
             flow_size=flow_size,
             period_type=period_type,
+            package_period_count=package_period_count,
+            material=material,
             test_expire_date=test_expire_date,
             silent_expire_date=silent_expire_date,
             purchase_date=purchase_date,
@@ -245,6 +249,7 @@ class StockInCRUD:
                 carrier=batch.carrier,
                 flow_size=batch.flow_size,
                 period_type=batch.period_type,
+                material=batch.material,
                 test_expire_date=batch.test_expire_date,
                 silent_expire_date=batch.silent_expire_date,
                 data_used=0,
@@ -269,10 +274,12 @@ class StockInCRUD:
         new_record_sql = """
             INSERT INTO stock_in_records 
             (supplier_id, package_id, test_expire_date, silent_expire_date,
+             package_period_count,
              record_no, batch_id, card_count, success_count, failed_count,
              remark, operator_id, created_at, updated_at)
             VALUES 
             (:supplier_id, :package_id, :test_expire_date, :silent_expire_date,
+             :package_period_count,
              :record_no, :batch_id, :card_count, :success_count, :failed_count,
              :remark, :operator_id, NOW(), NOW())
         """
@@ -281,6 +288,7 @@ class StockInCRUD:
             "package_id": batch.package_id,
             "test_expire_date": batch.test_expire_date,
             "silent_expire_date": batch.silent_expire_date,
+            "package_period_count": batch.package_period_count,
             "record_no": record.record_no,
             "batch_id": batch_id,
             "card_count": len(cards),
@@ -831,13 +839,12 @@ class StockInRecordCRUD:
             SELECT 
                 sir.id, sir.supplier_id, sir.package_id,
                 sir.test_expire_date, sir.silent_expire_date,
+                sir.package_period_count,
                 sir.card_count, sir.success_count, sir.failed_count,
                 sir.remark, sir.operator_id, sir.created_at,
                 s.name as supplier_name,
                 sp.name as package_name,
                 sp.period_type,
-                sp.period_months,
-                sp.period_days,
                 u.name as operator_name
             FROM stock_in_records sir
             LEFT JOIN suppliers s ON sir.supplier_id = s.id
@@ -859,7 +866,8 @@ class StockInRecordCRUD:
                 "supplier_name": row.supplier_name,
                 "package_id": row.package_id,
                 "package_name": row.package_name,
-                "package_period": _format_package_period(row.period_type, row.period_months, row.period_days),
+                "package_period_count": row.package_period_count,
+                "package_period": _format_period_count(row.period_type, row.package_period_count),
                 "test_expire_date": row.test_expire_date.strftime("%Y-%m-%d") if row.test_expire_date else None,
                 "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
                 "card_count": row.card_count,
@@ -882,13 +890,12 @@ class StockInRecordCRUD:
             SELECT 
                 sir.id, sir.supplier_id, sir.package_id,
                 sir.test_expire_date, sir.silent_expire_date,
+                sir.package_period_count,
                 sir.card_count, sir.success_count, sir.failed_count,
                 sir.remark, sir.operator_id, sir.created_at,
                 s.name as supplier_name,
                 sp.name as package_name,
                 sp.period_type,
-                sp.period_months,
-                sp.period_days,
                 u.name as operator_name
             FROM stock_in_records sir
             LEFT JOIN suppliers s ON sir.supplier_id = s.id
@@ -931,7 +938,8 @@ class StockInRecordCRUD:
             "supplier_name": row.supplier_name,
             "package_id": row.package_id,
             "package_name": row.package_name,
-            "package_period": _format_package_period(row.period_type, row.period_months, row.period_days),
+            "package_period_count": row.package_period_count,
+            "package_period": _format_period_count(row.period_type, row.package_period_count),
             "test_expire_date": row.test_expire_date.strftime("%Y-%m-%d") if row.test_expire_date else None,
             "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
             "card_count": row.card_count,
@@ -1469,7 +1477,7 @@ class CardStockRecordCRUD:
             SELECT 'in' as record_type, sirc.record_id, sirc.iccid, sirc.created_at,
                    sirc.test_expire_date, sirc.silent_expire_date,
                    sirc.supplier_name, sirc.base_package_name,
-                   sp.period_type, sp.period_months, sp.period_days,
+                   sp.period_type, sir.package_period_count,
                    u.name as operator_name
             FROM stock_in_record_cards sirc
             LEFT JOIN stock_in_records sir ON sirc.record_id = sir.id
@@ -1511,7 +1519,7 @@ class CardStockRecordCRUD:
                 "silent_expire_date": row.silent_expire_date.strftime("%Y-%m-%d") if row.silent_expire_date else None,
                 "supplier_name": row.supplier_name,
                 "base_package_name": row.base_package_name,
-                "package_period": _format_package_period(row.period_type, row.period_months, row.period_days),
+                "package_period": _format_period_count(row.period_type, row.package_period_count),
                 "sale_package_name": None,
                 "target_user_name": None
             })

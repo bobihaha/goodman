@@ -32,6 +32,8 @@ async def create_batch(
         db=db,
         supplier_id=request.supplier_id,
         package_id=request.package_id,
+        package_period_count=request.package_period_count,
+        material=request.material,
         test_expire_date=request.test_expire_date,
         silent_expire_date=request.silent_expire_date,
         purchase_date=request.purchase_date,

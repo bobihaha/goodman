@@ -15,6 +15,16 @@ class CardType(str, PyEnum):
     pool = "pool"             # 流量池卡
 
 
+class CardMaterial(str, PyEnum):
+    """卡片材质"""
+    plastic_plug = "plastic_plug"
+    industrial_plug_large = "industrial_plug_large"
+    industrial_plug_medium = "industrial_plug_medium"
+    industrial_plug_small = "industrial_plug_small"
+    standard_smd_5_6 = "standard_smd_5_6"
+    industrial_smd_5_6 = "industrial_smd_5_6"
+
+
 class CardStatus(str, PyEnum):
     """卡片状态"""
     stock = "stock"           # 库存 (未出库)
@@ -33,12 +43,22 @@ class SuspendType(str, PyEnum):
     expired = "expired"       # 到期停卡
     pool_exceed = "pool_exceed"   # 流量池超限
     card_exceed = "card_exceed"   # 单卡超量
+    device_separation = "device_separation"   # 机卡分离
 
 
 # 状态显示名称
 CARD_TYPE_NAMES = {
     "single": "单卡",
     "pool": "流量池卡"
+}
+
+CARD_MATERIAL_NAMES = {
+    "plastic_plug": "塑料插拔卡",
+    "industrial_plug_large": "工业插拔大卡",
+    "industrial_plug_medium": "工业插拔中卡",
+    "industrial_plug_small": "工业插拔小卡",
+    "standard_smd_5_6": "普通5*6贴片卡",
+    "industrial_smd_5_6": "工业5*6贴片卡",
 }
 
 CARD_STATUS_NAMES = {
@@ -56,7 +76,8 @@ SUSPEND_TYPE_NAMES = {
     "manual": "手动停卡",
     "expired": "到期停卡",
     "pool_exceed": "流量池超限停卡",
-    "card_exceed": "单卡超量停卡"
+    "card_exceed": "单卡超量停卡",
+    "device_separation": "机卡分离锁卡"
 }
 
 
@@ -94,6 +115,7 @@ class IotCardModel(BaseModel):
     
     # 卡片类型
     card_type = Column(Enum(CardType), nullable=False, default=CardType.single, comment="卡片类型: single=单卡, pool=流量池卡")
+    material = Column(String(50), nullable=True, comment="卡片材质编码")
     
     # 生命周期日期 (格式: YYYY-MM-DD, 显示为 26/1/31)
     test_expire_date = Column(Date, nullable=True, comment="测试期到期日")
@@ -108,6 +130,13 @@ class IotCardModel(BaseModel):
     addon_flow = Column(BigInteger, nullable=False, default=0, comment="当月补量(MB)")
     addon_flow_month = Column(String(7), nullable=True, comment="补量生效月份(YYYY-MM)")
     data_sync_at = Column(DateTime, nullable=True, comment="流量同步时间")
+
+    # 机卡分离检测
+    latest_imei = Column(String(32), nullable=True, comment="最近一次获取的IMEI")
+    previous_imei = Column(String(32), nullable=True, comment="上一次获取的IMEI")
+    imei_device_name = Column(String(100), nullable=True, comment="最近一次IMEI对应设备名称")
+    imei_checked_at = Column(DateTime, nullable=True, comment="IMEI检测时间")
+    imei_separation_detected = Column(Integer, nullable=False, default=0, comment="是否检测到机卡分离: 0=否,1=是")
     
     # 状态
     status = Column(Enum(CardStatus), nullable=False, default=CardStatus.stock, index=True, comment="状态")
@@ -186,6 +215,8 @@ class IotCardModel(BaseModel):
             # 卡片类型
             "card_type": self.card_type.value if self.card_type else None,
             "card_type_name": CARD_TYPE_NAMES.get(self.card_type.value, "") if self.card_type else None,
+            "material": self.material,
+            "material_name": CARD_MATERIAL_NAMES.get(self.material, "") if self.material else None,
             # 生命周期日期
             "test_expire_date": self._format_date(self.test_expire_date),
             "silent_expire_date": self._format_date(self.silent_expire_date),
@@ -200,6 +231,11 @@ class IotCardModel(BaseModel):
             "data_remain": self.data_total - self.data_used if self.data_total else 0,
             "data_usage_percent": self.get_data_usage_percent(),
             "data_sync_at": self.data_sync_at.isoformat() if self.data_sync_at else None,
+            "latest_imei": self.latest_imei,
+            "previous_imei": self.previous_imei,
+            "imei_device_name": self.imei_device_name,
+            "imei_checked_at": self.imei_checked_at.isoformat() if self.imei_checked_at else None,
+            "imei_separation_detected": self.imei_separation_detected == 1,
             # 状态
             "status": self.status.value if self.status else None,
             "status_name": CARD_STATUS_NAMES.get(self.status.value, "") if self.status else None,

@@ -53,11 +53,13 @@ export interface H5CardQueryResponse {
 export interface H5CardActionResult {
   card_id: number
   iccid: string
-  action: 'suspend' | 'resume' | 'refresh'
-  status: 'processing' | 'success' | 'failed'
+  action: 'suspend' | 'resume' | 'refresh' | 'device_separation'
+  status: 'processing' | 'success' | 'failed' | 'unsupported'
   callback_no?: string
   suspend_callback_no?: string
   resume_callback_no?: string
+  device_separation_detection_status?: 'detected' | 'clear' | 'pending' | 'unsupported'
+  device_separation_detection_message?: string
   message?: string
 }
 
@@ -86,6 +88,10 @@ export const h5Api = {
     return post<H5CardActionResult>(`/h5/${slug}/card/${cardId}/refresh`, {}, {
       timeout: 180000
     })
+  },
+
+  detectDeviceSeparation(slug: string, cardId: number): Promise<H5CardActionResult> {
+    return post<H5CardActionResult>(`/h5/${slug}/card/${cardId}/device-separation`, {})
   },
 
   updateRemark(slug: string, cardId: number, remark: string, operatorName?: string, operatorPhone?: string): Promise<Card> {

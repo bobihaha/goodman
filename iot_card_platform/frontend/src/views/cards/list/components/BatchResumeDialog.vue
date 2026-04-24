@@ -78,6 +78,14 @@
             </el-button>
           </div>
 
+          <el-alert
+            v-if="hasSuperAdminBlockedResume"
+            title="部分卡片由超级管理员手动停卡，普通用户不可复机，请联系超级管理员处理。"
+            type="warning"
+            :closable="false"
+            style="margin-bottom: 12px"
+          />
+
           <el-table
             :data="operationResult.failed_list"
             max-height="300"
@@ -163,6 +171,9 @@ const visible = computed({
   set: (value) => emit('update:modelValue', value)
 })
 const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
+const hasSuperAdminBlockedResume = computed(() =>
+  !!operationResult.value?.failed_list?.some(item => item.error?.includes('超级管理员手动停卡'))
+)
 
 const iccidCount = computed(() => {
   if (!iccidText.value.trim()) return 0

@@ -77,4 +77,6 @@ class H5CardActionResult(BaseModel):
     callback_no: Optional[str] = None
     suspend_callback_no: Optional[str] = None
     resume_callback_no: Optional[str] = None
+    device_separation_detection_status: Optional[str] = None
+    device_separation_detection_message: Optional[str] = None
     message: Optional[str] = None

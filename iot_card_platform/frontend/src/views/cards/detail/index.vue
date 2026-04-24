@@ -106,6 +106,23 @@
               {{ CARD_STATUS_MAP[card.status].label }}
             </el-tag>
           </el-descriptions-item>
+          <el-descriptions-item label="机卡分离检测">
+            <div class="device-separation-cell">
+              <span :class="getDeviceSeparationClass()">
+                {{ getDeviceSeparationText() }}
+              </span>
+              <el-button
+                type="primary"
+                size="small"
+                plain
+                :loading="deviceSeparationChecking"
+                :disabled="!card?.iccid"
+                @click="handleDeviceSeparationCheck"
+              >
+                检测
+              </el-button>
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item label="套餐规格">
             {{ card ? `${formatFlow(card.flow_size)}/${PERIOD_TYPE_MAP[card.period_type]}` : '-' }}
           </el-descriptions-item>
@@ -391,7 +408,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -429,6 +446,9 @@ const loading = ref(false)
 const transferLoading = ref(false)
 const card = ref<Card | null>(null)
 const transferList = ref<any[]>([])
+const deviceSeparationChecking = ref(false)
+const deviceSeparationDisplayState = ref<'idle' | 'pending' | 'detected' | 'clear'>('idle')
+let deviceSeparationStateTimer: ReturnType<typeof setTimeout> | null = null
 
 // 对话框显示状态
 const transferVisible = ref(false)
@@ -461,6 +481,130 @@ const usagePercent = computed(() => {
   const percent = (card.value.data_used / card.value.data_total) * 100
   return Math.max(percent, 0)
 })
+
+const clearDeviceSeparationDisplayState = () => {
+  deviceSeparationDisplayState.value = 'idle'
+  if (deviceSeparationStateTimer) {
+    clearTimeout(deviceSeparationStateTimer)
+    deviceSeparationStateTimer = null
+  }
+}
+
+const setDeviceSeparationDisplayState = (state: 'pending' | 'detected' | 'clear') => {
+  clearDeviceSeparationDisplayState()
+  deviceSeparationDisplayState.value = state
+  deviceSeparationStateTimer = setTimeout(() => {
+    deviceSeparationDisplayState.value = 'idle'
+    deviceSeparationStateTimer = null
+  }, 30000)
+}
+
+const getDeviceSeparationText = () => {
+  if (!card.value) return '-'
+  if (deviceSeparationDisplayState.value === 'pending') return '查询中'
+  if (deviceSeparationDisplayState.value === 'detected') return '机卡分离停机'
+  if (deviceSeparationDisplayState.value === 'clear') return '未机卡分离'
+  return '未检测'
+}
+
+const getDeviceSeparationClass = () => {
+  if (!card.value) return ''
+  if (deviceSeparationDisplayState.value === 'pending') return 'text-warning'
+  if (deviceSeparationDisplayState.value === 'detected') return 'text-danger'
+  if (deviceSeparationDisplayState.value === 'clear') return 'text-success'
+  return 'text-info'
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const resolveDeviceSeparationResult = async (iccid: string) => {
+  let result = await cardApi.syncSingleCard(iccid)
+  if (result.device_separation_detection_status !== 'pending') {
+    return result
+  }
+
+  setDeviceSeparationDisplayState('pending')
+  for (let i = 0; i < 5; i += 1) {
+    await sleep(5000)
+    result = await cardApi.syncSingleCard(iccid)
+    if (result.device_separation_detection_status !== 'pending') {
+      return result
+    }
+  }
+
+  return result
+}
+
+const handleDeviceSeparationCheck = async () => {
+  if (!card.value?.iccid) {
+    ElMessage.warning('当前卡片缺少 ICCID，无法检测')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '确定执行机卡分离检测吗？',
+      '提示',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  deviceSeparationChecking.value = true
+  try {
+    const result = await resolveDeviceSeparationResult(card.value.iccid)
+    if (result.device_separation_detection_status === 'pending') {
+      setDeviceSeparationDisplayState('pending')
+      await ElMessageBox.alert(
+        result.device_separation_detection_message || '供应商正在查询机卡分离状态，请稍后再试。',
+        '提示',
+        {
+          confirmButtonText: '知道了',
+          type: 'info'
+        }
+      )
+      return
+    }
+    await fetchCardDetail()
+    if (result.device_separation_detection_status === 'detected') {
+      setDeviceSeparationDisplayState('detected')
+      ElMessage.success('机卡分离检测已完成')
+      return
+    }
+    if (result.device_separation_detection_status === 'clear') {
+      setDeviceSeparationDisplayState('clear')
+      ElMessage.success('机卡分离检测已完成')
+      return
+    }
+    clearDeviceSeparationDisplayState()
+    if (result.device_separation_detection_status === 'unsupported') {
+      await ElMessageBox.alert(
+        result.device_separation_detection_message || '请联系客服',
+        '提示',
+        {
+          confirmButtonText: '知道了',
+          type: 'info'
+        }
+      )
+      return
+    }
+    ElMessage.warning('当前未获取到有效检测结果，请稍后再试')
+  } catch (error) {
+    console.error('机卡分离检测失败:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error || '')
+    if (errorMessage.includes('请联系客服') || errorMessage.includes('无权')) {
+      return
+    }
+    ElMessage.error('机卡分离检测失败，请稍后重试')
+  } finally {
+    deviceSeparationChecking.value = false
+  }
+}
 
 // 获取卡片详情
 const fetchCardDetail = async () => {
@@ -636,7 +780,9 @@ const handleResume = async () => {
       ElMessage.success('复机成功')
     } else {
       const firstError = result.failed_list?.[0]?.error || '当前不允许复机'
-      ElMessage.error(firstError)
+      ElMessage.error(firstError.includes('超级管理员手动停卡')
+        ? '该卡由超级管理员手动停卡，请联系管理员处理'
+        : firstError)
     }
     fetchCardDetail()
   } catch (error: any) {
@@ -749,6 +895,10 @@ onMounted(() => {
   historyDateRange.value = [start, end]
   fetchUsageHistory()
 })
+
+onBeforeUnmount(() => {
+  clearDeviceSeparationDisplayState()
+})
 </script>
 
 <style scoped lang="scss">
@@ -839,5 +989,11 @@ onMounted(() => {
     display: flex;
     justify-content: flex-end;
   }
+}
+
+.device-separation-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 </style>

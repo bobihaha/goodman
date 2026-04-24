@@ -24,6 +24,23 @@
             </el-form-item>
           </el-form>
           <div class="query-hint">移动卡输入最后6位，联通/电信卡输入去除字母后6位</div>
+          <div v-if="recentKeywords.length" class="recent-searches">
+            <div class="recent-searches__header">
+              <span>最近查询</span>
+              <button type="button" class="recent-searches__clear" @click="clearRecentKeywords">清空</button>
+            </div>
+            <div class="recent-searches__list">
+              <button
+                v-for="item in recentKeywords"
+                :key="item"
+                type="button"
+                class="recent-searches__item"
+                @click="handleRecentKeywordClick(item)"
+              >
+                {{ item }}
+              </button>
+            </div>
+          </div>
         </el-card>
 
         <el-card v-if="config?.notice" class="panel" shadow="never">
@@ -183,7 +200,7 @@
               @click="handleSuspendAction"
             >
               <el-icon class="operation-icon"><SwitchButton /></el-icon>
-              <span>停机</span>
+              <span>{{ getActionButtonText('suspend') }}</span>
             </button>
             <button
               v-if="showResumeButton"
@@ -192,7 +209,7 @@
               @click="handleResumeAction"
             >
               <el-icon class="operation-icon"><Right /></el-icon>
-              <span>复机</span>
+              <span>{{ getActionButtonText('resume') }}</span>
             </button>
             <button
               v-if="showRefreshButton"
@@ -201,7 +218,15 @@
               @click="handleRefreshAction"
             >
               <el-icon class="operation-icon" :class="{ 'is-spinning': isRefreshing }"><RefreshRight /></el-icon>
-              <span>{{ isRefreshing ? '刷新中' : '刷新' }}</span>
+              <span>{{ getActionButtonText('refresh') }}</span>
+            </button>
+            <button
+              class="operation-button operation-button--primary"
+              :disabled="isActionBusy || actionLoading === 'deviceSeparation'"
+              @click="handleDeviceSeparationAction"
+            >
+              <el-icon class="operation-icon" :class="{ 'is-spinning': actionLoading === 'deviceSeparation' }"><Search /></el-icon>
+              <span>{{ getActionButtonText('deviceSeparation') }}</span>
             </button>
             <button
               v-if="detail.actions.allow_remark"
@@ -263,7 +288,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
   Bell,
@@ -281,13 +306,21 @@ import { h5Api, type H5PortalConfig, type H5CardCandidate, type H5CardDetail, ty
 
 const route = useRoute()
 const slug = computed(() => String(route.params.slug || ''))
+const recentKeywordsStorageKey = computed(() => `h5-card-query-history:${slug.value}`)
 
 const config = ref<H5PortalConfig | null>(null)
 const keyword = ref('')
+const recentKeywords = ref<string[]>([])
 const searching = ref(false)
 const candidates = ref<H5CardCandidate[]>([])
 const detail = ref<H5CardDetail | null>(null)
-const actionLoading = ref<'suspend' | 'resume' | 'refresh' | 'remark' | ''>('')
+const actionLoading = ref<'suspend' | 'resume' | 'refresh' | 'remark' | 'deviceSeparation' | ''>('')
+const actionResultText = reactive({
+  suspend: '',
+  resume: '',
+  refresh: '',
+  deviceSeparation: ''
+})
 const diagnosisLoading = ref(false)
 const diagnosisDialogVisible = ref(false)
 const remarkDialogVisible = ref(false)
@@ -329,6 +362,23 @@ const showResumeButton = computed(() =>
 const showRefreshButton = computed(() =>
   Boolean(detail.value?.actions.allow_suspend) && Boolean(detail.value?.actions.allow_resume)
 )
+
+const getActionButtonText = (action: 'suspend' | 'resume' | 'refresh' | 'deviceSeparation') => {
+  if (action === 'suspend') {
+    if (actionLoading.value === 'suspend') return '停机中'
+    return actionResultText.suspend || '停机'
+  }
+  if (action === 'resume') {
+    if (actionLoading.value === 'resume') return '复机中'
+    return actionResultText.resume || '复机'
+  }
+  if (action === 'refresh') {
+    if (actionLoading.value === 'refresh') return '重启中'
+    return actionResultText.refresh || '重启'
+  }
+  if (actionLoading.value === 'deviceSeparation') return '检测中'
+  return actionResultText.deviceSeparation || '机卡分离检测'
+}
 
 const diagnosisTone = computed(() => {
   const card = detail.value?.card
@@ -378,10 +428,49 @@ const loadConfig = async () => {
   config.value = await h5Api.getConfig(slug.value)
 }
 
+const loadRecentKeywords = () => {
+  if (typeof window === 'undefined' || !slug.value) return
+  const raw = window.localStorage.getItem(recentKeywordsStorageKey.value)
+  if (!raw) {
+    recentKeywords.value = []
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    recentKeywords.value = Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string').slice(0, 10) : []
+  } catch {
+    recentKeywords.value = []
+  }
+}
+
+const saveRecentKeyword = (value: string) => {
+  const normalized = value.trim()
+  if (!normalized || typeof window === 'undefined') return
+  recentKeywords.value = [normalized, ...recentKeywords.value.filter(item => item !== normalized)].slice(0, 10)
+  window.localStorage.setItem(recentKeywordsStorageKey.value, JSON.stringify(recentKeywords.value))
+}
+
+const clearRecentKeywords = () => {
+  recentKeywords.value = []
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(recentKeywordsStorageKey.value)
+  }
+}
+
+const handleRecentKeywordClick = (value: string) => {
+  keyword.value = value
+  handleQuery()
+}
+
 const resetState = () => {
   candidates.value = []
   detail.value = null
   diagnosisDialogVisible.value = false
+  actionResultText.suspend = ''
+  actionResultText.resume = ''
+  actionResultText.refresh = ''
+  actionResultText.deviceSeparation = ''
 }
 
 const fillRemark = () => {
@@ -397,7 +486,9 @@ const handleQuery = async () => {
   searching.value = true
   resetState()
   try {
-    const result = await h5Api.queryCard(slug.value, keyword.value.trim())
+    const normalizedKeyword = keyword.value.trim()
+    const result = await h5Api.queryCard(slug.value, normalizedKeyword)
+    saveRecentKeyword(normalizedKeyword)
     if (result.match_type === 'none') {
       ElMessage.warning('未查询到对应卡片')
       return
@@ -445,9 +536,70 @@ const handleRefreshAction = async () => {
   actionLoading.value = 'refresh'
   try {
     const result = await h5Api.refreshCard(slug.value, detail.value.card.id)
-    await handleActionSubmitted(result)
-  } finally {
     actionLoading.value = ''
+    await handleActionSubmitted(result)
+  } catch (error) {
+    actionLoading.value = ''
+    throw error
+  }
+}
+
+const getDeviceSeparationAlertType = (status?: string) => {
+  if (status === 'detected') return 'warning'
+  if (status === 'clear') return 'success'
+  return 'info'
+}
+
+const waitForDeviceSeparationResult = async (cardId: number) => {
+  let latestResult: H5CardActionResult | null = null
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await sleep(5000)
+    latestResult = await h5Api.detectDeviceSeparation(slug.value, cardId)
+    const latestStatus = latestResult.device_separation_detection_status
+    const latestMessage = latestResult.device_separation_detection_message || latestResult.message || '请联系客服'
+    actionResultText.deviceSeparation = latestMessage
+
+    if (latestStatus && latestStatus !== 'pending') {
+      return latestResult
+    }
+  }
+
+  return latestResult
+}
+
+const handleDeviceSeparationAction = async () => {
+  if (!detail.value?.card?.id) return
+  actionLoading.value = 'deviceSeparation'
+  try {
+    let result = await h5Api.detectDeviceSeparation(slug.value, detail.value.card.id)
+    let detectionStatus = result.device_separation_detection_status
+    let message = result.device_separation_detection_message || result.message || '请联系客服'
+    actionResultText.deviceSeparation = message
+
+    if (detectionStatus === 'pending') {
+      actionLoading.value = ''
+      result = (await waitForDeviceSeparationResult(detail.value.card.id)) || result
+      detectionStatus = result.device_separation_detection_status
+      message = result.device_separation_detection_message || result.message || '请联系客服'
+      actionResultText.deviceSeparation = message
+    } else {
+      actionLoading.value = ''
+    }
+
+    if (detectionStatus === 'pending') {
+      message = '正在查询中，请稍后再试'
+      actionResultText.deviceSeparation = message
+    }
+
+    await ElMessageBox.alert(message, '机卡分离检测', {
+      confirmButtonText: '知道了',
+      type: getDeviceSeparationAlertType(detectionStatus)
+    })
+    actionResultText.deviceSeparation = ''
+  } catch (error) {
+    actionLoading.value = ''
+    throw error
   }
 }
 
@@ -456,9 +608,11 @@ const handleSuspendAction = async () => {
   actionLoading.value = 'suspend'
   try {
     const result = await h5Api.suspendCard(slug.value, detail.value.card.id)
-    await handleActionSubmitted(result)
-  } finally {
     actionLoading.value = ''
+    await handleActionSubmitted(result)
+  } catch (error) {
+    actionLoading.value = ''
+    throw error
   }
 }
 
@@ -467,9 +621,11 @@ const handleResumeAction = async () => {
   actionLoading.value = 'resume'
   try {
     const result = await h5Api.resumeCard(slug.value, detail.value.card.id)
-    await handleActionSubmitted(result)
-  } finally {
     actionLoading.value = ''
+    await handleActionSubmitted(result)
+  } catch (error) {
+    actionLoading.value = ''
+    throw error
   }
 }
 
@@ -495,20 +651,32 @@ const refreshDetailUntilRecovered = async (action: H5CardActionResult) => {
 
 const handleActionSubmitted = async (result: H5CardActionResult) => {
   const actionText = result.action === 'refresh'
-    ? '刷新'
+    ? '重启'
     : result.action === 'suspend'
       ? '停机'
       : '复机'
+  const actionKey = result.action as 'suspend' | 'resume' | 'refresh'
+  const resultMessage = result.action === 'refresh'
+    ? (result.message || '').replace(/刷新/g, '重启')
+    : (result.message || '')
+  actionResultText[actionKey] = resultMessage || `${actionText}已提交`
+
   if (result.status === 'processing') {
-    ElMessage.success(result.message || `${actionText}请求已提交，处理中`)
-    await refreshDetailUntilRecovered(result)
-  } else if (result.message) {
-    ElMessage.success(result.message)
-    await refreshDetail()
-  } else {
-    ElMessage.success(`${actionText}成功`)
-    await refreshDetail()
+    await ElMessageBox.alert(resultMessage || `${actionText}请求已提交，处理中`, `${actionText}`, {
+      confirmButtonText: '知道了',
+      type: 'info'
+    })
+    actionResultText[actionKey] = ''
+    void refreshDetailUntilRecovered(result)
+    return
   }
+
+  await ElMessageBox.alert(resultMessage || `${actionText}成功`, `${actionText}`, {
+    confirmButtonText: '知道了',
+    type: 'success'
+  })
+  actionResultText[actionKey] = ''
+  await refreshDetail()
 }
 
 const handleRemarkSubmit = async () => {
@@ -571,6 +739,7 @@ const getStatusClass = (status?: string) => {
 
 onMounted(async () => {
   await loadConfig()
+  loadRecentKeywords()
 })
 </script>
 
@@ -661,6 +830,46 @@ onMounted(async () => {
   color: #667085;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.recent-searches {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #ece7f2;
+}
+
+.recent-searches__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recent-searches__clear {
+  border: none;
+  background: transparent;
+  color: #667085;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.recent-searches__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-searches__item {
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #111827;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .notice-title-wrap {
@@ -984,6 +1193,12 @@ onMounted(async () => {
 .operation-button--refresh {
   color: #2563eb;
   border-color: #cfe0ff;
+  background: #fff;
+}
+
+.operation-button--primary {
+  color: #7c3aed;
+  border-color: #e6dcff;
   background: #fff;
 }
 

@@ -10,7 +10,9 @@ export interface CardStockRecordItem {
   silent_expire_date?: string
   supplier_name?: string
   base_package_name?: string
+  package_period_count?: number
   sale_package_name?: string
+  package_period?: string
   target_user_name?: string
   carrier?: string
   flow_size?: number

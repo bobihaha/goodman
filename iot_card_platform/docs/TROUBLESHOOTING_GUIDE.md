@@ -240,6 +240,62 @@
 - 停复机 / 回调 / 同步任务修改了状态，但前端未刷新
 - 列表和详情读的是不同聚合逻辑
 
+### 4.5.1 卡片列表导出的 Excel 无法打开
+
+#### 常见症状
+
+- 下载成功，但 macOS 或 Windows 提示“文件格式无效”
+- 文件扩展名是 `.xlsx`，但双击无法打开
+- 接口返回 200，导出仍失败
+
+#### 先看哪里
+
+1. `frontend/src/api/modules/card.ts`
+2. `frontend/src/views/cards/list/index.vue`
+3. `app/api/v1/iot_card.py`
+4. 浏览器 Network 中 `/api/v1/cards/export` 的响应头和响应体
+
+#### 重点检查
+
+- 前端是否按 Blob 方式下载文件
+- 后端接口是否真的返回 Excel 二进制，而不是 JSON
+- `content-type` 和 `content-disposition` 是否正确
+- 下载文件开头是否为标准 ZIP/XLSX 文件头
+
+#### 常见根因
+
+- 前端把 JSON 响应直接当 `.xlsx` 下载
+- 后端导出接口返回了结构化数据，而不是文件流
+- 浏览器下载逻辑没有按二进制处理
+
+### 4.5.2 历史用量导出某个月份显示为 0
+
+#### 常见症状
+
+- 选择多个月份导出时，某个月明明有用量，导出表里却是 `0`
+- 导出表头没有按月份分列
+- 月初或月末附近导出的值缺失
+
+#### 先看哪里
+
+1. `frontend/src/views/cards/list/components/ExportHistoryDialog.vue`
+2. `app/services/iot_card_service.py`
+3. 历史快照相关表数据
+4. 导出接口的入参时间范围
+
+#### 重点检查
+
+- 前端传给后端的开始和结束时间是否按自然月起止处理
+- 导出逻辑是否按“每月最新快照”取值
+- 导出列名是否按月份展开，例如 `2026-04用量(GB)`
+- 对应卡片在该月是否真的有历史快照
+
+#### 常见根因
+
+- 月份范围只传了月份字符串，没有展开到整月时间边界
+- 后端按错误口径聚合，导致没有命中当月最新记录
+- 导出逻辑仍沿用旧版单列结构，没有真正按月展开
+
 ### 4.6 出入库后数据不一致
 
 #### 常见症状
@@ -326,12 +382,23 @@
 - 日志记录和卡状态是否同时更新
 - 是否有回调把状态再次纠正
 - 是否被同步任务刷新覆盖
+- 最近一次停卡日志的操作人是否为超级管理员
+- 当前用户是否因为“超级管理员手动停卡”规则被拦截
+- 如果本地显示停卡但供应商实际已激活，复机接口是否返回了状态纠正信息
 
 #### 常见根因
 
 - 供应商接口成功/失败口径与本地处理不一致
 - 本地已更新状态，但供应商回调又修正回原值
 - 定时同步重新覆盖了手动操作结果
+- 普通用户尝试复机一张由超级管理员手动停卡的卡
+- 卡因超流量被本地标记停卡，但供应商侧其实已经恢复，页面未及时刷新
+
+#### 补充判断
+
+- 如果报错包含“超级管理员手动停卡”，这是权限规则命中，不是供应商接口故障
+- 如果用户反馈“明明能用但页面显示停卡”，要同时核对供应商侧状态和本地停复机日志
+- 对于 UPIOT 一类供应商，若复机时返回“已在使用/已激活”，系统可能会把这次复机当作状态纠正成功处理
 
 ### 4.9 同步任务没执行 / 重复执行
 
@@ -418,6 +485,84 @@
 - 只改了代码没跑 SQL
 - 只跑了部分环境
 - 字段名改动后旧查询仍在使用旧字段
+
+### 4.12 续费后到期日异常 / 续费记录缺失
+
+#### 常见症状
+
+- 点击“续费 1 个月”，到期日却延长了 3 个月
+- 页面提示续费成功，但 `expired_at` 没变化
+- 续费管理里的“续费记录”查不到刚操作的卡
+
+#### 先看哪里
+
+1. `frontend/src/views/cards/list/components/SingleRenewDialog.vue`
+2. `frontend/src/views/cards/list/components/BatchRenewDialog.vue`
+3. `app/api/v1/iot_card.py`
+4. `app/services/iot_card_service.py`
+5. `app/services/system_service.py`
+6. `sys_operation_logs`
+7. `iot_cards.expired_at / period_count / sale_package_id`
+
+#### 重点检查
+
+- 前端传的是不是 `renew_months`
+- 后端是否把“续费月数”误当成“续几个出库周期”
+- `sale_packages.period_months / period_days` 是否缺失
+- 批量续费路径是否有写 `cards + renew` 操作日志
+- 续费记录页聚合逻辑是否能解析出卡号和续费周期
+
+#### 常见根因
+
+- 错把 `iot_cards.period_count` 乘进续费计算，导致 `1个月 -> 3个月`
+- 历史套餐周期字段为空，导致到期日无法正确计算
+- 批量续费逻辑漏写日志，导致记录页为空
+
+#### 快速核查 SQL
+
+```sql
+SELECT id, iccid, sale_package_id, period_type, period_count, expired_at
+FROM iot_cards
+WHERE iccid = '目标ICCID';
+
+SELECT id, name, period_type, period_months, period_days
+FROM sale_packages
+WHERE id = 目标销售套餐ID;
+
+SELECT id, module, action, target_name, detail, created_at
+FROM sys_operation_logs
+WHERE target_name = '目标ICCID'
+ORDER BY id DESC
+LIMIT 20;
+```
+
+### 4.13 出入库记录看不清开通了多久
+
+#### 常见症状
+
+- 出库记录里只有销售套餐名，看不出具体开了几个月
+- 入库记录里只看到套餐名，看不出底层套餐周期
+- 按卡号查询时，入库和出库口径不一致
+
+#### 先看哪里
+
+1. `frontend/src/views/stock/records/index.vue`
+2. `app/crud/stock_crud.py`
+3. `stock_in_records / stock_out_records`
+4. `stock_in_record_cards / stock_out_record_cards`
+5. `iot_cards.period_count`
+
+#### 重点检查
+
+- 入库记录是否返回 `package_period`
+- 出库记录是否返回 `actual_period`
+- 按卡号查询是否对入库显示底层套餐周期、对出库显示实际开通周期
+
+#### 风险提醒
+
+- 当前历史出库记录的“开通周期”仍依赖 `iot_cards.period_count` 反推
+- 如果卡片后续被回收再重新出库，老记录可能被当前周期污染
+- 要彻底解决，需要给 `stock_out_record_cards` 增加周期快照冗余字段
 
 ## 5. 快速判断是哪里的问题
 

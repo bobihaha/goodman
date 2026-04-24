@@ -3,6 +3,7 @@
 """
 from typing import Optional, List, Tuple
 from datetime import datetime, date, timedelta
+import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 import asyncio
@@ -500,7 +501,20 @@ class SyncService:
             from app.db.models.sys_user import UserLevel
             if current_user.user_level != UserLevel.SUPER_ADMIN.value:
                 if card.user_id != current_user.id:
-                    raise BusinessException(code=403, msg="无权同步此卡片")
+                    return {
+                        "sync_no": "",
+                        "sync_type": "single_card",
+                        "total": 1,
+                        "success": 0,
+                        "failed": 1,
+                        "status": "unsupported",
+                        "changed": False,
+                        "changed_fields": [],
+                        "device_separation_detection_status": "unsupported",
+                        "device_separation_detection_message": "请联系客服",
+                        "before": {},
+                        "after": {}
+                    }
 
         # 创建同步日志
         log = await sync_log_crud.create(
@@ -524,6 +538,11 @@ class SyncService:
                 "data_used": card.data_used,
                 "data_used_month": card.data_used_month,
                 "data_total": card.data_total,
+                "latest_imei": card.latest_imei,
+                "previous_imei": card.previous_imei,
+                "imei_device_name": card.imei_device_name,
+                "imei_checked_at": card.imei_checked_at.isoformat() if card.imei_checked_at else None,
+                "imei_separation_detected": bool(card.imei_separation_detected),
                 "status": card.status.value if card.status else None,
                 "activated_at": card.activated_at.isoformat() if card.activated_at else None,
                 "expired_at": card.expired_at.isoformat() if card.expired_at else None,
@@ -544,9 +563,80 @@ class SyncService:
             card.data_used_month = card.data_used
             card.data_sync_at = datetime.now()
 
-            # 只同步供应商用量，但允许基于本地规则推导激活状态和日期
+            imei_info = {}
+            try:
+                imei_info = await self._retry_api_call(client.get_card_imei_info, iccid)
+            except Exception:
+                imei_info = {}
+            latest_imei = (imei_info.get("imei") or "").strip() or None
+            imei_device_name = (imei_info.get("device_name") or "").strip() or None
+            previous_latest_imei = (card.latest_imei or "").strip() or None
+            separation_stop_msg = (imei_info.get("separation_stop_msg") or "").strip()
+            detection_status = (imei_info.get("detection_status") or "").strip() or "unknown"
+            detection_message = (imei_info.get("detection_message") or "").strip()
+            separation_supported = detection_status in {"detected", "clear"} or separation_stop_msg in {"是", "否"}
+
+            if latest_imei:
+                if previous_latest_imei and previous_latest_imei != latest_imei:
+                    card.previous_imei = previous_latest_imei
+                card.latest_imei = latest_imei
+            if imei_device_name:
+                card.imei_device_name = imei_device_name
+            if detection_status in {"detected", "clear"}:
+                card.imei_checked_at = datetime.now()
+                card.imei_separation_detected = int(detection_status == "detected")
+
+            imei_lock_reason = None
+            if separation_supported and card.imei_separation_detected:
+                imei_lock_reason = "机卡分离自动锁卡：供应商检测结果为机卡分离停机"
+
+            # 先基于本地规则修正基础状态，再处理机卡分离锁卡，避免后续状态机把停机覆盖掉。
             from app.services.card_status_service import check_and_update_card_status
             await check_and_update_card_status(db, card)
+
+            if (
+                imei_lock_reason
+                and card.status in {CardStatus.activated, CardStatus.testing, CardStatus.silent}
+            ):
+                from app.crud.suspend_crud import CardSuspendCRUD, SuspendLogCRUD
+                from app.services.suspend_service import SuspendActionService
+
+                api_success, callback_no, reconciled_status = await SuspendActionService._call_supplier_suspend(
+                    db=db,
+                    card=card,
+                    supplier=supplier,
+                    reason=imei_lock_reason,
+                    operator_id=triggered_by
+                )
+                if not api_success:
+                    raise BusinessException(code=500, msg="检测到机卡分离，但供应商停机失败")
+
+                if reconciled_status == CardStatus.suspended.value:
+                    SuspendActionService.normalize_card_suspend_state(
+                        card,
+                        reconciled_status,
+                        suspend_type=SuspendType.device_separation,
+                        reason=imei_lock_reason,
+                    )
+                else:
+                    await CardSuspendCRUD.suspend_card(
+                        db=db,
+                        card_id=card.id,
+                        suspend_type=SuspendType.device_separation,
+                        reason=imei_lock_reason
+                    )
+
+                await SuspendLogCRUD.create(
+                    db=db,
+                    card_id=card.id,
+                    iccid=card.iccid,
+                    action=SuspendActionType.suspend,
+                    suspend_type=SuspendType.device_separation.value,
+                    reason=imei_lock_reason,
+                    api_called=True,
+                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None,
+                    operator_id=triggered_by
+                )
 
             await db.commit()
 
@@ -554,6 +644,11 @@ class SyncService:
                 "data_used": card.data_used,
                 "data_used_month": card.data_used_month,
                 "data_total": card.data_total,
+                "latest_imei": card.latest_imei,
+                "previous_imei": card.previous_imei,
+                "imei_device_name": card.imei_device_name,
+                "imei_checked_at": card.imei_checked_at.isoformat() if card.imei_checked_at else None,
+                "imei_separation_detected": bool(card.imei_separation_detected),
                 "status": card.status.value if card.status else None,
                 "activated_at": card.activated_at.isoformat() if card.activated_at else None,
                 "expired_at": card.expired_at.isoformat() if card.expired_at else None,
@@ -570,7 +665,8 @@ class SyncService:
                 db, log.id, SyncStatus.success,
                 total_count=1, success_count=1, fail_count=0,
                 sync_data={
-                    "usage": usage_data
+                    "usage": usage_data,
+                    "imei": imei_info
                 }
             )
 
@@ -583,6 +679,8 @@ class SyncService:
                 "status": "success",
                 "changed": bool(changed_fields),
                 "changed_fields": changed_fields,
+                "device_separation_detection_status": detection_status,
+                "device_separation_detection_message": detection_message,
                 "before": before_snapshot,
                 "after": after_snapshot
             }

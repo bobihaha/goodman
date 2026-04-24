@@ -417,6 +417,9 @@
               <template v-else-if="column.key === 'msisdn'">
                 {{ row.msisdn || '-' }}
               </template>
+              <template v-else-if="column.key === 'material'">
+                {{ row.material_name || CARD_MATERIAL_MAP[row.material as keyof typeof CARD_MATERIAL_MAP] || '-' }}
+              </template>
               <template v-else-if="column.key === 'diagnostic'">
                 <el-button type="primary" link @click="showDiagnosticsDialog(row)">
                   诊断
@@ -698,6 +701,7 @@ import type { User } from '@/types/user'
 import {
   CARRIER_MAP,
   CARRIER_OPTIONS,
+  CARD_MATERIAL_MAP,
   CARD_STATUS_MAP,
   CARD_STATUS_OPTIONS,
   PERIOD_TYPE_MAP,
@@ -721,6 +725,7 @@ import CardDiagnosticsDialog from './components/CardDiagnosticsDialog.vue'
 type DraggableColumnKey =
   | 'imsi'
   | 'msisdn'
+  | 'material'
   | 'diagnostic'
   | 'refresh'
   | 'card_type'
@@ -756,6 +761,7 @@ const COLUMN_VISIBILITY_STORAGE_KEY = 'card-list-visible-columns'
 const DEFAULT_DRAGGABLE_COLUMN_ORDER: DraggableColumnKey[] = [
   'imsi',
   'msisdn',
+  'material',
   'diagnostic',
   'refresh',
   'card_type',
@@ -779,6 +785,7 @@ const DEFAULT_DRAGGABLE_COLUMN_ORDER: DraggableColumnKey[] = [
 const DRAGGABLE_COLUMN_MAP: Record<DraggableColumnKey, DraggableColumnConfig> = {
   imsi: { key: 'imsi', label: 'IMSI', prop: 'imsi', width: 180, sortField: 'imsi' },
   msisdn: { key: 'msisdn', label: '号码', prop: 'msisdn', width: 130, sortField: 'msisdn' },
+  material: { key: 'material', label: '材质', prop: 'material_name', width: 160, sortField: 'material' },
   diagnostic: { key: 'diagnostic', label: '诊断', width: 90, align: 'center' },
   refresh: { key: 'refresh', label: '刷新', width: 90, align: 'center' },
   card_type: { key: 'card_type', label: '卡片类型', prop: 'card_type', width: 110, sortField: 'card_type' },
@@ -1049,7 +1056,8 @@ const loadVisibleColumns = () => {
       DEFAULT_DRAGGABLE_COLUMN_ORDER.includes(key as DraggableColumnKey)
     )
 
-    visibleColumnKeys.value = valid
+    const missing = DEFAULT_DRAGGABLE_COLUMN_ORDER.filter(key => !valid.includes(key))
+    visibleColumnKeys.value = [...valid, ...missing]
   } catch (error) {
     console.error('加载显示列配置失败:', error)
   }
@@ -1301,8 +1309,7 @@ const handleExport = async () => {
     }
 
     const blob = await cardApi.export(params)
-    
-    // 创建下载链接
+
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -1448,7 +1455,10 @@ const handleRowResume = async (card: Card) => {
       fetchCardList()
       fetchStats()
     } else {
-      ElMessage.error(result.failed_list?.[0]?.error || '复机失败')
+      const firstError = result.failed_list?.[0]?.error || '复机失败'
+      ElMessage.error(firstError.includes('超级管理员手动停卡')
+        ? '该卡由超级管理员手动停卡，请联系管理员处理'
+        : firstError)
     }
   } catch (error: any) {
     if (error !== 'cancel') {

@@ -141,17 +141,37 @@
         </el-button>
       </div>
 
+      <el-alert
+        v-if="isBatchQueryMode"
+        :title="`批量查询结果：找到 ${tableData.length} 张库存卡片，未找到 ${batchQueryNotFound.length} 个卡号`"
+        :type="batchQueryNotFound.length > 0 ? 'warning' : 'success'"
+        :closable="false"
+        style="margin-bottom: 16px"
+      />
+      <div v-if="isBatchQueryMode && batchQueryNotFound.length > 0" class="not-found-bar">
+        <span class="not-found-label">未找到：</span>
+        <el-tag v-for="iccid in batchQueryNotFound" :key="iccid" type="danger" class="not-found-tag">
+          {{ iccid }}
+        </el-tag>
+      </div>
+
       <!-- 表格 -->
       <el-table :data="tableData" v-loading="loading" border stripe>
         <el-table-column prop="iccid" label="ICCID" width="200" fixed />
         <el-table-column prop="imsi" label="IMSI" width="150" />
         <el-table-column prop="msisdn" label="MSISDN" width="130" />
         <el-table-column prop="supplier_name" label="供应商" width="120" />
+        <el-table-column prop="material_name" label="材质" width="160" />
         <el-table-column label="规格" width="220">
           <template #default="{ row }">
             <el-tag>{{ row.carrier_name }}</el-tag>
             <el-tag type="success" style="margin-left: 5px">{{ formatFlow(row.flow_size) }}</el-tag>
             <el-tag type="info" style="margin-left: 5px">{{ row.period_name }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="package_period" label="入库套餐周期" width="120">
+          <template #default="{ row }">
+            {{ row.package_period || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="生命周期" width="200">
@@ -234,50 +254,6 @@
         </el-button>
       </template>
     </el-dialog>
-
-    <!-- 批量查询结果对话框 -->
-    <el-dialog
-      v-model="showBatchResultDialog"
-      title="批量查询结果"
-      width="900px"
-    >
-      <el-alert
-        :title="`查询完成：找到 ${batchQueryResult.length} 张卡片，未找到 ${batchQueryNotFound.length} 个卡号`"
-        :type="batchQueryNotFound.length > 0 ? 'warning' : 'success'"
-        :closable="false"
-        style="margin-bottom: 20px"
-      />
-
-      <!-- 未找到的卡号 -->
-      <div v-if="batchQueryNotFound.length > 0" style="margin-bottom: 20px">
-        <div style="font-weight: 600; margin-bottom: 10px">未找到的卡号：</div>
-        <el-tag v-for="iccid in batchQueryNotFound" :key="iccid" type="danger" style="margin: 5px">
-          {{ iccid }}
-        </el-tag>
-      </div>
-
-      <!-- 查询结果表格 -->
-      <el-table :data="batchQueryResult" border stripe max-height="400">
-        <el-table-column prop="iccid" label="ICCID" width="200" />
-        <el-table-column prop="imsi" label="IMSI" width="150" />
-        <el-table-column prop="msisdn" label="MSISDN" width="130" />
-        <el-table-column prop="carrier_name" label="运营商" width="100" />
-        <el-table-column prop="supplier_name" label="供应商" width="120" />
-        <el-table-column prop="status_name" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status_name }}</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <template #footer>
-        <el-button @click="showBatchResultDialog = false">关闭</el-button>
-        <el-button type="success" @click="handleExportBatchResult">
-          <el-icon><Download /></el-icon>
-          导出结果
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -318,11 +294,10 @@ const packages = ref<any[]>([])
 
 // 批量查询
 const showBatchQueryDialog = ref(false)
-const showBatchResultDialog = ref(false)
 const batchQueryText = ref('')
 const batchQuerying = ref(false)
-const batchQueryResult = ref<any[]>([])
 const batchQueryNotFound = ref<string[]>([])
+const isBatchQueryMode = ref(false)
 
 // 批量查询卡号数量
 const batchQueryCount = computed(() => {
@@ -351,6 +326,8 @@ const fetchInventory = async () => {
     const res = await stockApi.getInventory(queryParams)
     tableData.value = res.items || res.list || []
     total.value = res.total || 0
+    isBatchQueryMode.value = false
+    batchQueryNotFound.value = []
   } catch (error) {
     ElMessage.error('获取库存列表失败')
   } finally {
@@ -429,13 +406,13 @@ const handleBatchQuery = async () => {
   batchQuerying.value = true
   try {
     const res = await stockApi.batchQuery({ iccids })
-    batchQueryResult.value = res.found || []
+    tableData.value = res.found || []
+    total.value = tableData.value.length
     batchQueryNotFound.value = res.not_found || []
-    
+    isBatchQueryMode.value = true
     showBatchQueryDialog.value = false
-    showBatchResultDialog.value = true
-    
-    ElMessage.success(`查询完成：找到 ${batchQueryResult.value.length} 张卡片`)
+    queryParams.page = 1
+    ElMessage.success(`查询完成：找到 ${tableData.value.length} 张卡片`)
   } catch (error: any) {
     ElMessage.error(error.message || '批量查询失败')
   } finally {
@@ -468,21 +445,6 @@ const handleExport = async () => {
       ElMessage.error(error.message || '导出失败')
     }
   }
-}
-
-// 导出批量查询结果
-const handleExportBatchResult = () => {
-  if (batchQueryResult.value.length === 0) {
-    ElMessage.warning('没有可导出的数据')
-    return
-  }
-
-  const ws = XLSX.utils.json_to_sheet(batchQueryResult.value)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '查询结果')
-  XLSX.writeFile(wb, `批量查询结果_${new Date().getTime()}.xlsx`)
-  
-  ElMessage.success('导出成功')
 }
 
 // 刷新
@@ -586,6 +548,20 @@ onMounted(() => {
     margin-bottom: 20px;
     display: flex;
     gap: 10px;
+  }
+
+  .not-found-bar {
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+
+  .not-found-label {
+    color: #606266;
+    margin-right: 8px;
+  }
+
+  .not-found-tag {
+    margin: 0 8px 8px 0;
   }
 
   .pagination {

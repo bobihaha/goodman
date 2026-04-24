@@ -290,8 +290,8 @@ class H5Service:
         if card.suspend_type == SuspendType.manual and current_supplier_status == CardStatus.suspended.value and not has_refresh_history:
             raise BusinessException(code=400, msg="当前卡片处于人工停卡状态，不支持刷新重启")
 
-        suspend_callback_no = None
         if current_supplier_status in self.REFRESH_ACTIVE_STATUSES:
+            suspend_callback_no = None
             suspend_success, suspend_callback_no, _ = await SuspendActionService._call_supplier_suspend(
                 db=db,
                 card=card,
@@ -304,17 +304,16 @@ class H5Service:
             if suspend_callback_no:
                 await SuspendActionService.mark_refresh_resume_pending(db, suspend_callback_no)
                 SuspendActionService.schedule_refresh_resume_fallback(suspend_callback_no)
+            return H5CardActionResult(
+                card_id=card.id,
+                iccid=card.iccid,
+                action="refresh",
+                status="processing",
+                suspend_callback_no=suspend_callback_no,
+                message="刷新请求已提交，处理中"
+            ).model_dump()
 
-            suspended_status = await self._wait_for_supplier_status(
-                db=db,
-                card=card,
-                supplier=supplier,
-                expected_statuses={CardStatus.suspended.value},
-                timeout_seconds=settings.refresh_suspend_confirm_timeout_seconds
-            )
-            if suspended_status != CardStatus.suspended.value:
-                raise BusinessException(code=502, msg="刷新失败：停机状态未在规定时间内生效")
-        elif current_supplier_status != CardStatus.suspended.value:
+        if current_supplier_status != CardStatus.suspended.value:
             raise BusinessException(code=400, msg=f"当前卡片状态不支持刷新: {current_supplier_status or card.status.value}")
 
         resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
@@ -325,40 +324,75 @@ class H5Service:
         )
         if not resume_success:
             raise BusinessException(code=502, msg="供应商复机请求提交失败")
-        if suspend_callback_no:
-            await SuspendActionService.mark_refresh_resume_submitted(
-                db=db,
-                suspend_callback_no=suspend_callback_no,
-                resume_callback_no=resume_callback_no,
-                submitted=resume_success
-            )
-
-        resumed_status = await self._wait_for_supplier_status(
-            db=db,
-            card=card,
-            supplier=supplier,
-            expected_statuses=self.REFRESH_ACTIVE_STATUSES,
-            timeout_seconds=settings.refresh_resume_confirm_timeout_seconds
-        )
-        if resumed_status not in self.REFRESH_ACTIVE_STATUSES:
-            return H5CardActionResult(
-                card_id=card.id,
-                iccid=card.iccid,
-                action="refresh",
-                status="processing",
-                suspend_callback_no=suspend_callback_no,
-                resume_callback_no=resume_callback_no,
-                message="刷新请求已提交，复机处理中，请稍后刷新页面查看状态"
-            ).model_dump()
 
         return H5CardActionResult(
             card_id=card.id,
             iccid=card.iccid,
             action="refresh",
-            status="success",
-            suspend_callback_no=suspend_callback_no,
+            status="processing",
             resume_callback_no=resume_callback_no,
-            message="刷新完成，卡片已恢复激活"
+            message="刷新请求已提交，处理中"
+        ).model_dump()
+
+    async def detect_device_separation(self, db: AsyncSession, slug: str, card_id: int) -> dict:
+        user = await self._get_h5_user(db, slug)
+        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        if not card:
+            raise BusinessException(code=404, msg="卡片不存在")
+
+        supplier_map = await SuspendActionService._load_supplier_map(db, [card])
+        supplier = supplier_map.get(card.supplier_id)
+        if not supplier or not card.iccid:
+            return H5CardActionResult(
+                card_id=card.id,
+                iccid=card.iccid or "",
+                action="device_separation",
+                status="unsupported",
+                device_separation_detection_status="unsupported",
+                device_separation_detection_message="请联系客服",
+                message="请联系客服"
+            ).model_dump()
+
+        client = get_supplier_client(
+            supplier_id=card.supplier_id,
+            api_url=supplier.api_url or "",
+            api_key=supplier.api_key or "",
+            api_secret=supplier.api_secret or ""
+        )
+
+        try:
+            imei_info = await client.get_card_imei_info(card.iccid)
+        except Exception:
+            imei_info = {
+                "detection_status": "unsupported",
+                "detection_message": "请联系客服"
+            }
+
+        detection_status = (imei_info.get("detection_status") or "").strip() or "unsupported"
+        detection_message = (imei_info.get("detection_message") or "").strip()
+
+        if detection_status == "detected":
+            final_message = "机卡分离停机"
+            final_status = "success"
+        elif detection_status == "clear":
+            final_message = "未机卡分离"
+            final_status = "success"
+        elif detection_status == "pending":
+            final_message = detection_message or "正在查询..."
+            final_status = "processing"
+        else:
+            detection_status = "unsupported"
+            final_message = detection_message or "请联系客服"
+            final_status = "unsupported"
+
+        return H5CardActionResult(
+            card_id=card.id,
+            iccid=card.iccid,
+            action="device_separation",
+            status=final_status,
+            device_separation_detection_status=detection_status,
+            device_separation_detection_message=final_message,
+            message=final_message
         ).model_dump()
 
     async def update_remark(

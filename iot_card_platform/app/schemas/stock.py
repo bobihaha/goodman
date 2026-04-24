@@ -18,6 +18,15 @@ class PeriodType(str, Enum):
     yearly = "yearly"
 
 
+class CardMaterialType(str, Enum):
+    plastic_plug = "plastic_plug"
+    industrial_plug_large = "industrial_plug_large"
+    industrial_plug_medium = "industrial_plug_medium"
+    industrial_plug_small = "industrial_plug_small"
+    standard_smd_5_6 = "standard_smd_5_6"
+    industrial_smd_5_6 = "industrial_smd_5_6"
+
+
 class BatchStatus(str, Enum):
     pending = "pending"
     stocked = "stocked"
@@ -30,6 +39,8 @@ class BatchCreate(BaseModel):
     """创建采购批次"""
     supplier_id: int = Field(..., description="供应商ID")
     package_id: int = Field(..., description="底层套餐ID")
+    package_period_count: int = Field(..., ge=1, description="入库套餐周期数量")
+    material: CardMaterialType = Field(..., description="卡片材质编码")
     test_expire_date: Optional[date] = Field(None, description="测试期到期日")
     silent_expire_date: date = Field(..., description="沉默期到期日")
     purchase_date: date = Field(..., description="采购日期")
@@ -49,6 +60,10 @@ class BatchInfo(BaseModel):
     flow_size: int
     period_type: Optional[str] = None
     period_name: Optional[str] = None
+    package_period_count: Optional[int] = None
+    package_period: Optional[str] = None
+    material: Optional[str] = None
+    material_name: Optional[str] = None
     test_expire_date: Optional[str] = None
     silent_expire_date: Optional[str] = None
     card_count: int = 0

@@ -18,6 +18,7 @@ from app.db.models.suspend import (
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.supplier import SupplierModel
+from app.db.models.sys_user import SysUserModel, UserLevel
 from app.schemas.suspend import (
     PolicyCreate, PolicyUpdate, ManualSuspend, ManualResume, SuspendResult
 )
@@ -146,6 +147,41 @@ class SuspendActionService:
     def _check_single_card_resume_eligibility(card: IotCardModel) -> Tuple[bool, Optional[str]]:
         if card.data_used > card.data_total:
             return False, "单卡流量仍超限，请先补量"
+        return True, None
+
+    @staticmethod
+    async def _check_manual_suspend_resume_permission(
+        db: AsyncSession,
+        card: IotCardModel,
+        operator_id: Optional[int],
+        is_admin: bool
+    ) -> Tuple[bool, Optional[str]]:
+        """超级管理员手动停卡后，仅超级管理员可复机。"""
+        if is_admin:
+            return True, None
+
+        latest_suspend_log = await SuspendLogCRUD.get_latest_by_card_and_action(
+            db=db,
+            card_id=card.id,
+            action=SuspendActionType.suspend
+        )
+        if not latest_suspend_log or latest_suspend_log.suspend_type != SuspendType.manual.value:
+            return True, None
+
+        suspend_operator_id = latest_suspend_log.operator_id
+        if not suspend_operator_id or suspend_operator_id == operator_id:
+            return True, None
+
+        operator_result = await db.execute(
+            select(SysUserModel.user_level).where(
+                SysUserModel.id == suspend_operator_id,
+                SysUserModel.is_deleted == 0
+            )
+        )
+        suspend_operator_level = operator_result.scalar_one_or_none()
+        if suspend_operator_level == UserLevel.SUPER_ADMIN.value:
+            return False, "该卡由超级管理员手动停卡，普通用户不可复机"
+
         return True, None
 
     @staticmethod
@@ -355,12 +391,19 @@ class SuspendActionService:
                         operation.action == SuspendActionType.resume
                         and request_meta.get("submitted")
                         and lifecycle_status == CardStatus.suspended.value
-                        and request_meta["auto_reconcile_attempts"] < 5
                     ):
-                        SuspendActionService.schedule_pending_operation_reconcile(
-                            callback_no=callback_no,
-                            delay_seconds=settings.supplier_callback_reconcile_seconds
+                        await SuspendActionService._retry_refresh_resume_if_needed(
+                            db=db,
+                            card=card,
+                            supplier=supplier,
+                            resume_callback_no=callback_no,
+                            observed_attempts=request_meta["auto_reconcile_attempts"]
                         )
+                        if request_meta["auto_reconcile_attempts"] < 5:
+                            SuspendActionService.schedule_pending_operation_reconcile(
+                                callback_no=callback_no,
+                                delay_seconds=settings.supplier_callback_reconcile_seconds
+                            )
                     return
 
                 SuspendActionService.normalize_card_suspend_state(
@@ -386,6 +429,23 @@ class SuspendActionService:
                     account_status=lifecycle_status,
                     callback_status="success"
                 )
+                if operation.action == SuspendActionType.suspend:
+                    if request_meta.get("refresh_resume_pending") and not request_meta.get("refresh_resume_submitted"):
+                        resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+                            db=db,
+                            card=card,
+                            supplier=supplier,
+                            operator_id=operation.operator_id
+                        )
+                        request_meta["refresh_resume_submitted"] = resume_success
+                        request_meta["refresh_resume_callback_no"] = resume_callback_no
+                        await SupplierSuspendOperationCRUD.update_request_result(
+                            db=db,
+                            operation_id=operation.id,
+                            request_result=json.dumps(request_meta, ensure_ascii=False)
+                        )
+                        if not resume_success:
+                            logger.error("刷新自动复机提交失败(自动对账): callback_no=%s iccid=%s", callback_no, operation.iccid)
                 if operation.action == SuspendActionType.resume:
                     await SuspendActionService._close_refresh_suspend_chain(
                         db=db,
@@ -441,6 +501,63 @@ class SuspendActionService:
                 callback_status="success"
             )
             break
+
+    @staticmethod
+    async def _retry_refresh_resume_if_needed(
+        db: AsyncSession,
+        card: IotCardModel,
+        supplier: Optional[SupplierModel],
+        resume_callback_no: str,
+        observed_attempts: int
+    ) -> bool:
+        if observed_attempts < 2:
+            return False
+
+        result = await db.execute(
+            select(SupplierSuspendOperationModel).where(
+                SupplierSuspendOperationModel.card_id == card.id,
+                SupplierSuspendOperationModel.action == SuspendActionType.suspend,
+                SupplierSuspendOperationModel.is_deleted == 0
+            ).order_by(SupplierSuspendOperationModel.id.desc())
+        )
+        operations = list(result.scalars().all())
+
+        for operation in operations:
+            request_meta: Dict[str, Any] = {}
+            if operation.request_result:
+                try:
+                    request_meta = json.loads(operation.request_result)
+                except Exception:
+                    request_meta = {"raw_request_result": operation.request_result}
+
+            if request_meta.get("refresh_resume_callback_no") != resume_callback_no:
+                continue
+
+            retry_count = int(request_meta.get("refresh_resume_retry_count") or 0)
+            if retry_count >= 2:
+                return False
+
+            resume_success, new_resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+                db=db,
+                card=card,
+                supplier=supplier,
+                operator_id=operation.operator_id
+            )
+            request_meta["refresh_resume_submitted"] = resume_success
+            request_meta["refresh_resume_callback_no"] = new_resume_callback_no
+            request_meta["refresh_resume_retry_count"] = retry_count + 1
+            request_meta["refresh_resume_retry_triggered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            request_meta["refresh_resume_retry_source"] = "resume_auto_reconcile"
+            await SupplierSuspendOperationCRUD.update_request_result(
+                db=db,
+                operation_id=operation.id,
+                request_result=json.dumps(request_meta, ensure_ascii=False)
+            )
+            if not resume_success:
+                logger.error("刷新复机重试提交失败: callback_no=%s iccid=%s", resume_callback_no, operation.iccid)
+            return resume_success
+
+        return False
 
     @staticmethod
     async def _call_supplier_suspend(
@@ -619,12 +736,6 @@ class SuspendActionService:
                 if not request_meta.get("refresh_resume_pending"):
                     return
 
-                if request_meta.get("refresh_resume_submitted"):
-                    return
-
-                if operation.callback_status != "pending":
-                    return
-
                 card = await db.get(IotCardModel, operation.card_id)
                 if not card:
                     logger.warning("刷新兜底复机未找到卡片: callback_no=%s", suspend_callback_no)
@@ -640,6 +751,43 @@ class SuspendActionService:
                     )
                     supplier = supplier_result.scalar_one_or_none()
 
+                if not supplier:
+                    return
+
+                supplier_client = get_supplier_client(
+                    supplier_id=card.supplier_id,
+                    api_url=supplier.api_url or "",
+                    api_key=supplier.api_key or "",
+                    api_secret=supplier.api_secret or ""
+                )
+                lifecycle_data = await supplier_client.get_card_lifecycle(card.iccid)
+                lifecycle_status = lifecycle_data.get("status")
+
+                request_meta["refresh_resume_fallback_checked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                request_meta["refresh_resume_fallback_observed_status"] = lifecycle_status
+
+                if lifecycle_status != CardStatus.suspended.value:
+                    await SupplierSuspendOperationCRUD.update_request_result(
+                        db=db,
+                        operation_id=operation.id,
+                        request_result=json.dumps(request_meta, ensure_ascii=False)
+                    )
+                    return
+
+                existing_resume_callback_no = request_meta.get("refresh_resume_callback_no")
+                if existing_resume_callback_no:
+                    existing_resume_operation = await SupplierSuspendOperationCRUD.get_by_callback_no(
+                        db,
+                        existing_resume_callback_no
+                    )
+                    if existing_resume_operation and existing_resume_operation.callback_status == "success":
+                        await SupplierSuspendOperationCRUD.update_request_result(
+                            db=db,
+                            operation_id=operation.id,
+                            request_result=json.dumps(request_meta, ensure_ascii=False)
+                        )
+                        return
+
                 resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
                     db=db,
                     card=card,
@@ -652,6 +800,7 @@ class SuspendActionService:
                 request_meta["refresh_resume_submitted"] = resume_success
                 request_meta["refresh_resume_callback_no"] = resume_callback_no
                 request_meta["refresh_resume_fallback_triggered"] = True
+                request_meta["refresh_resume_retry_count"] = int(request_meta.get("refresh_resume_retry_count") or 0) + 1
                 await SupplierSuspendOperationCRUD.update_request_result(
                     db=db,
                     operation_id=operation.id,
@@ -664,6 +813,8 @@ class SuspendActionService:
     async def _check_resume_eligibility(
         db: AsyncSession,
         card: IotCardModel,
+        operator_id: Optional[int] = None,
+        is_admin: bool = False,
         force: bool = False
     ) -> Tuple[bool, Optional[str]]:
         """检查卡片是否满足复机条件"""
@@ -679,6 +830,14 @@ class SuspendActionService:
             return SuspendActionService._check_card_not_expired(card)
 
         if suspend_type == SuspendType.manual:
+            permission_ok, permission_reason = await SuspendActionService._check_manual_suspend_resume_permission(
+                db=db,
+                card=card,
+                operator_id=operator_id,
+                is_admin=is_admin
+            )
+            if not permission_ok:
+                return False, permission_reason
             if card.pool_id:
                 return await SuspendActionService._check_pool_card_resume_eligibility(db, card)
             return SuspendActionService._check_single_card_resume_eligibility(card)
@@ -688,6 +847,9 @@ class SuspendActionService:
 
         if suspend_type == SuspendType.pool_exceed:
             return await SuspendActionService._check_pool_card_resume_eligibility(db, card)
+
+        if suspend_type == SuspendType.device_separation:
+            return False, "该卡因机卡分离被锁定，如需解锁请使用强制复机"
 
         return True, None
 
@@ -847,6 +1009,8 @@ class SuspendActionService:
             can_resume, fail_reason = await SuspendActionService._check_resume_eligibility(
                 db=db,
                 card=card,
+                operator_id=operator_id,
+                is_admin=is_admin,
                 force=force
             )
             if not can_resume:

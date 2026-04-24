@@ -107,6 +107,32 @@ class UpiotSupplierClient(SupplierAPIClient):
             )
         return result
 
+    async def _get_with_business_code(
+        self,
+        endpoint: str,
+        params: Optional[Dict] = None,
+        allowed_codes: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
+        """发送允许特定业务码的GET请求"""
+        url = self._build_url(endpoint)
+        sign = self._calc_get_sign(params)
+        query = {**(params or {}), "_sign": sign}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(url, params=query)
+            resp.raise_for_status()
+            try:
+                result = resp.json()
+            except Exception:
+                raise Exception(
+                    f"upiot GET error: 响应非JSON (HTTP {resp.status_code}), url={url}, body={resp.text[:200]}"
+                )
+        accepted_codes = {200, *(allowed_codes or [])}
+        if result.get("code") not in accepted_codes:
+            raise Exception(
+                f"upiot GET error: code={result.get('code')}, msg={result.get('msg', '')}"
+            )
+        return result
+
     async def _post(self, endpoint: str, body: Dict) -> Dict[str, Any]:
         """发送POST(JSON)请求"""
         url = self._build_url(endpoint)
@@ -332,3 +358,73 @@ class UpiotSupplierClient(SupplierAPIClient):
             "work_status": str(work_status) if work_status is not None else None,
             "work_status_msg": work_status_msg,
         }
+
+    async def get_card_imei_info(self, iccid: str) -> Dict[str, Any]:
+        """
+        获取单卡实时IMEI及绑定状态
+
+        upiot接口:
+        - GET /card/{iccid}/imei/device/
+        - GET /card/{iccid}/imei/lock/status/
+        - GET /card/{iccid}/stop_reason/
+        """
+        result = {
+            "iccid": iccid,
+            "imei": None,
+            "device_name": None,
+            "bind_status": None,
+            "lock_triggered": None,
+            "detection_status": "unknown",
+            "detection_message": "",
+        }
+
+        try:
+            device_data = await self._get(f"card/{iccid}/imei/device")
+            imei_payload = device_data.get("data", {}) or {}
+            result["imei"] = (imei_payload.get("imei") or "").strip() or None
+            result["device_name"] = (imei_payload.get("device") or "").strip() or None
+        except Exception as exc:
+            error_info = self._parse_supplier_error(exc)
+            error_msg = (error_info.get("msg") or "").strip()
+            if error_msg:
+                result["detection_message"] = error_msg
+                if "暂不支持" in error_msg or "未开放" in error_msg or "未开通" in error_msg:
+                    result["detection_status"] = "unsupported"
+            logger.warning("upiot get_card_imei_info device fallback: iccid=%s error=%s", iccid, exc)
+
+        try:
+            lock_data = await self._get(f"card/{iccid}/imei/lock/status")
+            lock_payload = lock_data.get("data", {}) or {}
+            triggered = lock_payload.get("triggered")
+            result["bind_status"] = lock_payload.get("status")
+            result["lock_triggered"] = triggered in {True, "true", "True", 1, "1", "是"}
+        except Exception as exc:
+            logger.warning("upiot get_card_imei_info lock status fallback: iccid=%s error=%s", iccid, exc)
+
+        try:
+            stop_reason = await self._get_with_business_code(
+                f"card/{iccid}/stop_reason",
+                allowed_codes=[300]
+            )
+            result["separation_stop_msg"] = stop_reason.get("msg")
+            result["separation_stop_code"] = stop_reason.get("code")
+            stop_msg = (stop_reason.get("msg") or "").strip()
+            if stop_msg == "是":
+                result["detection_status"] = "detected"
+                result["detection_message"] = "机卡分离停机"
+            elif stop_msg == "否":
+                result["detection_status"] = "clear"
+                result["detection_message"] = "未机卡分离"
+            elif stop_msg:
+                result["detection_status"] = "pending"
+                result["detection_message"] = stop_msg
+        except Exception as exc:
+            error_info = self._parse_supplier_error(exc)
+            error_msg = (error_info.get("msg") or "").strip()
+            if error_msg and result["detection_status"] == "unknown":
+                result["detection_message"] = error_msg
+                if "暂不支持" in error_msg or "未开放" in error_msg or "未开通" in error_msg:
+                    result["detection_status"] = "unsupported"
+            logger.warning("upiot get_card_imei_info stop_reason fallback: iccid=%s error=%s", iccid, exc)
+
+        return result

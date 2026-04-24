@@ -269,6 +269,22 @@ class SuspendLogCRUD:
 
         return list(logs), total
 
+    @staticmethod
+    async def get_latest_by_card_and_action(
+        db: AsyncSession,
+        card_id: int,
+        action: SuspendActionType
+    ) -> Optional[SuspendLogModel]:
+        """获取某张卡最近一次指定操作日志。"""
+        result = await db.execute(
+            select(SuspendLogModel).where(
+                SuspendLogModel.card_id == card_id,
+                SuspendLogModel.action == action,
+                SuspendLogModel.is_deleted == 0
+            ).order_by(SuspendLogModel.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
 
 class AlertLogCRUD:
     """告警记录 CRUD"""

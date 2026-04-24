@@ -305,6 +305,7 @@ CREATE TABLE `iot_cards` (
     `flow_size` BIGINT NOT NULL COMMENT '套餐流量(MB)',
     `period_type` ENUM('monthly', 'yearly') NOT NULL COMMENT '周期类型',
     `card_type` ENUM('single', 'pool') NOT NULL DEFAULT 'single' COMMENT '卡片类型: single=单卡(达量停机), pool=流量池卡',
+    `material` VARCHAR(50) DEFAULT NULL COMMENT '卡片材质编码',
     -- 生命周期日期 (格式: YYYY-MM-DD, 显示为 26/1/31)
     `test_expire_date` DATE DEFAULT NULL COMMENT '测试期到期日',
     `silent_expire_date` DATE DEFAULT NULL COMMENT '沉默期到期日',
@@ -315,11 +316,16 @@ CREATE TABLE `iot_cards` (
     `data_total` BIGINT NOT NULL COMMENT '总流量(MB)',
     `data_used_month` BIGINT NOT NULL DEFAULT 0 COMMENT '本月已用流量(MB)',
     `data_sync_at` DATETIME DEFAULT NULL COMMENT '流量同步时间',
+    `latest_imei` VARCHAR(32) DEFAULT NULL COMMENT '最近一次获取的IMEI',
+    `previous_imei` VARCHAR(32) DEFAULT NULL COMMENT '上一次获取的IMEI',
+    `imei_device_name` VARCHAR(100) DEFAULT NULL COMMENT '最近一次IMEI对应设备名称',
+    `imei_checked_at` DATETIME DEFAULT NULL COMMENT 'IMEI检测时间',
+    `imei_separation_detected` TINYINT NOT NULL DEFAULT 0 COMMENT '是否检测到机卡分离: 0=否,1=是',
     -- 状态
     `status` ENUM('stock', 'testing', 'silent', 'activated', 'expired', 'suspended', 'cancelled') 
         NOT NULL DEFAULT 'stock' COMMENT '状态',
     -- 停卡信息
-    `suspend_type` ENUM('none', 'manual', 'expired', 'pool_exceed', 'card_exceed') 
+    `suspend_type` ENUM('none', 'manual', 'expired', 'pool_exceed', 'card_exceed', 'device_separation') 
         DEFAULT 'none' COMMENT '停卡类型',
     `suspend_at` DATETIME DEFAULT NULL COMMENT '停卡时间',
     `suspend_reason` VARCHAR(200) DEFAULT NULL COMMENT '停卡原因',
@@ -377,6 +383,8 @@ CREATE TABLE `purchase_batches` (
     `carrier` ENUM('cmcc', 'cucc', 'ctcc') NOT NULL COMMENT '运营商',
     `flow_size` BIGINT NOT NULL COMMENT '套餐流量(MB)',
     `period_type` ENUM('monthly', 'yearly') NOT NULL COMMENT '周期类型',
+    `package_period_count` INT DEFAULT NULL COMMENT '入库套餐周期数量',
+    `material` VARCHAR(50) DEFAULT NULL COMMENT '卡片材质编码',
     -- 生命周期配置
     `test_expire_date` DATE DEFAULT NULL COMMENT '测试期到期日',
     `silent_expire_date` DATE NOT NULL COMMENT '沉默期到期日',
@@ -403,6 +411,7 @@ CREATE TABLE `stock_in_records` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录ID',
     `record_no` VARCHAR(50) NOT NULL COMMENT '入库单号',
     `batch_id` BIGINT UNSIGNED NOT NULL COMMENT '批次ID',
+    `package_period_count` INT DEFAULT NULL COMMENT '入库套餐周期数量',
     `card_count` INT NOT NULL DEFAULT 0 COMMENT '入库卡数',
     `success_count` INT NOT NULL DEFAULT 0 COMMENT '成功数',
     `fail_count` INT NOT NULL DEFAULT 0 COMMENT '失败数',

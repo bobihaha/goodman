@@ -17,6 +17,7 @@ class IotCardCRUD:
         "imsi": IotCardModel.imsi,
         "msisdn": IotCardModel.msisdn,
         "card_type": IotCardModel.card_type,
+        "material": IotCardModel.material,
         "carrier": IotCardModel.carrier,
         "status": IotCardModel.status,
         "data_used_month": IotCardModel.data_used_month,

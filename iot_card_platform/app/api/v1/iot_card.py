@@ -3,7 +3,11 @@
 用户/代理商侧：查看、搜索、划拨、备注、导出
 """
 from typing import Optional, List
+from io import BytesIO
+from zipfile import ZipFile, ZIP_DEFLATED
+from xml.sax.saxutils import escape
 from fastapi import APIRouter, Depends, Query, Body
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.services.iot_card_service import iot_card_service
@@ -18,6 +22,112 @@ from app.schemas.iot_card import (
 )
 
 router = APIRouter(prefix="/cards", tags=["卡片管理"])
+
+
+def _build_simple_xlsx(headers: List[str], rows: List[List[object]]) -> BytesIO:
+    """使用标准库构建一个简单的 xlsx 文件，避免依赖额外三方库。"""
+
+    def column_name(index: int) -> str:
+        name = ""
+        current = index
+        while current > 0:
+            current, remainder = divmod(current - 1, 26)
+            name = chr(65 + remainder) + name
+        return name
+
+    def cell_xml(row_index: int, col_index: int, value: object) -> str:
+        cell_ref = f"{column_name(col_index)}{row_index}"
+        if value is None:
+            return f'<c r="{cell_ref}" t="inlineStr"><is><t></t></is></c>'
+
+        if isinstance(value, bool):
+            return f'<c r="{cell_ref}" t="b"><v>{1 if value else 0}</v></c>'
+
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{cell_ref}"><v>{value}</v></c>'
+
+        text = escape(str(value))
+        return f'<c r="{cell_ref}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+    all_rows = [headers, *rows] if headers else rows
+    sheet_rows = []
+    for row_index, row in enumerate(all_rows, start=1):
+        cells = "".join(cell_xml(row_index, col_index, value) for col_index, value in enumerate(row, start=1))
+        sheet_rows.append(f'<row r="{row_index}">{cells}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData>'
+        '</worksheet>'
+    )
+
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="卡片列表" sheetId="1" r:id="rId1"/></sheets>'
+        '</workbook>'
+    )
+
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+        'Target="styles.xml"/>'
+        '</Relationships>'
+    )
+
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+        '<borders count="1"><border/></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        '</styleSheet>'
+    )
+
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        '</Types>'
+    )
+
+    output = BytesIO()
+    with ZipFile(output, "w", ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("[Content_Types].xml", content_types_xml)
+        zip_file.writestr("_rels/.rels", root_rels_xml)
+        zip_file.writestr("xl/workbook.xml", workbook_xml)
+        zip_file.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        zip_file.writestr("xl/styles.xml", styles_xml)
+        zip_file.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+    output.seek(0)
+    return output
 
 
 @router.get("", summary="获取卡片列表", response_model=ResponseModel)
@@ -413,7 +523,7 @@ async def batch_query_cards(
     return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
 
 
-@router.post("/export", summary="导出卡片数据", response_model=ResponseModel)
+@router.post("/export", summary="导出卡片数据")
 async def export_cards(
     request: CardExportRequest = Body(...),
     db: AsyncSession = Depends(get_db),
@@ -439,7 +549,23 @@ async def export_cards(
         expired_start=request.expired_start,
         expired_end=request.expired_end
     )
-    return ResponseModel(data={"count": len(data), "items": data})
+    if data:
+        headers = list(data[0].keys())
+        rows = [[item.get(header, "") for header in headers] for item in data]
+    else:
+        headers = ["提示"]
+        rows = [["暂无数据"]]
+
+    output = _build_simple_xlsx(headers, rows)
+
+    filename = "card_list_export.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
 
 
 # === 单个卡片操作 ===

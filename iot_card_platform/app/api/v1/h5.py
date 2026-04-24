@@ -78,6 +78,16 @@ async def refresh_h5_card(
     return ResponseModel(data=result, msg="刷新请求已提交")
 
 
+@router.post("/{slug}/card/{card_id}/device-separation", summary="H5机卡分离检测", response_model=ResponseModel)
+async def detect_h5_card_device_separation(
+    slug: str = Path(...),
+    card_id: int = Path(...),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await h5_service.detect_device_separation(db, slug, card_id)
+    return ResponseModel(data=result, msg=result.get("message") or "检测完成")
+
+
 @router.put("/{slug}/card/{card_id}/remark", summary="H5修改备注", response_model=ResponseModel)
 async def update_h5_card_remark(
     slug: str = Path(...),

@@ -91,8 +91,10 @@ const handleExport = async () => {
       return
     }
 
-    const startDate = formatDate(start)
-    const endDate = formatDate(end)
+    const startDate = formatMonthStart(start)
+    const endDate = formatMonthEnd(end)
+    const fileStartMonth = formatMonthLabel(start)
+    const fileEndMonth = formatMonthLabel(end)
 
     const data = await cardApi.exportHistory({
       ...props.filterParams,
@@ -109,7 +111,7 @@ const handleExport = async () => {
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '历史用量')
-    XLSX.writeFile(wb, `卡片历史用量_${startDate}_${endDate}.xlsx`)
+    XLSX.writeFile(wb, `卡片历史用量_${fileStartMonth}_${fileEndMonth}.xlsx`)
 
     ElMessage.success('导出成功')
     handleClose()
@@ -126,5 +128,19 @@ const formatDate = (date: Date) => {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const formatMonthStart = (date: Date) => {
+  return formatDate(new Date(date.getFullYear(), date.getMonth(), 1))
+}
+
+const formatMonthEnd = (date: Date) => {
+  return formatDate(new Date(date.getFullYear(), date.getMonth() + 1, 0))
+}
+
+const formatMonthLabel = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
 }
 </script>

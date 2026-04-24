@@ -13,7 +13,7 @@
 - 后端：FastAPI
 - 前端：Vue 3 + Vite
 - 部署：Docker Compose
-- 生产编排文件：`docker-compose.prod.yml`
+- 当前生产编排文件：`docker-compose.yml`
 
 ---
 
@@ -21,7 +21,7 @@
 
 结合当前仓库，发布链路有几个关键点：
 
-- 生产容器由 `docker-compose.prod.yml` 管理，核心服务包括 `nginx`、`frontend`、`backend`、`mysql`、`redis`
+- 当前生产机器由 `docker-compose.yml` 管理，核心服务包括 `app`、`frontend`、`mysql`、`redis`
 - 项目已提供健康检查脚本：`deploy/scripts/health_check.sh`
 - 项目已提供数据库备份与恢复脚本：
   - `deploy/scripts/backup_mysql.sh`
@@ -197,13 +197,13 @@ python scripts/run_migration.py app/db/migrations/xxx.sql
 如果预发布环境没有完全建立，至少做到：
 
 - 在本地用生产配置镜像构建一次
-- 用 `docker-compose.prod.yml` 在测试机器拉起验证
+- 用当前生产编排文件在测试机器拉起验证
 
 参考命令：
 
 ```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+docker compose build
+docker compose up -d
 ```
 
 ### Step 6：上线前检查清单
@@ -245,8 +245,8 @@ bash deploy/scripts/backup_mysql.sh
 #### 场景 1：仅代码发布，无 SQL 变更
 
 ```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+docker compose build
+docker compose up -d
 ```
 
 #### 场景 2：代码发布 + SQL 变更
@@ -262,8 +262,8 @@ docker compose -f docker-compose.prod.yml up -d
 
 ```bash
 python scripts/run_migration.py app/db/migrations/xxx.sql
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+docker compose build
+docker compose up -d
 ```
 
 兼容原则：
@@ -319,9 +319,9 @@ bash deploy/scripts/health_check.sh
 
 重点观察：
 
-- `docker compose -f docker-compose.prod.yml ps`
-- `docker logs iot_backend --tail 200`
-- `docker logs iot_nginx --tail 200`
+- `docker compose ps`
+- `docker logs iot_card_app --tail 200`
+- `docker logs iot_card_frontend --tail 200`
 - 接口报错率
 - 页面白屏、慢查询、超时
 - 定时任务是否异常执行
@@ -528,10 +528,10 @@ pytest tests
 cd frontend && npm run build
 
 # 3. 生产镜像构建
-docker compose -f docker-compose.prod.yml build
+docker compose build
 
 # 4. 启动生产容器
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 
 # 5. 数据库备份
 bash deploy/scripts/backup_mysql.sh

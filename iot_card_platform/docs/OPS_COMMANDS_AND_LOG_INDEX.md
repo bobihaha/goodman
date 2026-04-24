@@ -20,15 +20,15 @@
 
 ## 1. 当前生产容器约定
 
-基于 `docker-compose.prod.yml`，当前核心容器名如下：
+当前实际生产机器以仓库根目录的 `docker-compose.yml` 启动，核心容器名如下：
 
-- `iot_nginx`
-- `iot_frontend`
-- `iot_backend`
+- `iot_card_frontend`
+- `iot_card_app`
 - `iot_mysql`
 - `iot_redis`
 
 排障时先确认容器名，不要混用 `service name` 和 `container_name`。
+旧文档里如果还出现 `docker-compose.prod.yml / iot_backend / iot_frontend`，实操时以服务器现状为准。
 
 ## 2. 发布前速查
 
@@ -40,8 +40,8 @@ bash deploy/scripts/predeploy_check.sh
 
 用途：
 
-- 检查 `.env.production`
-- 检查 `docker-compose.prod.yml`
+- 检查生产 `.env`
+- 检查当前生产使用的 Compose 文件
 - 检查 Docker / Docker Compose
 - 检查编排配置是否可解析
 - 查看磁盘空间
@@ -62,7 +62,7 @@ npm run build
 ### 2.4 生产镜像构建
 
 ```bash
-docker compose -f docker-compose.prod.yml build
+docker compose build
 ```
 
 ## 3. 发布与回滚速查
@@ -70,14 +70,14 @@ docker compose -f docker-compose.prod.yml build
 ### 3.1 启动或更新生产容器
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
 如果本次有代码改动，通常先执行：
 
 ```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+docker compose build
+docker compose up -d
 ```
 
 ### 3.2 数据库备份
@@ -124,7 +124,7 @@ bash deploy/scripts/health_check.sh
 ### 4.2 手工健康检查
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
+docker compose ps
 curl -fsS http://127.0.0.1/health
 curl -fsS http://127.0.0.1/
 docker exec iot_mysql sh -lc 'exec mysqladmin -uroot -p"$MYSQL_ROOT_PASSWORD" ping'
@@ -134,7 +134,7 @@ docker exec iot_redis redis-cli ping
 ### 4.3 查看容器状态
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
+docker compose ps
 docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 ```
 
@@ -143,15 +143,15 @@ docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 ### 5.1 后端容器日志
 
 ```bash
-docker logs iot_backend --tail 100
-docker logs -f iot_backend
+docker logs iot_card_app --tail 100
+docker logs -f iot_card_app
 ```
 
 ### 5.2 Nginx 日志
 
 ```bash
-docker logs iot_nginx --tail 100
-docker logs -f iot_nginx
+docker logs iot_card_frontend --tail 100
+docker logs -f iot_card_frontend
 ```
 
 ### 5.3 MySQL / Redis 日志
@@ -179,7 +179,7 @@ tail -f logs/app.log
 ### 6.1 进入后端容器
 
 ```bash
-docker exec -it iot_backend sh
+docker exec -it iot_card_app sh
 ```
 
 ### 6.2 进入 MySQL 容器
@@ -197,7 +197,7 @@ docker exec -it iot_redis sh
 ### 6.4 检查后端环境变量是否加载
 
 ```bash
-docker exec iot_backend sh -lc 'env | sort | grep -E "APP_|DB_|REDIS_|SECRET_|ALLOW_ORIGINS"'
+docker exec iot_card_app sh -lc 'env | sort | grep -E "APP_|DB_|REDIS_|SECRET_|ALLOW_ORIGINS"'
 ```
 
 ### 6.5 检查 MySQL / Redis 连接
@@ -273,7 +273,7 @@ LIMIT 20;
 
 ```bash
 grep -Ei "登录|login|认证|permission|菜单|401|403" logs/app.log | tail -n 50
-docker logs iot_backend 2>&1 | grep -Ei "登录|login|permission|401|403" | tail -n 50
+docker logs iot_card_app 2>&1 | grep -Ei "登录|login|permission|401|403" | tail -n 50
 ```
 
 ### 8.2 同步任务 / 调度器
@@ -291,7 +291,7 @@ docker logs iot_backend 2>&1 | grep -Ei "登录|login|permission|401|403" | tail
 
 ```bash
 grep -Ei "定时任务|同步|sync|已加载同步任务|定时同步完成|定时同步失败" logs/app.log | tail -n 100
-docker logs iot_backend 2>&1 | grep -Ei "定时任务|同步|sync" | tail -n 100
+docker logs iot_card_app 2>&1 | grep -Ei "定时任务|同步|sync" | tail -n 100
 ```
 
 ### 8.3 停复机 / 回调
@@ -311,7 +311,7 @@ docker logs iot_backend 2>&1 | grep -Ei "定时任务|同步|sync" | tail -n 100
 
 ```bash
 grep -Ei "停卡|复机|suspend|resume|callback|回调|UPIOT" logs/app.log | tail -n 100
-docker logs iot_backend 2>&1 | grep -Ei "停卡|复机|callback|UPIOT" | tail -n 100
+docker logs iot_card_app 2>&1 | grep -Ei "停卡|复机|callback|UPIOT" | tail -n 100
 ```
 
 ### 8.4 流量池 / 超限 / 告警
@@ -329,7 +329,7 @@ docker logs iot_backend 2>&1 | grep -Ei "停卡|复机|callback|UPIOT" | tail -n
 
 ```bash
 grep -Ei "流量池|pool|超限|告警|alert|threshold" logs/app.log | tail -n 100
-docker logs iot_backend 2>&1 | grep -Ei "流量池|pool|超限|告警|alert" | tail -n 100
+docker logs iot_card_app 2>&1 | grep -Ei "流量池|pool|超限|告警|alert" | tail -n 100
 ```
 
 ### 8.5 出入库 / 回收
@@ -347,7 +347,7 @@ docker logs iot_backend 2>&1 | grep -Ei "流量池|pool|超限|告警|alert" | t
 
 ```bash
 grep -Ei "入库|出库|库存|回收|stock|recycle" logs/app.log | tail -n 100
-docker logs iot_backend 2>&1 | grep -Ei "入库|出库|库存|回收|stock|recycle" | tail -n 100
+docker logs iot_card_app 2>&1 | grep -Ei "入库|出库|库存|回收|stock|recycle" | tail -n 100
 ```
 
 ## 9. 常见排障命令组合
@@ -355,14 +355,14 @@ docker logs iot_backend 2>&1 | grep -Ei "入库|出库|库存|回收|stock|recyc
 ### 9.1 发布后快速确认服务全活着
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
+docker compose ps
 bash deploy/scripts/health_check.sh
 ```
 
 ### 9.2 后端接口 500，但不确定原因
 
 ```bash
-docker logs iot_backend --tail 200
+docker logs iot_card_app --tail 200
 tail -n 200 logs/app.log
 ```
 
@@ -376,7 +376,7 @@ docker exec -it iot_mysql sh -lc 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$M
 
 ```bash
 grep -Ei "已加载同步任务|定时同步完成|定时同步失败|sync" logs/app.log | tail -n 100
-docker logs iot_backend 2>&1 | grep -Ei "已加载同步任务|定时同步完成|定时同步失败|sync" | tail -n 100
+docker logs iot_card_app 2>&1 | grep -Ei "已加载同步任务|定时同步完成|定时同步失败|sync" | tail -n 100
 ```
 
 ### 9.5 怀疑回调到了但状态没更新
@@ -404,3 +404,55 @@ docker exec -it iot_mysql sh -lc 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$M
 3. 再看后端日志
 4. 再按业务关键词筛日志
 5. 最后再进数据库核对记录
+
+## 11. 近期需求相关排查命令
+
+### 11.1 查看单卡续费状态和周期
+
+```sql
+SELECT id, iccid, sale_package_id, period_type, period_count, expired_at, activated_at, user_id
+FROM iot_cards
+WHERE iccid = '目标ICCID';
+
+SELECT id, name, period_type, period_months, period_days, price_sale
+FROM sale_packages
+WHERE id = 目标销售套餐ID;
+```
+
+### 11.2 查看续费 / 补量记录来源日志
+
+```sql
+SELECT id, module, action, target_name, detail, created_at, user_id
+FROM sys_operation_logs
+WHERE target_name = '目标ICCID'
+ORDER BY id DESC
+LIMIT 20;
+```
+
+关键词建议：
+
+- `cards`
+- `renew`
+- `topup`
+- `批量续费`
+- `后台补量`
+
+### 11.3 查看出入库记录里的套餐和周期
+
+```sql
+SELECT id, supplier_name, package_name, created_at
+FROM stock_in_records
+ORDER BY id DESC
+LIMIT 10;
+
+SELECT id, record_no, sale_package_id, card_count, created_at
+FROM stock_out_records
+ORDER BY id DESC
+LIMIT 10;
+```
+
+说明：
+
+- 入库记录里的 `package_period` 来自底层套餐周期
+- 出库记录里的 `actual_period` 当前仍由卡片 `period_count` 反推
+- 若卡被回收再重新出库，历史出库周期可能不够稳定，后续应补记录表快照字段

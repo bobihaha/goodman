@@ -69,6 +69,8 @@ class CardInfo(BaseModel):
     period_type: Optional[str] = None
     period_name: Optional[str] = None
     spec_name: Optional[str] = None
+    material: Optional[str] = None
+    material_name: Optional[str] = None
     # 日期
     test_expire_date: Optional[str] = None
     silent_expire_date: Optional[str] = None
@@ -80,6 +82,11 @@ class CardInfo(BaseModel):
     data_remain: int = 0
     data_usage_percent: float = 0
     data_sync_at: Optional[str] = None
+    latest_imei: Optional[str] = None
+    previous_imei: Optional[str] = None
+    imei_device_name: Optional[str] = None
+    imei_checked_at: Optional[str] = None
+    imei_separation_detected: bool = False
     # 状态
     status: Optional[str] = None
     status_name: Optional[str] = None

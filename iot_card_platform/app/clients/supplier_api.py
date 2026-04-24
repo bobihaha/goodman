@@ -105,6 +105,13 @@ class SupplierAPIClient(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_card_imei_info(self, iccid: str) -> Dict[str, Any]:
+        """
+        获取单卡IMEI信息
+        """
+        pass
+
     async def _request(
         self,
         method: str,
@@ -224,6 +231,16 @@ class MockSupplierAPIClient(SupplierAPIClient):
             "work_status_msg": "在线"
         }
 
+    async def get_card_imei_info(self, iccid: str) -> Dict[str, Any]:
+        """模拟IMEI查询"""
+        return {
+            "iccid": iccid,
+            "imei": "868327073452754",
+            "device_name": "Mock Device",
+            "bind_status": "bind_support",
+            "lock_triggered": False,
+        }
+
 
 def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret: str) -> SupplierAPIClient:
     """
@@ -255,6 +272,5 @@ def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret
         f"api_key={'yes' if normalized_key else 'no'}, "
         f"api_secret={'yes' if normalized_secret else 'no'})"
     )
-
 
 

@@ -185,12 +185,25 @@ POST /api/v1/packages/sale
 
 ### 5. 出入库管理
 
+**本次增补（2026-04-24）**：
+- 新增卡片主数据字段 `material`（材质），用于标识卡片物理形态
+- 入库时必须选择材质，并随本次入库的全部卡片一起写入
+- 出库页、库存管理页、卡片列表页增加“材质”展示列，便于用户识别卡片类型
+- 材质选项固定为：
+  - `plastic_plug`: 塑料插拔卡
+  - `industrial_plug_large`: 工业插拔大卡
+  - `industrial_plug_medium`: 工业插拔中卡
+  - `industrial_plug_small`: 工业插拔小卡
+  - `standard_smd_5_6`: 普通5*6贴片卡
+  - `industrial_smd_5_6`: 工业5*6贴片卡
+
 #### 5.1 卡片入库
 **页面**: `/stock/in`
 
 **功能**：
 - Excel模板上传
 - 选择供应商/套餐
+- 选择材质
 - 设置测试期/沉默期
 
 **表单字段**：
@@ -198,11 +211,18 @@ POST /api/v1/packages/sale
 {
   supplier_id: number
   package_id: number
+  material: 'plastic_plug' | 'industrial_plug_large' | 'industrial_plug_medium' | 'industrial_plug_small' | 'standard_smd_5_6' | 'industrial_smd_5_6'
   test_expire_date?: string  // YYYY-MM-DD
   silent_expire_date: string // YYYY-MM-DD
   file: File
 }
 ```
+
+**交互要求**：
+- 材质为必填项，默认不选，必须由操作人显式选择
+- 同一次入库中的全部卡片共用同一个材质
+- 确认入库页需展示当前选中的材质
+- 卡片创建成功后，材质写入卡片主表，并同步记录到采购批次，便于后续追溯
 
 #### 5.2 卡片出库
 **页面**: `/stock/out`
@@ -213,6 +233,7 @@ POST /api/v1/packages/sale
 - 套餐周期选择（月包/年包）
 - 卡类型选择（仅月包：single/pool）
 - Excel批量出库
+- 卡片列表展示材质列
 
 **表单字段**：
 ```typescript
@@ -237,6 +258,19 @@ POST /api/v1/stock/recycle
 GET  /api/v1/stock/records/card
 ```
 
+**列表展示要求**：
+- 出库选卡列表新增 `material_name`
+- 出库确认页卡片列表新增“材质”列
+- 字段来源必须为卡片主数据，不允许前端本地推断
+
+#### 5.3 库存管理补充
+**页面**: `/stock/inventory`
+
+**补充功能**：
+- 库存卡片列表新增“材质”列
+- 批量查询结果弹窗同步展示“材质”列
+- 字段来源为库存卡片的 `material_name`
+
 ---
 
 ### 6. 卡片管理
@@ -248,6 +282,7 @@ GET  /api/v1/stock/records/card
 - 批量查询（最多10000个ICCID）
 - 高级搜索（备注、客户、出库单号、日期范围）
 - 批量操作（划拨/备注/续费/停机/复机）
+- 列表支持展示卡片材质
 
 **表格字段**：
 ```typescript
@@ -261,12 +296,19 @@ GET  /api/v1/stock/records/card
   data_total: number // MB
   flow_size: number
   period_type: 'monthly' | 'yearly'
+  material: 'plastic_plug' | 'industrial_plug_large' | 'industrial_plug_medium' | 'industrial_plug_small' | 'standard_smd_5_6' | 'industrial_smd_5_6'
+  material_name: string
   activated_at: string
   expired_at: string
   pool_id: number
   remark: string
 }
 ```
+
+**展示要求**：
+- 卡片列表新增“材质”列，支持列显示开关和列顺序配置
+- 返回值同时提供 `material` 与 `material_name`
+- 页面默认展示 `material_name`
 
 **API**：
 ```typescript

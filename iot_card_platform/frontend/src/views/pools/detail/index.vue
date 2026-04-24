@@ -548,7 +548,10 @@ const handleRowResume = async (row: any) => {
       ElMessage.success('复机成功')
       handleRefresh()
     } else {
-      ElMessage.error(result.failed_list?.[0]?.error || '复机失败')
+      const firstError = result.failed_list?.[0]?.error || '复机失败'
+      ElMessage.error(firstError.includes('超级管理员手动停卡')
+        ? '该卡由超级管理员手动停卡，请联系管理员处理'
+        : firstError)
     }
   } catch (error: any) {
     if (error !== 'cancel') {

@@ -10,13 +10,20 @@ export type PeriodType = 'monthly' | 'yearly'
 
 // 卡片类型
 export type CardType = 'single' | 'pool'
+export type CardMaterial =
+  | 'plastic_plug'
+  | 'industrial_plug_large'
+  | 'industrial_plug_medium'
+  | 'industrial_plug_small'
+  | 'standard_smd_5_6'
+  | 'industrial_smd_5_6'
 
 // 卡片状态
 export type CardStatus = 'stock' | 'testing' | 'silent' | 'activated' | 'expired' | 'suspended' | 'cancelled'
 export type SortOrder = 'asc' | 'desc'
 
 // 停卡类型
-export type SuspendType = 'none' | 'manual' | 'expired' | 'pool_exceed' | 'card_exceed'
+export type SuspendType = 'none' | 'manual' | 'expired' | 'pool_exceed' | 'card_exceed' | 'device_separation'
 
 // 卡片信息
 export interface Card {
@@ -38,6 +45,13 @@ export interface Card {
   spec_name?: string
   card_type: CardType             // 卡片类型
   card_type_name?: string         // 卡片类型名称
+  material?: CardMaterial
+  material_name?: string
+  package_period_count?: number
+  package_period?: string
+  base_package_id?: number
+  base_package_name?: string
+  batch_no?: string
   test_expire_date?: string       // 测试期到期日（格式：26/1/31）
   silent_expire_date?: string     // 沉默期到期日（格式：26/1/31）
   activated_at?: string           // 激活日期（格式：26/1/31）
@@ -48,6 +62,11 @@ export interface Card {
   data_remain?: number
   data_usage_percent?: number
   data_sync_at?: string
+  latest_imei?: string
+  previous_imei?: string
+  imei_device_name?: string
+  imei_checked_at?: string
+  imei_separation_detected?: boolean
   status: CardStatus
   status_name?: string
   suspend_type?: SuspendType

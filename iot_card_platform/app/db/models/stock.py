@@ -6,6 +6,7 @@ from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel
 from app.db.models.package import CarrierType, PeriodType
+from app.db.models.iot_card import CARD_MATERIAL_NAMES
 
 
 class BatchStatus(str, PyEnum):
@@ -59,6 +60,8 @@ class PurchaseBatchModel(BaseModel):
     carrier = Column(Enum(CarrierType), nullable=False, comment="运营商")
     flow_size = Column(BigInteger, nullable=False, comment="套餐流量(MB)")
     period_type = Column(Enum(PeriodType), nullable=False, comment="周期类型")
+    package_period_count = Column(Integer, nullable=True, comment="入库套餐周期数量")
+    material = Column(String(50), nullable=True, comment="材质编码")
 
     # 生命周期配置
     test_expire_date = Column(Date, nullable=True, comment="测试期到期日")
@@ -76,6 +79,12 @@ class PurchaseBatchModel(BaseModel):
 
     def to_dict(self):
         from app.db.models.package import CARRIER_NAMES, PERIOD_CONFIG
+        package_period = None
+        if self.package_period_count:
+            if self.period_type and self.period_type.value == "yearly":
+                package_period = f"{self.package_period_count}年"
+            else:
+                package_period = f"{self.package_period_count}个月"
         return {
             "id": self.id,
             "batch_no": self.batch_no,
@@ -86,6 +95,10 @@ class PurchaseBatchModel(BaseModel):
             "flow_size": self.flow_size,
             "period_type": self.period_type.value if self.period_type else None,
             "period_name": PERIOD_CONFIG.get(self.period_type.value, {}).get("name", "") if self.period_type else None,
+            "package_period_count": self.package_period_count,
+            "package_period": package_period,
+            "material": self.material,
+            "material_name": CARD_MATERIAL_NAMES.get(self.material, "") if self.material else None,
             "test_expire_date": self.test_expire_date.strftime("%y/%m/%d") if self.test_expire_date else None,
             "silent_expire_date": self.silent_expire_date.strftime("%y/%m/%d") if self.silent_expire_date else None,
             "card_count": self.card_count,

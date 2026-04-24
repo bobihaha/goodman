@@ -72,9 +72,15 @@
             <el-table-column prop="imsi" label="IMSI" width="150" />
             <el-table-column prop="msisdn" label="MSISDN" width="130" />
             <el-table-column prop="supplier_name" label="供应商" width="120" />
+            <el-table-column prop="material_name" label="材质" width="160" />
             <el-table-column label="规格" width="200">
               <template #default="{ row }">
                 {{ row.carrier_name }} / {{ formatFlow(row.flow_size) }} / {{ row.period_name }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="package_period" label="入库套餐周期" width="120">
+              <template #default="{ row }">
+                {{ row.package_period || '-' }}
               </template>
             </el-table-column>
             <el-table-column label="生命周期" width="180">
@@ -265,6 +271,8 @@
               <el-table-column prop="imsi" label="IMSI" />
               <el-table-column prop="msisdn" label="MSISDN" />
               <el-table-column prop="supplier_name" label="供应商" />
+              <el-table-column prop="package_period" label="入库套餐周期" width="120" />
+              <el-table-column prop="material_name" label="材质" width="160" />
             </el-table>
           </div>
 
