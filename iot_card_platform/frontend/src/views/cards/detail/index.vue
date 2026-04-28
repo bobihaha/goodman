@@ -404,6 +404,35 @@
       :card="card"
       @success="handleRenewSuccess"
     />
+
+    <el-dialog
+      v-model="actionDialogVisible"
+      :title="actionDialogTitle"
+      width="300px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!actionDialogProcessing"
+      :show-close="!actionDialogProcessing"
+      :before-close="handleActionDialogClose"
+    >
+      <div class="action-dialog">
+        <el-icon
+          class="action-dialog__icon"
+          :class="{
+            'is-spinning': actionDialogProcessing,
+            'is-success': actionDialogState === 'success',
+            'is-danger': actionDialogState === 'failed'
+          }"
+        >
+          <RefreshRight v-if="actionDialogProcessing" />
+          <CircleCheckFilled v-else-if="actionDialogState === 'success'" />
+          <WarningFilled v-else />
+        </el-icon>
+        <div class="action-dialog__message">{{ actionDialogMessage }}</div>
+      </div>
+      <template #footer>
+        <el-button v-if="!actionDialogProcessing" type="primary" @click="actionDialogVisible = false">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -417,7 +446,10 @@ import {
   Plus,
   CircleClose,
   CircleCheck,
-  Refresh
+  Refresh,
+  RefreshRight,
+  CircleCheckFilled,
+  WarningFilled
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { cardApi } from '@/api'
@@ -455,6 +487,10 @@ const transferVisible = ref(false)
 const remarkVisible = ref(false)
 const singleAddFlowVisible = ref(false)
 const singleRenewVisible = ref(false)
+const actionDialogVisible = ref(false)
+const actionDialogState = ref<'processing' | 'success' | 'failed'>('processing')
+const actionDialogTitle = ref('正在操作')
+const actionDialogMessage = ref('正在处理，请稍候')
 
 // 历史用量
 const historyLoading = ref(false)
@@ -516,6 +552,60 @@ const getDeviceSeparationClass = () => {
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const restartPollIntervalMs = 5000
+const restartMaxPollAttempts = 72
+const actionDialogProcessing = computed(() => actionDialogState.value === 'processing')
+
+const openActionDialog = (title: string, message: string) => {
+  actionDialogTitle.value = title
+  actionDialogMessage.value = message
+  actionDialogState.value = 'processing'
+  actionDialogVisible.value = true
+}
+
+const finishActionDialog = (success: boolean, message: string, title?: string) => {
+  actionDialogState.value = success ? 'success' : 'failed'
+  actionDialogTitle.value = title || '操作结果'
+  actionDialogMessage.value = message
+}
+
+const getRestartFailureMessage = (error: unknown) => {
+  const rawMessage = error instanceof Error ? error.message : String(error || '')
+  const message = rawMessage.trim()
+  if (!message) return '重启失败，请手动复机'
+  if (message.includes('timeout') || message.includes('exceeded') || message.includes('Network Error')) {
+    return '重启失败，请手动复机'
+  }
+  return message
+}
+const getCarrierLimitNotice = (carrier?: string) => carrier === 'cmcc' ? '移动卡单日不可超2次停复机操作' : ''
+
+const handleActionDialogClose = (done: () => void) => {
+  if (actionDialogProcessing.value) return
+  done()
+}
+
+const waitForRestartCompletion = async (cardId: number, initialStatus?: string) => {
+  let seenSuspended = initialStatus === 'suspended'
+
+  for (let attempt = 0; attempt < restartMaxPollAttempts; attempt += 1) {
+    await sleep(restartPollIntervalMs)
+    const latestCard = await cardApi.getDetail(cardId)
+    card.value = latestCard
+    const currentStatus = String(latestCard?.status || '')
+
+    if (currentStatus === 'suspended') {
+      seenSuspended = true
+      continue
+    }
+
+    if (seenSuspended && currentStatus) {
+      return true
+    }
+  }
+
+  return false
+}
 
 const resolveDeviceSeparationResult = async (iccid: string) => {
   let result = await cardApi.syncSingleCard(iccid)
@@ -556,51 +646,39 @@ const handleDeviceSeparationCheck = async () => {
   }
 
   deviceSeparationChecking.value = true
+  openActionDialog('正在检测', '机卡分离检测进行中，请稍候')
   try {
     const result = await resolveDeviceSeparationResult(card.value.iccid)
     if (result.device_separation_detection_status === 'pending') {
       setDeviceSeparationDisplayState('pending')
-      await ElMessageBox.alert(
-        result.device_separation_detection_message || '供应商正在查询机卡分离状态，请稍后再试。',
-        '提示',
-        {
-          confirmButtonText: '知道了',
-          type: 'info'
-        }
-      )
+      finishActionDialog(false, result.device_separation_detection_message || '供应商正在查询机卡分离状态，请稍后再试。', '检测结果')
       return
     }
     await fetchCardDetail()
     if (result.device_separation_detection_status === 'detected') {
       setDeviceSeparationDisplayState('detected')
-      ElMessage.success('机卡分离检测已完成')
+      finishActionDialog(true, '机卡分离检测已完成，结果为机卡分离停机', '检测结果')
       return
     }
     if (result.device_separation_detection_status === 'clear') {
       setDeviceSeparationDisplayState('clear')
-      ElMessage.success('机卡分离检测已完成')
+      finishActionDialog(true, '机卡分离检测已完成，结果为未机卡分离', '检测结果')
       return
     }
     clearDeviceSeparationDisplayState()
     if (result.device_separation_detection_status === 'unsupported') {
-      await ElMessageBox.alert(
-        result.device_separation_detection_message || '请联系客服',
-        '提示',
-        {
-          confirmButtonText: '知道了',
-          type: 'info'
-        }
-      )
+      finishActionDialog(false, result.device_separation_detection_message || '请联系客服', '检测结果')
       return
     }
-    ElMessage.warning('当前未获取到有效检测结果，请稍后再试')
+    finishActionDialog(false, '当前未获取到有效检测结果，请稍后再试', '检测结果')
   } catch (error) {
     console.error('机卡分离检测失败:', error)
     const errorMessage = error instanceof Error ? error.message : String(error || '')
     if (errorMessage.includes('请联系客服') || errorMessage.includes('无权')) {
+      finishActionDialog(false, errorMessage || '请联系客服', '检测结果')
       return
     }
-    ElMessage.error('机卡分离检测失败，请稍后重试')
+    finishActionDialog(false, '机卡分离检测失败，请稍后重试', '检测结果')
   } finally {
     deviceSeparationChecking.value = false
   }
@@ -736,7 +814,9 @@ const showRemarkDialog = () => {
 const handleSuspend = async () => {
   try {
     await ElMessageBox.confirm(
-      '确定要停机该卡片吗？',
+      getCarrierLimitNotice(card.value?.carrier)
+        ? `确定要停机该卡片吗？\n\n提示：${getCarrierLimitNotice(card.value?.carrier)}`
+        : '确定要停机该卡片吗？',
       '停机确认',
       {
         confirmButtonText: '确定',
@@ -745,15 +825,17 @@ const handleSuspend = async () => {
       }
     )
 
+    openActionDialog('正在停机', '正在提交停机操作，请稍候')
     await cardApi.batchSuspend({
       card_ids: [cardId.value]
     })
 
-    ElMessage.success('停机成功')
-    fetchCardDetail()
+    await fetchCardDetail()
+    finishActionDialog(true, '停机成功', '停机结果')
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('停机失败:', error)
+      finishActionDialog(false, error?.message || '停机失败，请稍后重试', '停机结果')
     }
   }
 }
@@ -763,7 +845,9 @@ const handleResume = async () => {
   if (!card.value?.iccid) return
   try {
     await ElMessageBox.confirm(
-      '确定要复机该卡片吗？',
+      getCarrierLimitNotice(card.value?.carrier)
+        ? `确定要复机该卡片吗？\n\n提示：${getCarrierLimitNotice(card.value?.carrier)}`
+        : '确定要复机该卡片吗？',
       '复机确认',
       {
         confirmButtonText: '确定',
@@ -772,22 +856,26 @@ const handleResume = async () => {
       }
     )
 
+    openActionDialog('正在复机', '正在提交复机操作，请稍候')
     const result = await cardApi.batchResumeByIccids({
       iccids: [card.value.iccid]
     })
 
     if (result.success > 0) {
-      ElMessage.success('复机成功')
+      finishActionDialog(true, '复机成功', '复机结果')
     } else {
       const firstError = result.failed_list?.[0]?.error || '当前不允许复机'
-      ElMessage.error(firstError.includes('超级管理员手动停卡')
-        ? '该卡由超级管理员手动停卡，请联系管理员处理'
-        : firstError)
+      finishActionDialog(
+        false,
+        firstError.includes('超级管理员手动停卡') ? '该卡由超级管理员手动停卡，请联系管理员处理' : firstError,
+        '复机结果'
+      )
     }
-    fetchCardDetail()
+    await fetchCardDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('复机失败:', error)
+      finishActionDialog(false, error?.message || '复机失败，请稍后重试', '复机结果')
     }
   }
 }
@@ -796,7 +884,9 @@ const handleRestart = async () => {
   if (!card.value?.id || !card.value?.iccid) return
   try {
     await ElMessageBox.confirm(
-      '确定要重启该卡片吗？系统会执行停机后再复机。',
+      getCarrierLimitNotice(card.value?.carrier)
+        ? `确定要重启该卡片吗？系统会执行停机后再复机。\n\n提示：${getCarrierLimitNotice(card.value?.carrier)}`
+        : '确定要重启该卡片吗？系统会执行停机后再复机。',
       '重启确认',
       {
         confirmButtonText: '确定重启',
@@ -805,12 +895,20 @@ const handleRestart = async () => {
       }
     )
 
+    openActionDialog('正在重启', '正在操作，请稍候')
+    const initialStatus = card.value.status
     const result = await cardApi.restartCard(card.value.id)
-    ElMessage.success(result.message || (result.status === 'processing' ? '重启请求已提交' : '重启成功'))
-    fetchCardDetail()
+    if (result.status === 'processing') {
+      const success = await waitForRestartCompletion(card.value.id, initialStatus)
+      finishActionDialog(success, success ? '重启成功' : '重启失败，请手动复机', '重启结果')
+    } else {
+      await fetchCardDetail()
+      finishActionDialog(true, result.message || '重启成功', '重启结果')
+    }
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('重启失败:', error)
+      finishActionDialog(false, getRestartFailureMessage(error), '重启结果')
     }
   }
 }
@@ -995,5 +1093,33 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.action-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 2px 0 6px;
+  text-align: center;
+}
+
+.action-dialog__icon {
+  font-size: 28px;
+  color: #2563eb;
+}
+
+.action-dialog__icon.is-success {
+  color: #16a34a;
+}
+
+.action-dialog__icon.is-danger {
+  color: #ef4444;
+}
+
+.action-dialog__message {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
 }
 </style>

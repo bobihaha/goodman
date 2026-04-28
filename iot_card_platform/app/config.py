@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     max_batch_operation_size: int = 10000
     max_export_size: int = 10000
     refresh_resume_fallback_seconds: int = 30
+    refresh_resume_delay_seconds: int = 180
     supplier_callback_reconcile_seconds: int = 90
     supplier_status_conflict_window_seconds: int = 600
     refresh_status_poll_interval_seconds: int = 5

@@ -70,6 +70,18 @@
             :closable="false"
             style="margin-bottom: 16px"
           />
+          <el-alert
+            v-if="operationResult.warning_list.length > 0"
+            title="存在供应商同步提示"
+            type="warning"
+            :closable="false"
+            style="margin-bottom: 16px"
+          >
+            <template #default>
+              <div>以下卡片本次只更新了本地套餐周期，当前版本未同步供应商续费周期。</div>
+              <div>如后续又被供应商生命周期同步覆盖，请优先补供应商续费接口。</div>
+            </template>
+          </el-alert>
         </div>
 
         <!-- 成功的卡片 -->
@@ -85,6 +97,16 @@
           >
             <el-table-column prop="iccid" label="ICCID" width="200" />
             <el-table-column prop="msisdn" label="号码" width="130" />
+            <el-table-column label="原到期日" width="120">
+              <template #default="{ row }">
+                {{ row.old_expired_at || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="新到期日" width="120">
+              <template #default="{ row }">
+                {{ row.new_expired_at || '-' }}
+              </template>
+            </el-table-column>
             <el-table-column prop="message" label="说明" min-width="150" />
           </el-table>
         </div>
@@ -155,7 +177,15 @@ interface Emits {
 interface OperationResult {
   success_count: number
   failed_count: number
-  success_list: Array<{ iccid: string; msisdn?: string; message: string }>
+  warning_list: Array<{ iccid: string; warning: string }>
+  success_list: Array<{
+    iccid: string
+    msisdn?: string
+    old_expired_at?: string | null
+    new_expired_at?: string | null
+    message: string
+    warning?: string
+  }>
   failed_list: Array<{ iccid: string; error: string }>
 }
 
@@ -254,12 +284,17 @@ const handleRenew = async () => {
         operationResult.value = {
           success_count: result.success || 0,
           failed_count: result.failed || 0,
+          warning_list: result.warning_list || [],
           success_list: result.success_list || [],
           failed_list: result.failed_list || []
         }
         
         if (result.success > 0) {
-          ElMessage.success(`成功续费 ${result.success} 张卡片`)
+          if ((result.warning_count || 0) > 0) {
+            ElMessage.warning(`成功续费 ${result.success} 张，其中 ${result.warning_count} 张仅更新本地套餐周期`)
+          } else {
+            ElMessage.success(`成功续费 ${result.success} 张卡片`)
+          }
           emit('success')
         }
         

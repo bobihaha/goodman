@@ -73,13 +73,10 @@
       </div>
     </div>
 
-    <!-- 账户余额 + 流量池用量 -->
-    <div class="balance-pool-section">
+    <!-- 账户余额 -->
+    <div class="balance-section">
       <div class="balance-wrapper">
         <account-balance />
-      </div>
-      <div class="pool-wrapper">
-        <pool-usage-chart />
       </div>
     </div>
 
@@ -121,7 +118,6 @@ import StatCard from './components/StatCard.vue'
 import AccountBalance from './components/AccountBalance.vue'
 import ExpiringCardList from './components/ExpiringCardList.vue'
 import OverUsageCardList from './components/OverUsageCardList.vue'
-import PoolUsageChart from './components/PoolUsageChart.vue'
 import AlertList from './components/AlertList.vue'
 
 const authStore = useAuthStore()
@@ -229,14 +225,17 @@ onMounted(async () => {
     }
   }
 
-  // 账户余额和流量池区域
-  .balance-pool-section {
-    display: grid;
-    grid-template-columns: 280px 1fr;
-    gap: 12px;
+  // 账户余额区域
+  .balance-section {
+    display: flex;
     margin-bottom: 12px;
     flex-shrink: 0;
     min-height: 0;
+
+    .balance-wrapper {
+      width: 280px;
+      max-width: 100%;
+    }
   }
 
   // 到期卡和超量卡区域
@@ -270,8 +269,8 @@ onMounted(async () => {
 
 @media (max-width: 1200px) {
   .dashboard-container {
-    .balance-pool-section {
-      grid-template-columns: 1fr;
+    .balance-section .balance-wrapper {
+      width: 100%;
     }
   }
 }

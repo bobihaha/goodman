@@ -63,7 +63,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:modelValue', value: boolean): void
-  (e: 'success', data: { found: Card[]; not_found: string[] }): void
+  (e: 'success', data: { found: Card[]; not_found: string[]; iccids: string[] }): void
 }
 
 const props = defineProps<Props>()
@@ -112,7 +112,10 @@ const handleQuery = async () => {
       ElMessage.success(`查询完成：找到 ${result.found.length} 张卡片`)
     }
 
-    emit('success', result)
+    emit('success', {
+      ...result,
+      iccids
+    })
     handleClose()
   } catch (error) {
     console.error('批量查询失败:', error)

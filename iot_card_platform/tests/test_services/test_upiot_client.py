@@ -237,8 +237,29 @@ class TestGetCardUsage:
 
         assert result["iccid"] == "898600000000001"
         assert result["data_used"] == 512.0
+        assert result["data_used_month"] == 512.0
+        assert result["data_used_scope"] == "month"
         assert result["data_total"] == 1024.0
         assert "sync_time" in result
+
+    @pytest.mark.asyncio
+    async def test_accumulated_card_uses_cycle_usage(self, client):
+        api_data = {
+            "code": 200,
+            "data": {
+                "iccid": "898600000000001",
+                "data_usage": "15.532",
+                "cycle_data_usage": "35.926",
+                "accumulated": True,
+                "data_traffic_amount": "5120.000",
+            }
+        }
+        with patch.object(client, "_get", AsyncMock(return_value=api_data)):
+            result = await client.get_card_usage("898600000000001")
+
+        assert result["data_used"] == 35.926
+        assert result["data_used_month"] == 15.532
+        assert result["data_used_scope"] == "cycle"
 
     @pytest.mark.asyncio
     async def test_fallback_iccid_from_param(self, client):
@@ -312,7 +333,40 @@ class TestGetBatchUsage:
         assert len(results) == 2
         assert results[0]["iccid"] == "A"
         assert results[0]["data_used"] == 100.0
+        assert results[0]["data_used_month"] == 100.0
+        assert results[0]["data_used_scope"] == "month"
         assert results[1]["sync_time"] != ""  # fallback to now
+
+    @pytest.mark.asyncio
+    async def test_yearly_batch_row_fetches_cycle_usage(self, client):
+        api_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {
+                        "iccid": "A",
+                        "data_usage": "15.532",
+                        "data_plan": "5120",
+                        "bg_code": "109230028MWL5GB1211Y",
+                        "updated_time": "2026-01-01 00:00:00",
+                    },
+                ]
+            }
+        }
+        cycle_usage = {
+            "iccid": "A",
+            "data_used": 35.926,
+            "data_used_month": 15.532,
+            "data_used_scope": "cycle",
+            "data_total": 5120.0,
+            "sync_time": "2026-01-01 00:01:00",
+        }
+        with patch.object(client, "_post", AsyncMock(return_value=api_data)), \
+             patch.object(client, "get_card_usage", AsyncMock(return_value=cycle_usage)) as mock_single:
+            results = await client.get_batch_usage(["A"])
+
+        assert results == [cycle_usage]
+        mock_single.assert_awaited_once_with("A")
 
     @pytest.mark.asyncio
     async def test_splits_into_batches_of_50(self, client):

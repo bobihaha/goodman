@@ -208,6 +208,19 @@ cd /home/deploy/iot_card_platform
 bash ./check_system.sh
 ```
 
+如果要继续排查“续费成功但卡片列表没延长”“套餐周期被回写变短”，再补跑：
+
+```bash
+cd /home/deploy/iot_card_platform
+python scripts/check_renew_anomalies.py --days 7
+```
+
+脚本会主动检查：
+
+- 最近续费日志对应的本地到期日是否变短
+- `status=activated` 但缺少 `activated_at` 的卡
+- 本地到期日与供应商生命周期到期日是否不一致
+
 ### 7.2 用户反馈系统慢
 
 先执行脚本，看三件事：

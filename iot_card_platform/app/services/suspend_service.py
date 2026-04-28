@@ -431,21 +431,11 @@ class SuspendActionService:
                 )
                 if operation.action == SuspendActionType.suspend:
                     if request_meta.get("refresh_resume_pending") and not request_meta.get("refresh_resume_submitted"):
-                        resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+                        await SuspendActionService.schedule_refresh_resume_after_suspend_confirmed(
                             db=db,
-                            card=card,
-                            supplier=supplier,
-                            operator_id=operation.operator_id
+                            suspend_callback_no=callback_no,
+                            source="auto_reconcile"
                         )
-                        request_meta["refresh_resume_submitted"] = resume_success
-                        request_meta["refresh_resume_callback_no"] = resume_callback_no
-                        await SupplierSuspendOperationCRUD.update_request_result(
-                            db=db,
-                            operation_id=operation.id,
-                            request_result=json.dumps(request_meta, ensure_ascii=False)
-                        )
-                        if not resume_success:
-                            logger.error("刷新自动复机提交失败(自动对账): callback_no=%s iccid=%s", callback_no, operation.iccid)
                 if operation.action == SuspendActionType.resume:
                     await SuspendActionService._close_refresh_suspend_chain(
                         db=db,
@@ -671,6 +661,47 @@ class SuspendActionService:
             db=db,
             operation_id=operation.id,
             request_result=json.dumps(metadata, ensure_ascii=False)
+        )
+
+    @staticmethod
+    async def schedule_refresh_resume_after_suspend_confirmed(
+        db: AsyncSession,
+        suspend_callback_no: str,
+        delay_seconds: Optional[int] = None,
+        source: str = "unknown"
+    ) -> None:
+        operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, suspend_callback_no)
+        if not operation:
+            return
+
+        metadata: Dict[str, Any] = {}
+        if operation.request_result:
+            try:
+                metadata = json.loads(operation.request_result)
+            except Exception:
+                metadata = {"raw_request_result": operation.request_result}
+
+        if not metadata.get("refresh_resume_pending") or metadata.get("refresh_resume_submitted"):
+            return
+
+        effective_delay = max(1, delay_seconds or settings.refresh_resume_delay_seconds)
+        existing_delay = int(metadata.get("refresh_resume_delay_seconds") or 0)
+        if metadata.get("refresh_resume_scheduled") and existing_delay == effective_delay:
+            return
+
+        metadata["refresh_resume_scheduled"] = True
+        metadata["refresh_resume_schedule_source"] = source
+        metadata["refresh_resume_delay_seconds"] = effective_delay
+        metadata["refresh_resume_scheduled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await SupplierSuspendOperationCRUD.update_request_result(
+            db=db,
+            operation_id=operation.id,
+            request_result=json.dumps(metadata, ensure_ascii=False)
+        )
+
+        SuspendActionService.schedule_refresh_resume_fallback(
+            suspend_callback_no=suspend_callback_no,
+            delay_seconds=effective_delay
         )
 
     @staticmethod
@@ -1348,23 +1379,11 @@ class SupplierCallbackService:
             )
             supplier = supplier_result.scalar_one_or_none()
 
-        resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
+        await SuspendActionService.schedule_refresh_resume_after_suspend_confirmed(
             db=db,
-            card=card,
-            supplier=supplier,
-            operator_id=operation.operator_id
+            suspend_callback_no=callback_no,
+            source="supplier_callback"
         )
-
-        request_meta["refresh_resume_submitted"] = resume_success
-        request_meta["refresh_resume_callback_no"] = resume_callback_no
-        await SupplierSuspendOperationCRUD.update_request_result(
-            db=db,
-            operation_id=operation.id,
-            request_result=json.dumps(request_meta, ensure_ascii=False)
-        )
-
-        if not resume_success:
-            logger.error("刷新自动复机提交失败: callback_no=%s iccid=%s", callback_no, operation.iccid)
 
 
 class SuspendLogService:

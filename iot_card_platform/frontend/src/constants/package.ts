@@ -63,14 +63,13 @@ export const COMMON_FLOW_SIZES = [
   { label: '100GB', value: 102400 }
 ]
 
-// 常用有效天数
+// 常用有效天数（旧字段兼容，年包实际按 12 个计费月计算）
 export const COMMON_VALID_DAYS = [
   { label: '30天（月包）', value: 30 },
   { label: '90天（季包）', value: 90 },
   { label: '180天（半年包）', value: 180 },
-  { label: '365天（年包）', value: 365 }
+  { label: '12个月（年包）', value: 360 }
 ]
-
 
 
 

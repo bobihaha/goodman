@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -60,6 +61,7 @@ class UpiotSupplierClient(SupplierAPIClient):
         if not self.api_url:
             self.api_url = "http://ec.upiot.net"
         self.last_sor_result: Optional[Dict[str, Any]] = None
+        self.last_force_activate_result: Optional[Dict[str, Any]] = None
 
     # ========== 签名计算 ==========
 
@@ -186,6 +188,37 @@ class UpiotSupplierClient(SupplierAPIClient):
             "msg": match.group(2).strip(),
         }
 
+    def _resolve_usage_payload(self, card: Dict[str, Any]) -> Dict[str, Any]:
+        monthly_used = self._parse_float(card.get("data_usage"))
+        cycle_used = self._parse_float(card.get("cycle_data_usage"))
+        is_accumulated = card.get("accumulated") is True and card.get("cycle_data_usage") not in (None, "")
+        if is_accumulated:
+            return {
+                "data_used": cycle_used,
+                "data_used_month": monthly_used,
+                "data_used_scope": "cycle",
+            }
+        return {
+            "data_used": monthly_used,
+            "data_used_month": monthly_used,
+            "data_used_scope": "month",
+        }
+
+    def _looks_like_yearly_usage_row(self, row: Dict[str, Any]) -> bool:
+        product_code = str(row.get("bg_code") or row.get("code") or "").upper()
+        if product_code.endswith("Y") or "Y" in product_code:
+            return True
+        expiry_date = row.get("expiry_date")
+        valid_date = row.get("valid_date") or row.get("active_date")
+        if not expiry_date or not valid_date:
+            return False
+        try:
+            expiry = datetime.strptime(str(expiry_date), "%Y-%m-%d").date()
+            valid = datetime.strptime(str(valid_date), "%Y-%m-%d").date()
+        except ValueError:
+            return False
+        return (expiry - valid).days >= 300
+
     # ========== 核心接口实现 ==========
 
     async def get_card_usage(self, iccid: str) -> Dict[str, Any]:
@@ -195,9 +228,10 @@ class UpiotSupplierClient(SupplierAPIClient):
         """
         data = await self._get(f"card/{iccid}")
         card = data.get("data", {})
+        usage_payload = self._resolve_usage_payload(card)
         return {
             "iccid": card.get("iccid", iccid),
-            "data_used": self._parse_float(card.get("data_usage")),
+            **usage_payload,
             "data_total": self._parse_float(card.get("data_traffic_amount")),
             "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -212,9 +246,17 @@ class UpiotSupplierClient(SupplierAPIClient):
             batch = iccid_list[i : i + BATCH_MAX_SIZE]
             data = await self._post("card_usage_info", {"msisdns": batch})
             for row in data.get("data", {}).get("rows", []):
+                iccid = row.get("iccid", "")
+                if iccid and self._looks_like_yearly_usage_row(row):
+                    try:
+                        results.append(await self.get_card_usage(iccid))
+                        continue
+                    except Exception as exc:
+                        logger.warning("年包周期累计用量补查失败: iccid=%s, error=%s", iccid, exc)
+                usage_payload = self._resolve_usage_payload(row)
                 results.append({
-                    "iccid": row.get("iccid", ""),
-                    "data_used": self._parse_float(row.get("data_usage")),
+                    "iccid": iccid,
+                    **usage_payload,
                     "data_total": self._parse_float(row.get("data_plan")),
                     "sync_time": row.get("updated_time")
                         or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -333,6 +375,99 @@ class UpiotSupplierClient(SupplierAPIClient):
                 "error": str(e),
             }
             logger.error(f"upiot resume_card failed: iccid={iccid}, error={e}")
+            return False
+
+    async def force_activate_card(self, iccid: str, card_no: Optional[str] = None) -> bool:
+        """
+        强制激活
+
+        upiot接口:
+        - POST /card_status_change/ oper_type=1|2
+        - GET /card_status_change_result/?task_id=xxx
+
+        口径:
+        - 测试期 -> 正使用: oper_type=2
+        - 沉默期/库存期 -> 正使用: oper_type=1
+        """
+        self.last_force_activate_result = None
+        try:
+            lifecycle = await self.get_card_lifecycle(iccid)
+            current_status = str(lifecycle.get("status") or "").strip()
+            if current_status == "activated":
+                self.last_force_activate_result = {
+                    "submitted": True,
+                    "idempotent": True,
+                    "current_status": current_status,
+                    "reconciled_status": "activated",
+                    "supplier_msg": "供应商侧已是正使用状态，已按激活纠正本地状态",
+                }
+                return True
+            oper_type = 2 if current_status == "testing" else 1
+            request_card_no = (card_no or iccid or "").strip()
+
+            payload = {"cards_no": [request_card_no], "oper_type": oper_type}
+            response = await self._post("card_status_change", payload)
+            task_id = response.get("data")
+            self.last_force_activate_result = {
+                "submitted": True,
+                "task_id": task_id,
+                "oper_type": oper_type,
+                "current_status": current_status,
+                "request_card_no": request_card_no,
+            }
+
+            if task_id:
+                for _ in range(3):
+                    await asyncio.sleep(2)
+                    result = await self._get("card_status_change_result", {"task_id": task_id})
+                    rows = result.get("data") or []
+                    row = next(
+                        (
+                            item for item in rows
+                            if str(item.get("iccid") or "") == iccid
+                            or str(item.get("msisdn") or "") == iccid
+                            or str(item.get("imsi") or "") == iccid
+                        ),
+                        None
+                    )
+                    if not row:
+                        continue
+                    result_text = str(row.get("result") or "")
+                    self.last_force_activate_result["result"] = result_text
+                    if "成功" in result_text:
+                        return True
+                    if "失败" in result_text:
+                        self.last_force_activate_result.update({
+                            "submitted": False,
+                            "error": result_text,
+                        })
+                        return False
+
+            return True
+        except Exception as e:
+            error_meta = self._parse_supplier_error(e)
+            supplier_msg = error_meta.get("msg") or ""
+            if "正使用" in supplier_msg or "已使用" in supplier_msg:
+                self.last_force_activate_result = {
+                    "submitted": True,
+                    "idempotent": True,
+                    "supplier_code": error_meta.get("code"),
+                    "supplier_msg": supplier_msg,
+                    "reconciled_status": "activated",
+                }
+                logger.warning(
+                    "upiot force_activate already active, reconcile locally: iccid=%s, msg=%s",
+                    iccid,
+                    supplier_msg,
+                )
+                return True
+            self.last_force_activate_result = {
+                "submitted": False,
+                "supplier_code": error_meta.get("code"),
+                "supplier_msg": supplier_msg,
+                "error": str(e),
+            }
+            logger.error("upiot force_activate failed: iccid=%s, error=%s", iccid, e)
             return False
 
     async def get_card_diagnostics(self, iccid: str) -> Dict[str, Any]:

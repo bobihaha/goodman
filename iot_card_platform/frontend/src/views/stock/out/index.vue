@@ -155,7 +155,7 @@
               />
             </el-select>
             <div style="color: #909399; font-size: 12px; margin-top: 5px">
-              {{ selectedPackagePeriodType === 'yearly' ? '注意：年包有效期为360天/年' : '' }}
+              {{ selectedPackagePeriodType === 'yearly' ? '年包按自激活后12个月/年计算，首月不足30天按一个月' : '' }}
             </div>
           </el-form-item>
 
@@ -229,7 +229,7 @@
                 {{ outForm.period_count }} {{ selectedPackagePeriodType === 'yearly' ? '年' : '个月' }}
               </el-tag>
               <span v-if="selectedPackagePeriodType === 'yearly'" style="color: #909399; font-size: 12px; margin-left: 10px">
-                (有效期: {{ (outForm.period_count || 0) * 360 }} 天)
+                (有效期: {{ (outForm.period_count || 0) * 12 }} 个月)
               </span>
             </el-descriptions-item>
             <el-descriptions-item label="卡类型" v-if="selectedPackagePeriodType === 'monthly'">
@@ -352,7 +352,7 @@
             <div>1. 下载Excel模板，按照模板格式填写数据</div>
             <div>2. 月包套餐必须填写卡类型（single/pool），年包可不填</div>
             <div>3. 套餐周期：月包填月数（3/6/12等），年包填年数（1/2/3等）</div>
-            <div>4. 年包有效期为360天/年，不是365天</div>
+            <div>4. 年包按自激活后12个月/年计算，首月不足30天按一个月</div>
             <div>5. 日期格式：YYYY-MM-DD（如：2026-02-11）</div>
           </div>
         </el-alert>

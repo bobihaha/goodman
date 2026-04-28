@@ -90,6 +90,13 @@ class SupplierAPIClient(ABC):
         pass
 
     @abstractmethod
+    async def force_activate_card(self, iccid: str, card_no: Optional[str] = None) -> bool:
+        """
+        强制激活
+        """
+        pass
+
+    @abstractmethod
     async def get_card_diagnostics(self, iccid: str) -> Dict[str, Any]:
         """
         获取单卡诊断状态
@@ -221,6 +228,10 @@ class MockSupplierAPIClient(SupplierAPIClient):
         """模拟复机"""
         return True
 
+    async def force_activate_card(self, iccid: str, card_no: Optional[str] = None) -> bool:
+        """模拟强制激活"""
+        return True
+
     async def get_card_diagnostics(self, iccid: str) -> Dict[str, Any]:
         """模拟诊断状态"""
         return {
@@ -272,5 +283,3 @@ def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret
         f"api_key={'yes' if normalized_key else 'no'}, "
         f"api_secret={'yes' if normalized_secret else 'no'})"
     )
-
-

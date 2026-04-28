@@ -135,9 +135,9 @@
         <el-col :span="12">
           <el-form-item label="周期规则">
             <div class="readonly-period">
-              <span>{{ formData.period_type === 'yearly' ? '按年包基础周期处理' : '按月包基础周期处理' }}</span>
+              <span>{{ formData.period_type === 'yearly' ? '自激活后12个月/年' : '按月包基础周期处理' }}</span>
               <div class="form-tip">
-                销售套餐不再单独设置套餐周期，具体开通时长以出库时选择的套餐周期为准
+                销售套餐不再单独设置套餐周期，年包首月不足30天按一个月，具体开通时长以出库时选择的套餐周期为准
               </div>
             </div>
           </el-form-item>

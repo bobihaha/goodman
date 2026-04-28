@@ -204,6 +204,7 @@ sequenceDiagram
 - 到期日更新在 `app/services/iot_card_service.py`
 - 续费记录页当前基于 `sys_operation_logs` 聚合
 - 如果日志漏写，页面会显示“续费成功但续费记录为空”
+- 当前实现默认只更新本地 `iot_cards.expired_at`，未对接供应商续费接口
 
 ### 容易出问题的点
 

@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.crud.iot_card_crud import iot_card_crud
 from app.crud.sys_user_crud import sys_user_crud
+from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.db.models.suspend import SupplierSuspendOperationModel, SuspendActionType
 from app.db.models.iot_card import CardStatus, SuspendType
 from app.db.models.iot_card import CardH5RemarkLogModel, IotCardModel
@@ -48,6 +49,21 @@ class H5Service:
     @staticmethod
     def _is_enabled(user) -> bool:
         return bool(user.h5_enabled) and (user.h5_status or "enabled") == "enabled"
+
+    async def _get_accessible_user_ids(self, db: AsyncSession, user) -> Optional[List[int]]:
+        if user.user_level == UserLevel.SUPER_ADMIN.value:
+            return None
+
+        if user.user_level == UserLevel.SUB_USER.value:
+            return [user.id]
+
+        sys_user_crud = SysUserCRUDEnhanced()
+        child_ids = await sys_user_crud.get_children_ids(db, user.id)
+        return [user.id, *child_ids]
+
+    async def _get_card_in_scope(self, db: AsyncSession, user, card_id: int) -> Optional[IotCardModel]:
+        user_ids = await self._get_accessible_user_ids(db, user)
+        return await iot_card_crud.get_by_id_in_scope(db, card_id, user_ids)
 
     async def _has_refresh_history(self, db: AsyncSession, card_id: int) -> bool:
         result = await db.execute(
@@ -121,7 +137,7 @@ class H5Service:
 
     async def _get_h5_user(self, db: AsyncSession, slug: str):
         user = await sys_user_crud.get_by_h5_slug(db, slug)
-        if not user or user.user_level == UserLevel.SUPER_ADMIN.value:
+        if not user:
             raise BusinessException(code=404, msg="H5地址不存在")
         if not self._is_enabled(user):
             raise BusinessException(code=403, msg="该H5地址已停用")
@@ -137,7 +153,8 @@ class H5Service:
         if not normalized:
             raise BusinessException(code=400, msg="请输入卡号或ICCID")
 
-        items = await iot_card_crud.search(db, normalized, user_id=user.id, limit=20)
+        user_ids = await self._get_accessible_user_ids(db, user)
+        items = await iot_card_crud.search(db, normalized, user_ids=user_ids, limit=20)
         if not items:
             return {"match_type": "none", "items": []}
 
@@ -200,7 +217,7 @@ class H5Service:
         if not user.h5_allow_suspend:
             raise BusinessException(code=403, msg="当前账号H5未开通停机功能")
 
-        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
         if card.status == CardStatus.suspended:
@@ -234,7 +251,7 @@ class H5Service:
         if not user.h5_allow_resume:
             raise BusinessException(code=403, msg="当前账号H5未开通复机功能")
 
-        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
         if card.status != CardStatus.suspended:
@@ -273,7 +290,7 @@ class H5Service:
         if not user.h5_allow_suspend or not user.h5_allow_resume:
             raise BusinessException(code=403, msg="当前账号H5未同时开通停机和复机功能")
 
-        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
 
@@ -303,7 +320,6 @@ class H5Service:
                 raise BusinessException(code=502, msg="供应商停机请求提交失败")
             if suspend_callback_no:
                 await SuspendActionService.mark_refresh_resume_pending(db, suspend_callback_no)
-                SuspendActionService.schedule_refresh_resume_fallback(suspend_callback_no)
             return H5CardActionResult(
                 card_id=card.id,
                 iccid=card.iccid,
@@ -336,7 +352,7 @@ class H5Service:
 
     async def detect_device_separation(self, db: AsyncSession, slug: str, card_id: int) -> dict:
         user = await self._get_h5_user(db, slug)
-        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
 
@@ -409,7 +425,7 @@ class H5Service:
         if not user.h5_allow_remark:
             raise BusinessException(code=403, msg="当前账号H5未开通备注功能")
 
-        card = await iot_card_crud.get_by_id(db, card_id, user_id=user.id)
+        card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
 

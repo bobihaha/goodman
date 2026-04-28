@@ -666,6 +666,35 @@
       v-model="diagnosticsVisible"
       :card="currentCard"
     />
+
+    <el-dialog
+      v-model="actionDialogVisible"
+      :title="actionDialogTitle"
+      width="300px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!actionDialogProcessing"
+      :show-close="!actionDialogProcessing"
+      :before-close="handleActionDialogClose"
+    >
+      <div class="action-dialog">
+        <el-icon
+          class="action-dialog__icon"
+          :class="{
+            'is-spinning': actionDialogProcessing,
+            'is-success': actionDialogState === 'success',
+            'is-danger': actionDialogState === 'failed'
+          }"
+        >
+          <RefreshRight v-if="actionDialogProcessing" />
+          <CircleCheckFilled v-else-if="actionDialogState === 'success'" />
+          <WarningFilled v-else />
+        </el-icon>
+        <div class="action-dialog__message">{{ actionDialogMessage }}</div>
+      </div>
+      <template #footer>
+        <el-button v-if="!actionDialogProcessing" type="primary" @click="actionDialogVisible = false">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -691,7 +720,9 @@ import {
   ArrowDown,
   ArrowUp,
   MoreFilled,
-  Setting
+  Setting,
+  RefreshRight,
+  CircleCheckFilled
 } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
 import { userApi } from '@/api'
@@ -817,7 +848,12 @@ const selectedCards = ref<Card[]>([])
 const currentCard = ref<Card | null>(null)
 const refreshingMap = ref<Record<number, boolean>>({})
 const isBatchQueryMode = ref(false)
+const batchQueryIccids = ref<string[]>([])
 const batchQueryNotFound = ref<string[]>([])
+const actionDialogVisible = ref(false)
+const actionDialogState = ref<'processing' | 'success' | 'failed'>('processing')
+const actionDialogTitle = ref('正在操作')
+const actionDialogMessage = ref('正在处理，请稍候')
 const showAdvanced = ref(false)
 const customerLoading = ref(false)
 const customerList = ref<User[]>([])
@@ -859,6 +895,62 @@ const stats = ref<CardStats>({
     ctcc: 0
   }
 })
+
+const actionDialogProcessing = computed(() => actionDialogState.value === 'processing')
+const restartPollIntervalMs = 5000
+const restartMaxPollAttempts = 72
+
+const openActionDialog = (title: string, message: string) => {
+  actionDialogTitle.value = title
+  actionDialogMessage.value = message
+  actionDialogState.value = 'processing'
+  actionDialogVisible.value = true
+}
+
+const finishActionDialog = (success: boolean, message: string, title?: string) => {
+  actionDialogState.value = success ? 'success' : 'failed'
+  actionDialogTitle.value = title || '操作结果'
+  actionDialogMessage.value = message
+}
+
+const getRestartFailureMessage = (error: unknown) => {
+  const rawMessage = error instanceof Error ? error.message : String(error || '')
+  const message = rawMessage.trim()
+  if (!message) return '重启失败，请手动复机'
+  if (message.includes('timeout') || message.includes('exceeded') || message.includes('Network Error')) {
+    return '重启失败，请手动复机'
+  }
+  return message
+}
+const getCarrierLimitNotice = (carrier?: string) => carrier === 'cmcc' ? '移动卡单日不可超2次停复机操作' : ''
+
+const handleActionDialogClose = (done: () => void) => {
+  if (actionDialogProcessing.value) return
+  done()
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const waitForRestartCompletion = async (cardId: number, initialStatus?: string) => {
+  let seenSuspended = initialStatus === 'suspended'
+
+  for (let attempt = 0; attempt < restartMaxPollAttempts; attempt += 1) {
+    await sleep(restartPollIntervalMs)
+    const latestCard = await cardApi.getDetail(cardId)
+    const currentStatus = String(latestCard?.status || '')
+
+    if (currentStatus === 'suspended') {
+      seenSuspended = true
+      continue
+    }
+
+    if (seenSuspended && currentStatus) {
+      return true
+    }
+  }
+
+  return false
+}
 
 // 搜索表单
 const searchForm = reactive<CardListParams>({
@@ -1179,6 +1271,20 @@ const fetchCardList = async () => {
   }
 }
 
+const refreshCurrentList = async () => {
+  if (isBatchQueryMode.value && batchQueryIccids.value.length > 0) {
+    const result = await cardApi.batchQuery({ iccids: batchQueryIccids.value })
+    batchQueryNotFound.value = result.not_found
+    cardList.value = normalizeCardList(result.found)
+    pagination.total = result.found.length
+    pagination.page = 1
+    sortBatchQueryList()
+    return
+  }
+
+  await fetchCardList()
+}
+
 // 获取统计数据
 const fetchStats = async () => {
   try {
@@ -1380,7 +1486,7 @@ const handleRowRefresh = async (card: Card) => {
     }
 
     await Promise.all([
-      fetchCardList(),
+      refreshCurrentList(),
       fetchStats()
     ])
   } catch (error) {
@@ -1437,7 +1543,9 @@ const handleRowAction = (command: string, card: Card) => {
 const handleRowResume = async (card: Card) => {
   try {
     await ElMessageBox.confirm(
-      `确定要复机卡片 ${card.iccid} 吗？`,
+      getCarrierLimitNotice(card.carrier)
+        ? `确定要复机卡片 ${card.iccid} 吗？\n\n提示：${getCarrierLimitNotice(card.carrier)}`
+        : `确定要复机卡片 ${card.iccid} 吗？`,
       '复机确认',
       {
         confirmButtonText: '确定复机',
@@ -1446,23 +1554,26 @@ const handleRowResume = async (card: Card) => {
       }
     )
 
+    openActionDialog('正在复机', '正在提交复机操作，请稍候')
     const result = await cardApi.batchResumeByIccids({
       iccids: [card.iccid]
     })
 
     if (result.success > 0) {
-      ElMessage.success('复机成功')
-      fetchCardList()
-      fetchStats()
+      await Promise.all([refreshCurrentList(), fetchStats()])
+      finishActionDialog(true, '复机成功', '复机结果')
     } else {
       const firstError = result.failed_list?.[0]?.error || '复机失败'
-      ElMessage.error(firstError.includes('超级管理员手动停卡')
-        ? '该卡由超级管理员手动停卡，请联系管理员处理'
-        : firstError)
+      finishActionDialog(
+        false,
+        firstError.includes('超级管理员手动停卡') ? '该卡由超级管理员手动停卡，请联系管理员处理' : firstError,
+        '复机结果'
+      )
     }
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('单行复机失败:', error)
+      finishActionDialog(false, error?.message || '复机失败，请稍后重试', '复机结果')
     }
   }
 }
@@ -1470,7 +1581,9 @@ const handleRowResume = async (card: Card) => {
 const handleRowRestart = async (card: Card) => {
   try {
     await ElMessageBox.confirm(
-      `确定要重启卡片 ${card.iccid} 吗？系统会执行停机后再复机。`,
+      getCarrierLimitNotice(card.carrier)
+        ? `确定要重启卡片 ${card.iccid} 吗？系统会执行停机后再复机。\n\n提示：${getCarrierLimitNotice(card.carrier)}`
+        : `确定要重启卡片 ${card.iccid} 吗？系统会执行停机后再复机。`,
       '重启确认',
       {
         confirmButtonText: '确定重启',
@@ -1479,16 +1592,20 @@ const handleRowRestart = async (card: Card) => {
       }
     )
 
+    openActionDialog('正在重启', '正在操作，请稍候')
     const result = await cardApi.restartCard(card.id)
-    ElMessage.success(result.message || (result.status === 'processing' ? '重启请求已提交' : '重启成功'))
-
-    await Promise.all([
-      fetchCardList(),
-      fetchStats()
-    ])
+    if (result.status === 'processing') {
+      const success = await waitForRestartCompletion(card.id, card.status)
+      await Promise.all([refreshCurrentList(), fetchStats()])
+      finishActionDialog(success, success ? '重启成功' : '重启失败，请手动复机', '重启结果')
+    } else {
+      await Promise.all([refreshCurrentList(), fetchStats()])
+      finishActionDialog(true, result.message || '重启成功', '重启结果')
+    }
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('单行重启失败:', error)
+      finishActionDialog(false, getRestartFailureMessage(error), '重启结果')
     }
   }
 }
@@ -1512,7 +1629,7 @@ const handleRowForceResume = async (card: Card) => {
 
     if (result.success > 0) {
       ElMessage.success('强制复机成功')
-      fetchCardList()
+      refreshCurrentList()
       fetchStats()
     } else {
       ElMessage.error(result.failed_list?.[0]?.error || '强制复机失败')
@@ -1525,8 +1642,9 @@ const handleRowForceResume = async (card: Card) => {
 }
 
 // 批量查询成功回调
-const handleBatchQuerySuccess = (data: { found: Card[]; not_found: string[] }) => {
+const handleBatchQuerySuccess = (data: { found: Card[]; not_found: string[]; iccids: string[] }) => {
   isBatchQueryMode.value = true
+  batchQueryIccids.value = data.iccids
   batchQueryNotFound.value = data.not_found
   cardList.value = normalizeCardList(data.found)
   pagination.total = data.found.length
@@ -1537,6 +1655,7 @@ const handleBatchQuerySuccess = (data: { found: Card[]; not_found: string[] }) =
 // 清除批量查询筛选
 const clearBatchQuery = () => {
   isBatchQueryMode.value = false
+  batchQueryIccids.value = []
   batchQueryNotFound.value = []
   fetchCardList()
 }
@@ -1544,61 +1663,61 @@ const clearBatchQuery = () => {
 // 批量划拨成功回调
 const handleBatchTransferSuccess = () => {
   clearSelection()
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
 // 批量备注成功回调
 const handleBatchRemarkSuccess = () => {
   clearSelection()
-  fetchCardList()
+  refreshCurrentList()
 }
 
 // 批量续费成功回调
 const handleBatchRenewSuccess = () => {
   clearSelection()
-  fetchCardList()
+  refreshCurrentList()
 }
 
 // 批量补量成功回调
 const handleBatchAddFlowSuccess = () => {
   clearSelection()
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
 // 批量停机成功回调
 const handleBatchSuspendSuccess = () => {
   clearSelection()
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
 // 批量复机成功回调
 const handleBatchResumeSuccess = () => {
   clearSelection()
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
 // 单卡划拨成功回调
 const handleTransferSuccess = () => {
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
 // 单卡备注成功回调
 const handleRemarkSuccess = () => {
-  fetchCardList()
+  refreshCurrentList()
 }
 
 const handleSingleAddFlowSuccess = () => {
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
 const handleSingleRenewSuccess = () => {
-  fetchCardList()
+  refreshCurrentList()
   fetchStats()
 }
 
@@ -2006,5 +2125,33 @@ onMounted(() => {
   :deep(.el-pagination) {
     font-size: 13px;
   }
+}
+
+.action-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 2px 0 6px;
+  text-align: center;
+}
+
+.action-dialog__icon {
+  font-size: 28px;
+  color: #2563eb;
+}
+
+.action-dialog__icon.is-success {
+  color: #16a34a;
+}
+
+.action-dialog__icon.is-danger {
+  color: #ef4444;
+}
+
+.action-dialog__message {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
 }
 </style>

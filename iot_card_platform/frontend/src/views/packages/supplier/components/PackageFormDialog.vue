@@ -95,17 +95,9 @@
 
       <el-form-item
         v-if="formData.period_type === 'yearly'"
-        label="套餐周期"
-        prop="period_days"
+        label="周期规则"
       >
-        <el-input-number
-          v-model="formData.period_days"
-          :min="1"
-          :max="3650"
-          :precision="0"
-          style="width: 200px"
-        />
-        <span style="margin-left: 10px; color: #909399">天（固定天数）</span>
+        <span>自激活后 12 个月，首月不足 30 天按一个月</span>
       </el-form-item>
 
       <el-row :gutter="20">
@@ -335,12 +327,8 @@ const rules: FormRules = {
   ],
   period_days: [
     {
-      validator: (_rule, value, callback) => {
-        if (formData.period_type === 'yearly' && !value) {
-          callback(new Error('请输入套餐周期（天）'))
-        } else {
-          callback()
-        }
+      validator: (_rule, _value, callback) => {
+        callback()
       },
       trigger: 'blur'
     }

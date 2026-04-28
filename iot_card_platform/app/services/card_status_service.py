@@ -39,8 +39,7 @@ async def check_and_update_card_status(
                 card.expired_at = calculate_expiry_date(
                     start_date=today,
                     period_type=card.period_type.value,
-                    period_months=card.period_count if card.period_type.value == "monthly" else None,
-                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None,
+                    period_months=card.period_count * 12 if card.period_type.value == "yearly" else card.period_count,
                     carrier=card.carrier.value if card.carrier else None
                 )
             status_changed = True
@@ -62,8 +61,7 @@ async def check_and_update_card_status(
                 card.expired_at = calculate_expiry_date(
                     start_date=today,
                     period_type=card.period_type.value,
-                    period_months=card.period_count if card.period_type.value == "monthly" else None,
-                    period_days=card.period_count * 360 if card.period_type.value == "yearly" else None,
+                    period_months=card.period_count * 12 if card.period_type.value == "yearly" else card.period_count,
                     carrier=card.carrier.value if card.carrier else None
                 )
 
@@ -72,12 +70,12 @@ async def check_and_update_card_status(
     # 规则3: 修复已激活但缺少日期的卡片
     if card.status == CardStatus.activated and not card.activated_at and card.data_used > 0:
         card.activated_at = today
-        if card.period_type:
+        # 只在到期日也缺失时补算，避免覆盖续费后已经写入的套餐周期。
+        if card.period_type and not card.expired_at:
             card.expired_at = calculate_expiry_date(
                 start_date=today,
                 period_type=card.period_type.value,
-                period_months=card.period_count if card.period_type.value == "monthly" else None,
-                period_days=card.period_count * 360 if card.period_type.value == "yearly" else None,
+                period_months=card.period_count * 12 if card.period_type.value == "yearly" else card.period_count,
                 carrier=card.carrier.value if card.carrier else None
             )
         status_changed = True

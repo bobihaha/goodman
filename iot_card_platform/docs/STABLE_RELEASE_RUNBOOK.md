@@ -22,10 +22,8 @@
 结合当前仓库，发布链路有几个关键点：
 
 - 当前生产机器由 `docker-compose.yml` 管理，核心服务包括 `app`、`frontend`、`mysql`、`redis`
-- 项目已提供健康检查脚本：`deploy/scripts/health_check.sh`
-- 项目已提供数据库备份与恢复脚本：
-  - `deploy/scripts/backup_mysql.sh`
-  - `deploy/scripts/restore_mysql.sh`
+- 当前生产机首选健康检查脚本：`./check_system.sh`
+- 仓库内提供的备份/检查脚本可能与生产机实际文件不完全一致，发布前必须先确认生产目录中的真实脚本
 - 数据库变更目前主要通过 SQL 文件和脚本执行，没有完整的迁移平台统一管理
 - 测试存在，但不是全链路自动化，因此上线前必须做“人工卡点”
 
@@ -228,10 +226,26 @@ docker compose up -d
 
 正式发布前，先备份数据库。
 
-执行命令：
+仓库标准脚本：
 
 ```bash
 bash deploy/scripts/backup_mysql.sh
+```
+
+当前生产机若缺少上述脚本，可使用容器内备份方式：
+
+```bash
+cd /home/deploy/iot_card_platform
+TS=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="release_backups/${TS}_<release_name>"
+mkdir -p "$BACKUP_DIR/mysql" "$BACKUP_DIR/redis"
+docker exec iot_mysql sh -lc 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events "$MYSQL_DATABASE"' \
+  | gzip > "$BACKUP_DIR/mysql/iot_card_platform_${TS}.sql.gz"
+docker exec iot_redis redis-cli BGSAVE >/dev/null
+sleep 3
+docker cp iot_redis:/data/dump.rdb "$BACKUP_DIR/redis/dump_${TS}.rdb"
+chmod 700 release_backups "$BACKUP_DIR" "$BACKUP_DIR/mysql" "$BACKUP_DIR/redis"
+chmod 600 "$BACKUP_DIR"/mysql/* "$BACKUP_DIR"/redis/*
 ```
 
 备份要求：
@@ -239,6 +253,7 @@ bash deploy/scripts/backup_mysql.sh
 - 记录备份文件路径
 - 确认备份文件已生成
 - 高风险发布时，备份文件保留到发布观察期结束
+- 备份文件包含敏感业务数据，目录权限必须收紧为 `700`，文件权限必须收紧为 `600`
 
 ### Step 8：执行发布
 
@@ -257,6 +272,23 @@ docker compose up -d
 2. 执行兼容型 SQL
 3. 再发布应用
 4. 做上线验证
+
+#### 场景 3：生产机依赖下载慢或 Docker 构建失败
+
+标准发布仍应以 `docker compose -f docker-compose.yml up -d --build <service>` 为准。
+
+如果后端构建卡在 PyPI 下载依赖：
+
+- 优先修复 Dockerfile / 构建网络后重新标准构建
+- 本项目后端 Dockerfile 已使用阿里云 PyPI 镜像源和超时/重试参数
+- 不建议把“复制文件进容器”作为常规发布方式
+
+如遇紧急修复需要先热补丁：
+
+1. 必须先备份数据库、Redis、待覆盖文件和容器内原文件
+2. 热补丁后必须尽快补一次标准 Docker 构建
+3. 标准构建成功后，再跑完整健康检查和业务验证
+4. 记录热补丁原因、备份目录和最终标准构建结果
 
 执行示例：
 

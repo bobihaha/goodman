@@ -15,7 +15,7 @@ from app.schemas.package import (
 
 
 def get_default_effective_days(period_type: str) -> int:
-    """获取默认有效天数: 月包30天, 年包360天"""
+    """获取旧有效天数字段默认值；年包实际有效期按12个计费月计算。"""
     config = PERIOD_CONFIG.get(period_type, {})
     return config.get("default_days", 30)
 

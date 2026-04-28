@@ -77,7 +77,7 @@ async def create_supplier_package(
     
     有效天数默认值:
     - 月包(monthly): 30天
-    - 年包(yearly): 360天
+    - 年包(yearly): 自激活后12个月，首月不足30天按一个月
     """
     result = await supplier_package_service.create_package(db, data, current_user.id)
     return ResponseModel(msg="创建成功", data=result)

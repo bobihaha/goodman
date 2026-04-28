@@ -59,6 +59,7 @@ cd /home/deploy/iot_card_platform
 
 - `./check_system.sh` 比单看容器状态更可靠，适合作为发布后的首选验收命令
 - 前端重建时可能会连带触发后端容器重建，发布后务必再次执行健康检查
+- 发布前备份文件会包含敏感数据，`release_backups` 目录建议权限为 `700`，备份文件建议权限为 `600`
 
 ## 服务器建议
 
@@ -158,6 +159,24 @@ cd /home/deploy/iot_card_platform
 /home/deploy/iot_card_platform/release_backups/<timestamp>_<release_name>
 ```
 
+如果生产机缺少仓库里的 `deploy/scripts/backup_mysql.sh` / `backup_redis.sh`，可以直接用容器备份：
+
+```bash
+TS=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="release_backups/${TS}_<release_name>"
+mkdir -p "$BACKUP_DIR/mysql" "$BACKUP_DIR/redis"
+
+docker exec iot_mysql sh -lc 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events "$MYSQL_DATABASE"' \
+  | gzip > "$BACKUP_DIR/mysql/iot_card_platform_${TS}.sql.gz"
+
+docker exec iot_redis redis-cli BGSAVE >/dev/null
+sleep 3
+docker cp iot_redis:/data/dump.rdb "$BACKUP_DIR/redis/dump_${TS}.rdb"
+
+chmod 700 release_backups "$BACKUP_DIR" "$BACKUP_DIR/mysql" "$BACKUP_DIR/redis"
+chmod 600 "$BACKUP_DIR"/mysql/* "$BACKUP_DIR"/redis/*
+```
+
 ### 3. 同步代码
 
 推荐从本地将本次改动文件打包后同步到生产机，避免把无关文件一并覆盖：
@@ -187,6 +206,12 @@ docker compose -f docker-compose.yml up -d --build frontend
 ```bash
 docker compose -f docker-compose.yml up -d --build app frontend
 ```
+
+后端镜像构建说明：
+
+- 后端 `Dockerfile` 使用阿里云 PyPI 镜像源，并设置较长超时和重试，避免生产机直连 PyPI 导致构建失败。
+- 如构建仍失败，不要默认把热补丁作为最终发布结果；应先确认旧容器是否仍健康，再修复构建问题并补一次标准 `docker compose ... --build`。
+- 如确需临时热补丁，必须先备份容器内原文件，并在热补丁后尽快补标准镜像构建。
 
 ### 5. 发布后检查
 

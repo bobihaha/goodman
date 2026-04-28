@@ -33,10 +33,10 @@ CARRIER_NAMES = {
     "ctcc": "电信"
 }
 
-# 周期类型显示名称和默认有效天数
+# 周期类型显示名称和旧有效天数字段默认值
 PERIOD_CONFIG = {
     "monthly": {"name": "月", "default_days": 30},
-    "yearly": {"name": "年", "default_days": 360}  # 年包360天
+    "yearly": {"name": "年", "default_days": 360}  # 年包实际按12个计费月计算
 }
 
 

@@ -117,13 +117,26 @@ const handleSubmit = async () => {
     loading.value = true
     if (isSelfOwned.value) {
       const result = await cardApi.purchaseRenew(props.card.id, renewMonths.value)
-      ElMessage.success(`续费成功，自动复机 ${result.auto_resumed || 0} 张`)
+      if (result.warning_message) {
+        ElMessage.warning(`续费成功，但${result.warning_message}`)
+      } else {
+        ElMessage.success(`续费成功，自动复机 ${result.auto_resumed || 0} 张`)
+      }
     } else {
       const result = await cardApi.batchRenewByIccids({
         iccids: [props.card.iccid],
         renew_months: renewMonths.value
       })
-      ElMessage.success(`后台续费成功 ${result.success || 0} 张`)
+      if (result.success > 0) {
+        if ((result.warning_count || 0) > 0) {
+          ElMessage.warning(`后台续费成功 ${result.success} 张，但仅更新了本地套餐周期`)
+        } else {
+          ElMessage.success(`后台续费成功 ${result.success} 张`)
+        }
+      } else {
+        const firstError = result.failed_list?.[0]?.error
+        throw new Error(firstError || '后台续费失败')
+      }
     }
     emit('success')
     handleClose()

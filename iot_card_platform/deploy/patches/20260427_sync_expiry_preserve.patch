@@ -1,0 +1,82 @@
+diff --git a/app/services/sync_service.py b/app/services/sync_service.py
+index 16eaecf..8c98e5e 100644
+--- a/app/services/sync_service.py
++++ b/app/services/sync_service.py
+@@ -24,6 +24,31 @@ class SyncService:
+     MAX_RETRIES = 3
+     RETRY_DELAY = 1.0  # 秒
+ 
++    @staticmethod
++    def _parse_supplier_date(value: Optional[str]) -> Optional[date]:
++        if not value:
++            return None
++        return datetime.strptime(value, "%Y-%m-%d").date()
++
++    @staticmethod
++    def _resolve_lifecycle_expired_at(
++        card: IotCardModel,
++        supplier_expired_at: Optional[date]
++    ) -> Tuple[Optional[date], bool]:
++        """
++        生命周期同步时优先保护本地更长的套餐周期，避免把刚续费的到期日写短。
++
++        Returns:
++            (最终应写入的到期日, 是否保留了本地更长周期)
++        """
++        if not supplier_expired_at:
++            return card.expired_at, False
++        if not card.expired_at:
++            return supplier_expired_at, False
++        if supplier_expired_at >= card.expired_at:
++            return supplier_expired_at, False
++        return card.expired_at, True
++
+     async def _get_latest_supplier_operation(
+         self,
+         db: AsyncSession,
+@@ -423,9 +448,12 @@ class SyncService:
+                                 card.activated_at = datetime.strptime(
+                                     data["activated_at"], "%Y-%m-%d"
+                                 ).date()
+                             if data.get("expired_at"):
+-                                new_expired_at = datetime.strptime(
+-                                    data["expired_at"], "%Y-%m-%d"
+-                                ).date()
++                                supplier_expired_at = self._parse_supplier_date(
++                                    data["expired_at"]
++                                )
++                                new_expired_at, preserved_local_expiry = self._resolve_lifecycle_expired_at(
++                                    card,
++                                    supplier_expired_at
++                                )
+                                 # 年包：检测续费
+                                 if (card.period_type.value == "yearly" and
+                                     old_expired_at and
+@@ -447,9 +475,10 @@ class SyncService:
+                             
+                             success_count += 1
+                             sync_details.append({
+                                 "iccid": card.iccid,
+-                                "status": "success"
++                                "status": "success",
++                                "preserved_local_expiry": preserved_local_expiry if data.get("expired_at") else False
+                             })
+                         else:
+                             fail_count += 1
+                             sync_details.append({
+diff --git a/app/services/card_status_service.py b/app/services/card_status_service.py
+index d50205d..e99ad3a 100644
+--- a/app/services/card_status_service.py
++++ b/app/services/card_status_service.py
+@@ -70,9 +70,10 @@ async def check_and_update_card_status(
+ 
+     # 规则3: 修复已激活但缺少日期的卡片
+     if card.status == CardStatus.activated and not card.activated_at and card.data_used > 0:
+         card.activated_at = today
+-        if card.period_type:
++        # 只在到期日也缺失时补算，避免覆盖续费后已经写入的套餐周期。
++        if card.period_type and not card.expired_at:
+             card.expired_at = calculate_expiry_date(
+                 start_date=today,
+                 period_type=card.period_type.value,
+                 period_months=card.period_count if card.period_type.value == "monthly" else None,

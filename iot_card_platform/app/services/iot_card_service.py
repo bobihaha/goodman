@@ -2,6 +2,7 @@
 物联网卡服务层
 """
 import asyncio
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,6 +119,16 @@ class IotCardService:
         return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     @staticmethod
+    def _build_supplier_renew_warning(card: IotCardModel) -> Optional[str]:
+        """
+        当前续费逻辑仅更新本地套餐周期，未调用供应商续费接口。
+        对供应商卡直接返回提示，避免前端继续把本地续费误认为供应商已同步。
+        """
+        if not getattr(card, "supplier_id", None):
+            return None
+        return "已更新本地套餐周期，当前版本未同步供应商续费周期"
+
+    @staticmethod
     def _get_effective_card_addon_flow(card: IotCardModel) -> int:
         if card.addon_flow and not card.addon_flow_month:
             return int(card.addon_flow or 0)
@@ -165,22 +176,83 @@ class IotCardService:
         package,
         renew_cycles: int
     ) -> tuple[str, Optional[int], Optional[int]]:
-        """解析续费周期，按用户选择的续费月数/年数计算。"""
+        """解析续费周期，按用户选择的续费月数计算。"""
         if package and package.period_type:
             period_type = package.period_type.value if hasattr(package.period_type, "value") else str(package.period_type)
         else:
             period_type = card.period_type.value if hasattr(card.period_type, "value") else str(card.period_type)
 
-        if period_type == PeriodType.monthly.value:
-            base_months = 1
-            if package and getattr(package, "period_months", None):
-                base_months = int(package.period_months)
-            return period_type, (base_months or 1) * renew_cycles, None
+        return period_type, renew_cycles, None
 
-        base_days = 360
-        if package and getattr(package, "period_days", None):
-            base_days = int(package.period_days)
-        return period_type, None, (base_days or 360) * renew_cycles
+    @staticmethod
+    def _resolve_yearly_renew_flow(package, renew_months: int) -> int:
+        """年包流量跨月累计，续费时按续费月数追加新周期可用流量。"""
+        flow_size = int(getattr(package, "flow_size", 0) or 0)
+        if flow_size <= 0 or renew_months <= 0:
+            return 0
+        return (flow_size * renew_months + 11) // 12
+
+    @staticmethod
+    def _apply_yearly_renew_flow(card: IotCardModel, package, renew_months: int) -> None:
+        card_period_type = getattr(card, "period_type", None)
+        period_type = card_period_type.value if hasattr(card_period_type, "value") else str(card_period_type)
+        if period_type != PeriodType.yearly.value:
+            return
+        added_flow = IotCardService._resolve_yearly_renew_flow(package, renew_months)
+        if added_flow > 0:
+            card.data_total = int(card.data_total or 0) + added_flow
+
+    @staticmethod
+    def _parse_supplier_expired_at(value) -> Optional[date]:
+        """解析供应商返回的到期日。"""
+        if not value:
+            return None
+        if isinstance(value, date):
+            return value
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    async def _resolve_renew_base_date(
+        self,
+        db: AsyncSession,
+        card: IotCardModel
+    ) -> date:
+        """续费基准日优先取本地到期日，超量停卡年包从停卡月份重新起算。"""
+        card_period_type = getattr(card, "period_type", None)
+        card_suspend_type = getattr(card, "suspend_type", None)
+        period_type = card_period_type.value if hasattr(card_period_type, "value") else str(card_period_type)
+        suspend_type = card_suspend_type.value if hasattr(card_suspend_type, "value") else str(card_suspend_type)
+        if period_type == PeriodType.yearly.value and suspend_type == SuspendType.card_exceed.value:
+            suspend_date = card.suspend_at.date() if card.suspend_at else date.today()
+            return suspend_date - timedelta(days=1)
+
+        if card.expired_at:
+            return card.expired_at
+
+        if card.supplier_id:
+            from app.crud.supplier_crud import supplier_crud
+
+            supplier = await supplier_crud.get_by_id(db, card.supplier_id)
+            if supplier:
+                try:
+                    client = get_supplier_client(
+                        supplier_id=card.supplier_id,
+                        api_url=supplier.api_url or "",
+                        api_key=supplier.api_key or "",
+                        api_secret=supplier.api_secret or ""
+                    )
+                    lifecycle = await client.get_card_lifecycle(card.iccid)
+                    supplier_expired_at = self._parse_supplier_expired_at(
+                        lifecycle.get("expired_at")
+                    )
+                    if supplier_expired_at:
+                        return supplier_expired_at
+                except Exception:
+                    pass
+
+        return date.today()
 
     async def _get_accessible_user_ids(
         self,
@@ -472,7 +544,6 @@ class IotCardService:
                 raise BusinessException(code=502, msg="供应商停机请求提交失败")
             if suspend_callback_no:
                 await SuspendActionService.mark_refresh_resume_pending(db, suspend_callback_no)
-                SuspendActionService.schedule_refresh_resume_fallback(suspend_callback_no)
 
             suspended_status = await self._wait_for_supplier_status(
                 db=db,
@@ -1050,29 +1121,22 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量续费"""
-        from sqlalchemy import select
-        from datetime import datetime, timedelta, date
         from app.crud.package_crud import sale_package_crud
         from app.utils.date_utils import calculate_expiry_date
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
+
+        cards = await self._get_cards_by_iccids_in_scope(
+            db,
+            iccids,
+            current_user_id,
+            user_level
         )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
         card_map = {card.iccid: card for card in cards}
 
         success_list = []
         failed_list = []
         renewed_cards = []
+        renewed_expiry_map = {}
+        warning_list = []
 
         for iccid in iccids:
             card = card_map.get(iccid)
@@ -1081,18 +1145,21 @@ class IotCardService:
                 continue
             
             try:
+                old_expired_at = card.expired_at
+
                 # 续费逻辑：延长到期日期
                 package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
                 if package:
-                    base_date = card.expired_at if card.expired_at else date.today()
+                    base_date = await self._resolve_renew_base_date(db, card)
                     period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
                     card.expired_at = calculate_expiry_date(
-                        base_date + timedelta(days=1) if card.expired_at else base_date,
+                        base_date + timedelta(days=1),
                         period_type,
                         period_months,
                         period_days,
                         card.carrier.value if card.carrier else None
                     )
+                    self._apply_yearly_renew_flow(card, package, renew_months)
                 else:
                     # 兼容旧逻辑：无套餐信息时按30天/月计算
                     if card.expired_at:
@@ -1103,9 +1170,22 @@ class IotCardService:
                 success_list.append({
                     "iccid": card.iccid,
                     "msisdn": card.msisdn,
+                    "old_expired_at": old_expired_at.isoformat() if old_expired_at else None,
+                    "new_expired_at": card.expired_at.isoformat() if card.expired_at else None,
                     "message": f"续费{renew_months}个月成功"
                 })
                 renewed_cards.append(card)
+                renewed_expiry_map[card.iccid] = {
+                    "old": old_expired_at.isoformat() if old_expired_at else None,
+                    "new": card.expired_at.isoformat() if card.expired_at else None,
+                }
+                warning = self._build_supplier_renew_warning(card)
+                if warning:
+                    success_list[-1]["warning"] = warning
+                    warning_list.append({
+                        "iccid": card.iccid,
+                        "warning": warning,
+                    })
             except Exception as e:
                 failed_list.append({"iccid": iccid, "error": str(e)})
         
@@ -1120,14 +1200,19 @@ class IotCardService:
                 target_type="card",
                 target_id=card.id,
                 target_name=card.iccid,
-                detail=f"批量续费 {renew_months} 个月"
+                detail=(
+                    f"批量续费 {renew_months} 个月，原到期 {renewed_expiry_map.get(card.iccid, {}).get('old') or '-'}，"
+                    f"新到期 {renewed_expiry_map.get(card.iccid, {}).get('new') or '-'}"
+                )
             )
         
         return {
             "success": len(success_list),
             "failed": len(failed_list),
             "success_list": success_list,
-            "failed_list": failed_list
+            "failed_list": failed_list,
+            "warning_count": len(warning_list),
+            "warning_list": warning_list,
         }
 
     async def batch_suspend_by_iccids(
@@ -1443,7 +1528,7 @@ class IotCardService:
         current_user_id: int,
         remark: Optional[str] = None
     ) -> dict:
-        from datetime import date, timedelta
+        from datetime import timedelta
         from app.crud.package_crud import sale_package_crud
         from app.utils.date_utils import calculate_expiry_date
 
@@ -1474,15 +1559,16 @@ class IotCardService:
 
         package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
         if package:
-            base_date = card.expired_at if card.expired_at else date.today()
+            base_date = await self._resolve_renew_base_date(db, card)
             period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
             card.expired_at = calculate_expiry_date(
-                base_date + timedelta(days=1) if card.expired_at else base_date,
+                base_date + timedelta(days=1),
                 period_type,
                 period_months,
                 period_days,
                 card.carrier.value if card.carrier else None
             )
+            self._apply_yearly_renew_flow(card, package, renew_months)
         else:
             if card.expired_at:
                 card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
@@ -1512,6 +1598,8 @@ class IotCardService:
             )
         )
 
+        warning_message = self._build_supplier_renew_warning(card)
+
         return {
             "card_id": card.id,
             "iccid": card.iccid,
@@ -1519,7 +1607,9 @@ class IotCardService:
             "price": float(total_price),
             "balance": balance_result["after_balance"],
             "expired_at": card.expired_at.isoformat() if card.expired_at else None,
-            "auto_resumed": auto_resume_result["resumed_count"]
+            "auto_resumed": auto_resume_result["resumed_count"],
+            "warning_message": warning_message,
+            "supplier_sync_status": "local_only" if warning_message else "not_applicable",
         }
 
     async def batch_force_resume_by_iccids(
@@ -1571,984 +1661,6 @@ class IotCardService:
             "failed_list": failed_list
         }
 
-    async def batch_query_cards(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """批量查询卡片"""
-        found_cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        
-        # 找到的ICCID
-        found_iccids = {card.iccid for card in found_cards}
-        
-        # 未找到的ICCID
-        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
-        
-        return {
-            "found": [card.to_dict() for card in found_cards],
-            "not_found": not_found
-        }
-
-    async def batch_transfer_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        to_user_id: int,
-        current_user_id: int,
-        user_level: int,
-        remark: Optional[str] = None
-    ) -> dict:
-        """通过ICCID批量划拨"""
-        from sqlalchemy import select, update
-        from app.db.models.sys_user import SysUserModel
-        
-        if user_level == UserLevel.SUB_USER.value:
-            raise BusinessException(code=403, msg="子用户无权划拨卡片")
-        
-        # 验证目标用户存在
-        target_user = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-        if not target_user.scalar_one_or_none():
-            raise BusinessException(code=404, msg="目标用户不存在")
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                # 更新卡片归属
-                old_user_id = card.user_id
-                card.user_id = to_user_id
-                
-                # 记录划拨日志
-                from app.db.models.iot_card import CardTransferModel
-                transfer_log = CardTransferModel(
-                    card_id=card.id,
-                    iccid=card.iccid,
-                    from_user_id=old_user_id,
-                    to_user_id=to_user_id,
-                    operator_id=current_user_id,
-                    remark=remark
-                )
-                db.add(transfer_log)
-                
-                # 获取目标用户名称
-                target_user_obj = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-                target_user_name = target_user_obj.scalar_one().name
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "to_user_name": target_user_name,
-                    "message": "划拨成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_remark_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        remark: str,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量备注"""
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.remark = remark
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "remark": remark
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_renew_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        renew_months: int,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量续费"""
-        from datetime import datetime, timedelta, date
-        from app.crud.package_crud import sale_package_crud
-        from app.utils.date_utils import calculate_expiry_date
-
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                # 续费逻辑：延长到期日期
-                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
-                if package:
-                    base_date = card.expired_at if card.expired_at else date.today()
-                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
-                    card.expired_at = calculate_expiry_date(
-                        base_date + timedelta(days=1) if card.expired_at else base_date,
-                        period_type,
-                        period_months,
-                        period_days,
-                        card.carrier.value if card.carrier else None
-                    )
-                else:
-                    # 兼容旧逻辑：无套餐信息时按30天/月计算
-                    if card.expired_at:
-                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
-                    else:
-                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": f"续费{renew_months}个月成功"
-                })
-                renewed_cards.append(card)
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-
-        for card in renewed_cards:
-            await SysOperationLogCRUD.create(
-                db=db,
-                module="cards",
-                action="renew",
-                user_id=current_user_id,
-                target_type="card",
-                target_id=card.id,
-                target_name=card.iccid,
-                detail=f"批量续费 {renew_months} 个月"
-            )
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_suspend_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        reason: Optional[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量停机"""
-        from datetime import datetime
-        from app.db.models.iot_card import CardStatus, SuspendType
-
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.status = CardStatus.suspended
-                card.suspend_type = SuspendType.manual
-                card.suspend_at = datetime.now()
-                card.suspend_reason = reason or "手动停机"
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": "停机成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_resume_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量复机"""
-        from app.db.models.iot_card import CardStatus, SuspendType
-
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.status = CardStatus.activated
-                card.suspend_type = SuspendType.none
-                card.suspend_at = None
-                card.suspend_reason = None
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": "复机成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_query_cards(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """批量查询卡片"""
-        from sqlalchemy import select
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        found_cards = list(result.scalars().all())
-        
-        # 找到的ICCID
-        found_iccids = {card.iccid for card in found_cards}
-        
-        # 未找到的ICCID
-        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
-        
-        return {
-            "found": [card.to_dict() for card in found_cards],
-            "not_found": not_found
-        }
-
-    async def batch_transfer_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        to_user_id: int,
-        current_user_id: int,
-        user_level: int,
-        remark: Optional[str] = None
-    ) -> dict:
-        """通过ICCID批量划拨"""
-        from sqlalchemy import select, update
-        from app.db.models.sys_user import SysUserModel
-        
-        if user_level == UserLevel.SUB_USER.value:
-            raise BusinessException(code=403, msg="子用户无权划拨卡片")
-        
-        # 验证目标用户存在
-        target_user = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-        if not target_user.scalar_one_or_none():
-            raise BusinessException(code=404, msg="目标用户不存在")
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                # 更新卡片归属
-                old_user_id = card.user_id
-                card.user_id = to_user_id
-                
-                # 记录划拨日志
-                from app.db.models.iot_card import CardTransferModel
-                transfer_log = CardTransferModel(
-                    card_id=card.id,
-                    iccid=card.iccid,
-                    from_user_id=old_user_id,
-                    to_user_id=to_user_id,
-                    operator_id=current_user_id,
-                    remark=remark
-                )
-                db.add(transfer_log)
-                
-                # 获取目标用户名称
-                target_user_obj = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-                target_user_name = target_user_obj.scalar_one().name
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "to_user_name": target_user_name,
-                    "message": "划拨成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_remark_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        remark: str,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量备注"""
-        from sqlalchemy import select
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.remark = remark
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "remark": remark
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_renew_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        renew_months: int,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量续费"""
-        from sqlalchemy import select
-        from datetime import datetime, timedelta, date
-        from app.crud.package_crud import sale_package_crud
-        from app.utils.date_utils import calculate_expiry_date
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                # 续费逻辑：延长到期日期
-                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
-                if package:
-                    base_date = card.expired_at if card.expired_at else date.today()
-                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
-                    card.expired_at = calculate_expiry_date(
-                        base_date + timedelta(days=1) if card.expired_at else base_date,
-                        period_type,
-                        period_months,
-                        period_days,
-                        card.carrier.value if card.carrier else None
-                    )
-                else:
-                    # 兼容旧逻辑：无套餐信息时按30天/月计算
-                    if card.expired_at:
-                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
-                    else:
-                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": f"续费{renew_months}个月成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_suspend_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        reason: Optional[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量停机"""
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        card_map = {card.iccid: card for card in cards}
-        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
-
-        result = await SuspendActionService.manual_suspend(
-            db=db,
-            data=ManualSuspend(card_ids=found_card_ids, reason=reason),
-            operator_id=current_user_id,
-            user_id=current_user_id,
-            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
-            is_admin=user_level == UserLevel.SUPER_ADMIN.value
-        )
-
-        success_list = []
-        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
-
-        for iccid in result.success_cards:
-            card = card_map.get(iccid)
-            success_list.append({
-                "iccid": iccid,
-                "msisdn": card.msisdn if card else None,
-                "message": "停机成功"
-            })
-
-        for item in result.fail_cards:
-            failed_list.append({
-                "iccid": item.get("iccid", "未知"),
-                "error": item.get("reason", "停机失败")
-            })
-
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_resume_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量复机"""
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        card_map = {card.iccid: card for card in cards}
-        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
-
-        result = await SuspendActionService.manual_resume(
-            db=db,
-            data=ManualResume(card_ids=found_card_ids),
-            operator_id=current_user_id,
-            user_id=current_user_id,
-            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
-            is_admin=user_level == UserLevel.SUPER_ADMIN.value
-        )
-
-        success_list = []
-        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
-
-        for iccid in result.success_cards:
-            card = card_map.get(iccid)
-            success_list.append({
-                "iccid": iccid,
-                "msisdn": card.msisdn if card else None,
-                "message": "复机成功"
-            })
-
-        for item in result.fail_cards:
-            failed_list.append({
-                "iccid": item.get("iccid", "未知"),
-                "error": item.get("reason", "复机失败")
-            })
-
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_query_cards(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """批量查询卡片"""
-        from sqlalchemy import select
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        found_cards = list(result.scalars().all())
-        
-        # 找到的ICCID
-        found_iccids = {card.iccid for card in found_cards}
-        
-        # 未找到的ICCID
-        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
-        
-        return {
-            "found": [card.to_dict() for card in found_cards],
-            "not_found": not_found
-        }
-
-    async def batch_transfer_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        to_user_id: int,
-        current_user_id: int,
-        user_level: int,
-        remark: Optional[str] = None
-    ) -> dict:
-        """通过ICCID批量划拨"""
-        from sqlalchemy import select, update
-        from app.db.models.sys_user import SysUserModel
-        
-        if user_level == UserLevel.SUB_USER.value:
-            raise BusinessException(code=403, msg="子用户无权划拨卡片")
-        
-        # 验证目标用户存在
-        target_user = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-        if not target_user.scalar_one_or_none():
-            raise BusinessException(code=404, msg="目标用户不存在")
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                # 更新卡片归属
-                old_user_id = card.user_id
-                card.user_id = to_user_id
-                
-                # 记录划拨日志
-                from app.db.models.iot_card import CardTransferModel
-                transfer_log = CardTransferModel(
-                    card_id=card.id,
-                    iccid=card.iccid,
-                    from_user_id=old_user_id,
-                    to_user_id=to_user_id,
-                    operator_id=current_user_id,
-                    remark=remark
-                )
-                db.add(transfer_log)
-                
-                # 获取目标用户名称
-                target_user_obj = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-                target_user_name = target_user_obj.scalar_one().name
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "to_user_name": target_user_name,
-                    "message": "划拨成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_remark_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        remark: str,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量备注"""
-        from sqlalchemy import select
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                card.remark = remark
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "remark": remark
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_renew_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        renew_months: int,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量续费"""
-        from sqlalchemy import select
-        from datetime import datetime, timedelta, date
-        from app.crud.package_crud import sale_package_crud
-        from app.utils.date_utils import calculate_expiry_date
-        
-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
-        
-        # 查询所有匹配的卡片
-        query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
-            IotCardModel.is_deleted == 0
-        )
-        
-        if user_filter is not None:
-            query = query.where(IotCardModel.user_id == user_filter)
-        
-        result = await db.execute(query)
-        cards = list(result.scalars().all())
-        
-        success_list = []
-        failed_list = []
-        
-        for iccid in iccids:
-            card = next((c for c in cards if c.iccid == iccid), None)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-            
-            try:
-                # 续费逻辑：延长到期日期
-                package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
-                if package:
-                    base_date = card.expired_at if card.expired_at else date.today()
-                    period_type, period_months, period_days = self._resolve_renew_period(card, package, renew_months)
-                    card.expired_at = calculate_expiry_date(
-                        base_date + timedelta(days=1) if card.expired_at else base_date,
-                        period_type,
-                        period_months,
-                        period_days,
-                        card.carrier.value if card.carrier else None
-                    )
-                else:
-                    # 兼容旧逻辑：无套餐信息时按30天/月计算
-                    if card.expired_at:
-                        card.expired_at = card.expired_at + timedelta(days=renew_months * 30)
-                    else:
-                        card.expired_at = date.today() + timedelta(days=renew_months * 30)
-                
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "message": f"续费{renew_months}个月成功"
-                })
-            except Exception as e:
-                failed_list.append({"iccid": iccid, "error": str(e)})
-        
-        await db.commit()
-        
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_suspend_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        reason: Optional[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量停机"""
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        card_map = {card.iccid: card for card in cards}
-        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
-
-        result = await SuspendActionService.manual_suspend(
-            db=db,
-            data=ManualSuspend(card_ids=found_card_ids, reason=reason),
-            operator_id=current_user_id,
-            user_id=current_user_id,
-            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
-            is_admin=user_level == UserLevel.SUPER_ADMIN.value
-        )
-
-        success_list = []
-        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
-
-        for iccid in result.success_cards:
-            card = card_map.get(iccid)
-            success_list.append({
-                "iccid": iccid,
-                "msisdn": card.msisdn if card else None,
-                "message": "停机成功"
-            })
-
-        for item in result.fail_cards:
-            failed_list.append({
-                "iccid": item.get("iccid", "未知"),
-                "error": item.get("reason", "停机失败")
-            })
-
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_resume_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量复机"""
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        card_map = {card.iccid: card for card in cards}
-        found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
-
-        result = await SuspendActionService.manual_resume(
-            db=db,
-            data=ManualResume(card_ids=found_card_ids),
-            operator_id=current_user_id,
-            user_id=current_user_id,
-            user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
-            is_admin=user_level == UserLevel.SUPER_ADMIN.value
-        )
-
-        success_list = []
-        failed_list = [{"iccid": iccid, "error": "卡片不存在或无权操作"} for iccid in iccids if iccid not in card_map]
-
-        for iccid in result.success_cards:
-            card = card_map.get(iccid)
-            success_list.append({
-                "iccid": iccid,
-                "msisdn": card.msisdn if card else None,
-                "message": "复机成功"
-            })
-
-        for item in result.fail_cards:
-            failed_list.append({
-                "iccid": item.get("iccid", "未知"),
-                "error": item.get("reason", "复机失败")
-            })
-
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
 
     async def get_card_usage_history(
         self,
@@ -2719,130 +1831,6 @@ class IotCardService:
 
         return export_data
 
-    async def batch_query_cards(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """批量查询卡片（最终覆盖重复旧实现）"""
-        found_cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        found_iccids = {card.iccid for card in found_cards}
-        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
-        found_list = [card.to_dict() for card in found_cards]
-        await self._hydrate_card_dicts(db, found_list, current_user_id)
-        return {
-            "found": found_list,
-            "not_found": not_found
-        }
-
-    async def batch_transfer_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        to_user_id: int,
-        current_user_id: int,
-        user_level: int,
-        remark: Optional[str] = None
-    ) -> dict:
-        """通过ICCID批量划拨（最终覆盖重复旧实现）"""
-        from sqlalchemy import select
-        from app.db.models.sys_user import SysUserModel
-        from app.db.models.iot_card import CardTransferModel
-
-        if user_level == UserLevel.SUB_USER.value:
-            raise BusinessException(code=403, msg="子用户无权划拨卡片")
-
-        target_user = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-        if not target_user.scalar_one_or_none():
-            raise BusinessException(code=404, msg="目标用户不存在")
-
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        card_map = {card.iccid: card for card in cards}
-
-        target_user_obj = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-        target_user_name = target_user_obj.scalar_one().name
-
-        success_list = []
-        failed_list = []
-
-        for iccid in iccids:
-            card = card_map.get(iccid)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-
-            try:
-                old_user_id = card.user_id
-                card.user_id = to_user_id
-                db.add(
-                    CardTransferModel(
-                        card_id=card.id,
-                        iccid=card.iccid,
-                        from_user_id=old_user_id,
-                        to_user_id=to_user_id,
-                        operator_id=current_user_id,
-                        remark=remark
-                    )
-                )
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "to_user_name": target_user_name,
-                    "message": "划拨成功"
-                })
-            except Exception as exc:
-                failed_list.append({"iccid": iccid, "error": str(exc)})
-
-        await db.commit()
-
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
-
-    async def batch_remark_by_iccids(
-        self,
-        db: AsyncSession,
-        iccids: List[str],
-        remark: str,
-        current_user_id: int,
-        user_level: int
-    ) -> dict:
-        """通过ICCID批量备注（最终覆盖重复旧实现）"""
-        cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
-        card_map = {card.iccid: card for card in cards}
-
-        success_list = []
-        failed_list = []
-
-        for iccid in iccids:
-            card = card_map.get(iccid)
-            if not card:
-                failed_list.append({"iccid": iccid, "error": "卡片不存在或无权操作"})
-                continue
-
-            try:
-                await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
-                success_list.append({
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "remark": remark
-                })
-            except Exception as exc:
-                failed_list.append({"iccid": iccid, "error": str(exc)})
-
-        await db.commit()
-
-        return {
-            "success": len(success_list),
-            "failed": len(failed_list),
-            "success_list": success_list,
-            "failed_list": failed_list
-        }
 
 
 iot_card_service = IotCardService()

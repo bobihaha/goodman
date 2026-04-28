@@ -1,6 +1,24 @@
 <template>
-  <div class="h5-page">
-    <main class="content">
+  <div
+    class="h5-page"
+    @touchstart.passive="handleTouchStart"
+    @touchmove="handleTouchMove"
+    @touchend="handleTouchEnd"
+    @touchcancel="handleTouchEnd"
+  >
+    <div
+      class="pull-refresh"
+      :class="{
+        'is-visible': pullDistance > 0 || pullRefreshing,
+        'is-ready': pullReady,
+        'is-refreshing': pullRefreshing
+      }"
+      :style="{ height: `${pullIndicatorHeight}px` }"
+    >
+      <span>{{ pullRefreshText }}</span>
+    </div>
+
+    <main class="content" :style="{ transform: `translateY(${pullOffset}px)` }">
       <template v-if="!detail">
         <el-card class="panel query-panel" shadow="never">
           <div class="panel-title panel-title--large">卡片查询</div>
@@ -282,6 +300,35 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="refreshDialogVisible"
+      :title="refreshDialogTitle"
+      width="300px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!refreshDialogProcessing"
+      :show-close="!refreshDialogProcessing"
+      :before-close="handleRefreshDialogClose"
+    >
+      <div class="refresh-dialog">
+        <el-icon
+          class="refresh-dialog__icon"
+          :class="{
+            'is-spinning': refreshDialogProcessing,
+            'is-success': refreshDialogState === 'success',
+            'is-danger': refreshDialogState === 'failed'
+          }"
+        >
+          <RefreshRight v-if="refreshDialogProcessing" />
+          <CircleCheckFilled v-else-if="refreshDialogState === 'success'" />
+          <WarningFilled v-else />
+        </el-icon>
+        <div class="refresh-dialog__message">{{ refreshDialogMessage }}</div>
+      </div>
+      <template #footer>
+        <el-button v-if="!refreshDialogProcessing" type="primary" @click="refreshDialogVisible = false">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -292,6 +339,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
   Bell,
+  CircleCheckFilled,
   Clock,
   EditPen,
   Message,
@@ -300,6 +348,7 @@ import {
   RefreshRight,
   Right,
   Search,
+  WarningFilled,
   SwitchButton
 } from '@element-plus/icons-vue'
 import { h5Api, type H5PortalConfig, type H5CardCandidate, type H5CardDetail, type H5CardActionResult } from '@/api/modules/h5'
@@ -324,12 +373,21 @@ const actionResultText = reactive({
 const diagnosisLoading = ref(false)
 const diagnosisDialogVisible = ref(false)
 const remarkDialogVisible = ref(false)
+const refreshDialogVisible = ref(false)
 const noticeCollapse = ref(['notice'])
 const remarkForm = reactive({
   remark: '',
   operatorName: '',
   operatorPhone: ''
 })
+const refreshDialogState = ref<'processing' | 'success' | 'failed'>('processing')
+const refreshDialogMessage = ref('正在重启')
+const touchStartY = ref(0)
+const pullDistance = ref(0)
+const pullRefreshing = ref(false)
+
+const pullThreshold = 72
+const pullMaxDistance = 108
 
 const todayLabel = computed(() => {
   const today = new Date()
@@ -362,6 +420,17 @@ const showResumeButton = computed(() =>
 const showRefreshButton = computed(() =>
   Boolean(detail.value?.actions.allow_suspend) && Boolean(detail.value?.actions.allow_resume)
 )
+const pullReady = computed(() => pullDistance.value >= pullThreshold)
+const pullIndicatorHeight = computed(() => (pullRefreshing.value ? 56 : Math.max(pullDistance.value, 0)))
+const pullOffset = computed(() => (pullRefreshing.value ? 56 : Math.max(pullDistance.value, 0)))
+const pullRefreshText = computed(() => {
+  if (pullRefreshing.value) return '刷新中...'
+  if (pullReady.value) return '释放立即刷新'
+  return pullDistance.value > 0 ? '下拉刷新页面' : ''
+})
+const refreshDialogProcessing = computed(() => refreshDialogState.value === 'processing')
+const refreshDialogTitle = computed(() => refreshDialogProcessing.value ? '正在重启' : '重启结果')
+const getCarrierLimitNotice = (carrier?: string) => carrier === 'cmcc' ? '移动卡单日不可超2次停复机操作' : ''
 
 const getActionButtonText = (action: 'suspend' | 'resume' | 'refresh' | 'deviceSeparation') => {
   if (action === 'suspend') {
@@ -473,6 +542,76 @@ const resetState = () => {
   actionResultText.deviceSeparation = ''
 }
 
+const refreshCurrentView = async () => {
+  if (detail.value?.card?.id) {
+    await refreshDetail()
+    return
+  }
+
+  if (candidates.value.length && keyword.value.trim()) {
+    const result = await h5Api.queryCard(slug.value, keyword.value.trim())
+    if (result.match_type === 'fuzzy_multiple') {
+      candidates.value = result.items as H5CardCandidate[]
+      detail.value = null
+      return
+    }
+    if (result.match_type !== 'none') {
+      detail.value = (result.items[0] as H5CardDetail) || null
+      candidates.value = []
+      fillRemark()
+      return
+    }
+  }
+
+  await loadConfig()
+}
+
+const resetPullState = () => {
+  pullDistance.value = 0
+  touchStartY.value = 0
+}
+
+const handleTouchStart = (event: TouchEvent) => {
+  if (pullRefreshing.value || window.scrollY > 0) return
+  touchStartY.value = event.touches[0]?.clientY || 0
+}
+
+const handleTouchMove = (event: TouchEvent) => {
+  if (pullRefreshing.value || !touchStartY.value || window.scrollY > 0) return
+
+  const currentY = event.touches[0]?.clientY || 0
+  const deltaY = currentY - touchStartY.value
+
+  if (deltaY <= 0) {
+    pullDistance.value = 0
+    return
+  }
+
+  pullDistance.value = Math.min(deltaY * 0.45, pullMaxDistance)
+  if (pullDistance.value > 0) {
+    event.preventDefault()
+  }
+}
+
+const handleTouchEnd = async () => {
+  if (pullRefreshing.value) return
+  const shouldRefresh = pullDistance.value >= pullThreshold
+  if (!shouldRefresh) {
+    resetPullState()
+    return
+  }
+
+  pullRefreshing.value = true
+  pullDistance.value = 56
+  try {
+    await refreshCurrentView()
+    ElMessage.success('页面已刷新')
+  } finally {
+    pullRefreshing.value = false
+    resetPullState()
+  }
+}
+
 const fillRemark = () => {
   remarkForm.remark = detail.value?.card.remark || ''
 }
@@ -533,13 +672,32 @@ const handleDiagnosisAction = async () => {
 
 const handleRefreshAction = async () => {
   if (!detail.value?.card?.id) return
+  const carrierNotice = getCarrierLimitNotice(detail.value?.card?.carrier)
+  try {
+    await ElMessageBox.confirm(
+      carrierNotice ? `确定要重启当前卡片吗？系统会执行停机后再复机。\n\n提示：${carrierNotice}` : '确定要重启当前卡片吗？系统会执行停机后再复机。',
+      '重启确认',
+      {
+        confirmButtonText: '确定重启',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
   actionLoading.value = 'refresh'
+  refreshDialogState.value = 'processing'
+  refreshDialogMessage.value = '正在重启'
+  refreshDialogVisible.value = true
   try {
     const result = await h5Api.refreshCard(slug.value, detail.value.card.id)
     actionLoading.value = ''
-    await handleActionSubmitted(result)
+    await handleRefreshSubmitted(result)
   } catch (error) {
     actionLoading.value = ''
+    refreshDialogState.value = 'failed'
+    refreshDialogMessage.value = '重启失败，请手动复机'
     throw error
   }
 }
@@ -605,6 +763,20 @@ const handleDeviceSeparationAction = async () => {
 
 const handleSuspendAction = async () => {
   if (!detail.value?.card?.id) return
+  const carrierNotice = getCarrierLimitNotice(detail.value?.card?.carrier)
+  try {
+    await ElMessageBox.confirm(
+      carrierNotice ? `确定要停机当前卡片吗？\n\n提示：${carrierNotice}` : '确定要停机当前卡片吗？',
+      '停机确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
   actionLoading.value = 'suspend'
   try {
     const result = await h5Api.suspendCard(slug.value, detail.value.card.id)
@@ -618,6 +790,20 @@ const handleSuspendAction = async () => {
 
 const handleResumeAction = async () => {
   if (!detail.value?.card?.id) return
+  const carrierNotice = getCarrierLimitNotice(detail.value?.card?.carrier)
+  try {
+    await ElMessageBox.confirm(
+      carrierNotice ? `确定要复机当前卡片吗？\n\n提示：${carrierNotice}` : '确定要复机当前卡片吗？',
+      '复机确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
   actionLoading.value = 'resume'
   try {
     const result = await h5Api.resumeCard(slug.value, detail.value.card.id)
@@ -630,6 +816,30 @@ const handleResumeAction = async () => {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const refreshPollIntervalMs = 5000
+const refreshMaxPollAttempts = 72
+
+const waitForRefreshCompletion = async () => {
+  const initialStatus = detail.value?.card?.status
+  let seenSuspended = initialStatus === 'suspended'
+
+  for (let attempt = 0; attempt < refreshMaxPollAttempts; attempt += 1) {
+    await sleep(refreshPollIntervalMs)
+    await refreshDetail()
+
+    const currentStatus = String(detail.value?.card?.status || '')
+    if (currentStatus === 'suspended') {
+      seenSuspended = true
+      continue
+    }
+
+    if (seenSuspended && currentStatus) {
+      return true
+    }
+  }
+
+  return false
+}
 
 const refreshDetailUntilRecovered = async (action: H5CardActionResult) => {
   const expectRecovered = action.action === 'refresh' || action.action === 'resume'
@@ -647,6 +857,23 @@ const refreshDetailUntilRecovered = async (action: H5CardActionResult) => {
       return
     }
   }
+}
+
+const handleRefreshSubmitted = async (result: H5CardActionResult) => {
+  const resultMessage = (result.message || '').replace(/刷新/g, '重启')
+
+  if (result.status !== 'processing') {
+    refreshDialogState.value = result.status === 'success' ? 'success' : 'failed'
+    refreshDialogMessage.value = result.status === 'success'
+      ? (resultMessage || '重启成功')
+      : '重启失败，请手动复机'
+    await refreshDetail()
+    return
+  }
+
+  const success = await waitForRefreshCompletion()
+  refreshDialogState.value = success ? 'success' : 'failed'
+  refreshDialogMessage.value = success ? '重启成功' : '重启失败，请手动复机'
 }
 
 const handleActionSubmitted = async (result: H5CardActionResult) => {
@@ -696,6 +923,11 @@ const handleRemarkSubmit = async () => {
   } finally {
     actionLoading.value = ''
   }
+}
+
+const handleRefreshDialogClose = (done: () => void) => {
+  if (refreshDialogProcessing.value) return
+  done()
 }
 
 const formatFlow = (value: number) => {
@@ -749,12 +981,33 @@ onMounted(async () => {
   background: linear-gradient(180deg, #fbfbff 0%, #f9f7ff 100%);
   color: #111827;
   font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+  overscroll-behavior-y: contain;
+}
+
+.pull-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 600;
+  transition: height 0.2s ease;
+}
+
+.pull-refresh.is-ready {
+  color: #2563eb;
+}
+
+.pull-refresh.is-refreshing {
+  color: #111827;
 }
 
 .content {
   max-width: 500px;
   margin: 0 auto;
   padding: 2px 0 28px;
+  transition: transform 0.2s ease;
 }
 
 .panel {
@@ -1226,6 +1479,34 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.refresh-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 2px 0 6px;
+  text-align: center;
+}
+
+.refresh-dialog__icon {
+  font-size: 28px;
+  color: #2563eb;
+}
+
+.refresh-dialog__icon.is-success {
+  color: #16a34a;
+}
+
+.refresh-dialog__icon.is-danger {
+  color: #ef4444;
+}
+
+.refresh-dialog__message {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
 }
 
 .diag-list {

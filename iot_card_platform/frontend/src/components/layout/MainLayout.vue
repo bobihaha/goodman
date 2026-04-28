@@ -146,7 +146,8 @@ import {
   OfficeBuilding,
   Setting as SettingIcon,
   WarningFilled,
-  Money
+  Money,
+  Calendar
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores'
 import SuperLoginBanner from '@/components/common/SuperLoginBanner.vue'
@@ -188,7 +189,9 @@ const iconMap: Record<string, any> = {
   'system': SettingIcon,
   'system_config': SettingIcon,
   'permissions': SettingIcon,
-  'renewal': Money
+  'renewal': Money,
+  'package_period': Calendar,
+  'package_period_force_activate': Calendar
 }
 
 // 从后端菜单数据转换为前端菜单格式

@@ -178,6 +178,15 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'package-period/force-activate',
+        name: 'PackagePeriodManagement',
+        component: () => import('@/views/package-period/force-activate/index.vue'),
+        meta: {
+          title: '强制激活管理',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'records/purchases',
         name: 'PurchaseRecords',
         component: () => import('@/views/records/purchases/index.vue'),

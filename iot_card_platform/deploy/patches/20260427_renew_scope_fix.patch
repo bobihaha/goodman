@@ -1,0 +1,49 @@
+diff --git a/app/services/iot_card_service.py b/app/services/iot_card_service.py
+index 184f349..2601d52 100644
+--- a/app/services/iot_card_service.py
++++ b/app/services/iot_card_service.py
+@@ -1097,20 +1097,13 @@ class IotCardService:
+         from datetime import datetime, timedelta, date
+         from app.crud.package_crud import sale_package_crud
+         from app.utils.date_utils import calculate_expiry_date
+-        
+-        user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
+-        
+-        # 查询所有匹配的卡片
+-        query = select(IotCardModel).where(
+-            IotCardModel.iccid.in_(iccids),
+-            IotCardModel.is_deleted == 0
++
++        cards = await self._get_cards_by_iccids_in_scope(
++            db,
++            iccids,
++            current_user_id,
++            user_level
+         )
+-        
+-        if user_filter is not None:
+-            query = query.where(IotCardModel.user_id == user_filter)
+-        
+-        result = await db.execute(query)
+-        cards = list(result.scalars().all())
+         card_map = {card.iccid: card for card in cards}
+ 
+         success_list = []
+diff --git a/frontend/src/views/cards/list/components/SingleRenewDialog.vue b/frontend/src/views/cards/list/components/SingleRenewDialog.vue
+index ae2b518..561fedf 100644
+--- a/frontend/src/views/cards/list/components/SingleRenewDialog.vue
++++ b/frontend/src/views/cards/list/components/SingleRenewDialog.vue
+@@ -123,7 +123,12 @@ const handleSubmit = async () => {
+         iccids: [props.card.iccid],
+         renew_months: renewMonths.value
+       })
+-      ElMessage.success(`后台续费成功 ${result.success || 0} 张`)
++      if (result.success > 0) {
++        ElMessage.success(`后台续费成功 ${result.success} 张`)
++      } else {
++        const firstError = result.failed_list?.[0]?.error
++        throw new Error(firstError || '后台续费失败')
++      }
+     }
+     emit('success')
+     handleClose()

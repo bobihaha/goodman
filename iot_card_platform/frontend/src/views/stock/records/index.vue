@@ -9,7 +9,7 @@
 
       <el-tabs v-model="activeTab">
         <!-- 入库记录 -->
-        <el-tab-pane label="入库记录" name="in">
+        <el-tab-pane v-if="isSuperAdmin" label="入库记录" name="in">
           <div class="records-section">
             <!-- 筛选 -->
             <el-form :inline="true" :model="inParams" class="search-form">
@@ -87,7 +87,7 @@
         </el-tab-pane>
 
         <!-- 出库记录 -->
-        <el-tab-pane label="出库记录" name="out">
+        <el-tab-pane v-if="isSuperAdmin" label="出库记录" name="out">
           <div class="records-section">
             <!-- 筛选 -->
             <el-form :inline="true" :model="outParams" class="search-form">
@@ -300,16 +300,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 import { stockApi } from '@/api/modules/stock'
 import { supplierApi } from '@/api/modules/supplier'
 import { userApi } from '@/api/modules/user'
+import { useAuthStore } from '@/stores/modules/auth'
 import * as XLSX from 'xlsx'
 
+const authStore = useAuthStore()
+const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
+
 // 当前标签页
-const activeTab = ref('in')
+const activeTab = ref(isSuperAdmin.value ? 'in' : 'card')
 
 // 入库记录
 const inParams = reactive({
@@ -533,10 +537,14 @@ const getStatusType = (status: string) => {
 }
 
 onMounted(() => {
-  fetchSuppliers()
-  fetchUsers()
-  handleQueryIn()
-  handleQueryOut()
+  if (isSuperAdmin.value) {
+    fetchSuppliers()
+    fetchUsers()
+    handleQueryIn()
+    handleQueryOut()
+    return
+  }
+  activeTab.value = 'card'
 })
 </script>
 

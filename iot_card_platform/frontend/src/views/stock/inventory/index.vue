@@ -208,13 +208,14 @@
 
       <!-- 分页 -->
       <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.page_size"
-        :total="total"
+        v-if="!isBatchQueryMode"
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.page_size"
+        :total="pagination.total"
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleQuery"
-        @current-change="handleQuery"
+        @size-change="handleSizeChange"
+        @current-change="handlePageChange"
         class="pagination"
       />
     </el-card>
@@ -275,15 +276,18 @@ const queryParams = reactive({
   carrier: undefined,
   package_id: undefined,
   sort_by: 'stock_in_at',
-  sort_order: 'desc',
-  page: 1,
-  page_size: 20
+  sort_order: 'desc'
 })
 
 // 表格数据
 const tableData = ref<any[]>([])
-const total = ref(0)
 const loading = ref(false)
+
+const pagination = reactive({
+  page: 1,
+  page_size: 20,
+  total: 0
+})
 
 // 统计数据
 const summary = ref<any>({})
@@ -323,9 +327,13 @@ const fetchSummary = async () => {
 const fetchInventory = async () => {
   loading.value = true
   try {
-    const res = await stockApi.getInventory(queryParams)
+    const res = await stockApi.getInventory({
+      ...queryParams,
+      page: pagination.page,
+      page_size: pagination.page_size
+    })
     tableData.value = res.items || res.list || []
-    total.value = res.total || 0
+    pagination.total = res.total || 0
     isBatchQueryMode.value = false
     batchQueryNotFound.value = []
   } catch (error) {
@@ -357,7 +365,20 @@ const fetchPackages = async () => {
 
 // 查询
 const handleQuery = () => {
-  queryParams.page = 1
+  pagination.page = 1
+  fetchInventory()
+}
+
+// 页码变化
+const handlePageChange = (page: number) => {
+  pagination.page = page
+  fetchInventory()
+}
+
+// 每页条数变化
+const handleSizeChange = (pageSize: number) => {
+  pagination.page_size = pageSize
+  pagination.page = 1
   fetchInventory()
 }
 
@@ -368,7 +389,7 @@ const handleReset = () => {
   queryParams.package_id = undefined
   queryParams.sort_by = 'stock_in_at'
   queryParams.sort_order = 'desc'
-  queryParams.page = 1
+  pagination.page = 1
   fetchInventory()
 }
 
@@ -376,7 +397,7 @@ const handleReset = () => {
 const handleStockInSort = (sortOrder: 'asc' | 'desc') => {
   queryParams.sort_by = 'stock_in_at'
   queryParams.sort_order = sortOrder
-  queryParams.page = 1
+  pagination.page = 1
   fetchInventory()
 }
 
@@ -407,11 +428,11 @@ const handleBatchQuery = async () => {
   try {
     const res = await stockApi.batchQuery({ iccids })
     tableData.value = res.found || []
-    total.value = tableData.value.length
+    pagination.total = tableData.value.length
     batchQueryNotFound.value = res.not_found || []
     isBatchQueryMode.value = true
     showBatchQueryDialog.value = false
-    queryParams.page = 1
+    pagination.page = 1
     ElMessage.success(`查询完成：找到 ${tableData.value.length} 张卡片`)
   } catch (error: any) {
     ElMessage.error(error.message || '批量查询失败')

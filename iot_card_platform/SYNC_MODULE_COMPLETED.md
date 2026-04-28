@@ -73,6 +73,10 @@ Content-Type: application/json
 }
 ```
 
+**年卡用量口径：**
+- 月卡：`data_used` 和 `data_used_month` 均使用供应商返回的当前周期用量。
+- 年卡：供应商返回值按当前计费月用量写入 `data_used_month`；`data_used` 按月内增量/跨月归零累加，表示套餐有效期内累计用量。
+
 ### 2. 同步生命周期
 
 **请求：**
@@ -406,7 +410,6 @@ curl -X POST http://localhost:8000/api/v1/sync/usage \
 3. 根据实际供应商API文档实现具体客户端
 4. 添加定时任务调度功能
 5. 完善错误处理和重试机制
-
 
 
 
