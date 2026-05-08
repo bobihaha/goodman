@@ -14,7 +14,7 @@ curl -fsS http://127.0.0.1/health
 echo
 
 echo "[3/6] Nginx health"
-curl -fsS http://127.0.0.1/
+curl -fsS http://127.0.0.1/healthz
 echo
 
 echo "[4/6] MySQL ping"

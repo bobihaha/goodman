@@ -101,100 +101,73 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="720" fixed="right">
+        <el-table-column label="操作" width="72" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button
-              type="primary"
-              link
-              :icon="Edit"
-              @click="handleEdit(row)"
-            >
-              编辑
-            </el-button>
-            <el-button
-              v-if="canAssignPermission(row)"
-              type="primary"
-              link
-              :icon="Setting"
-              @click="handleAssignPermission(row)"
-            >
-              分配权限
-            </el-button>
-            <el-button
-              v-if="canGrantBalance(row)"
-              type="success"
-              link
-              @click="handleGrantBalance(row)"
-            >
-              分配余额
-            </el-button>
-            <el-button
-              v-if="canManageApiCredentials(row)"
-              type="success"
-              link
-              @click="handleManageApiCredentials(row)"
-            >
-              API凭证
-            </el-button>
-            <el-button
-              v-if="canManageH5(row) && !row.h5?.slug"
-              type="success"
-              link
-              @click="handleGenerateH5(row)"
-            >
-              生成H5
-            </el-button>
-            <el-button
-              v-if="canManageH5(row) && row.h5?.slug"
-              type="primary"
-              link
-              @click="handleEditH5(row)"
-            >
-              H5配置
-            </el-button>
-            <el-button
-              v-if="canSuperLogin(row)"
-              type="success"
-              link
-              :icon="SwitchButton"
-              @click="handleSuperLogin(row)"
-            >
-              超级登录
-            </el-button>
-            <el-button
-              type="warning"
-              link
-              :icon="Key"
-              @click="handleResetPassword(row)"
-            >
-              重置密码
-            </el-button>
-            <el-button
-              v-if="row.status === 'enable'"
-              type="warning"
-              link
-              :icon="Lock"
-              @click="handleToggleStatus(row)"
-            >
-              禁用
-            </el-button>
-            <el-button
-              v-else
-              type="success"
-              link
-              :icon="Unlock"
-              @click="handleToggleStatus(row)"
-            >
-              启用
-            </el-button>
-            <el-button
-              type="danger"
-              link
-              :icon="Delete"
-              @click="handleDelete(row)"
-            >
-              删除
-            </el-button>
+            <el-dropdown trigger="click" @command="handleRowAction($event, row)">
+              <el-button
+                type="primary"
+                link
+                class="more-actions-btn"
+                title="更多操作"
+              >
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit" :icon="Edit">编辑</el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canAssignPermission(row)"
+                    command="assignPermission"
+                    :icon="Setting"
+                  >
+                    分配权限
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canGrantBalance(row)"
+                    command="grantBalance"
+                  >
+                    分配余额
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canManageApiCredentials(row)"
+                    command="apiCredentials"
+                  >
+                    API凭证
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canManageH5(row) && !row.h5?.slug"
+                    command="generateH5"
+                  >
+                    生成H5
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canManageH5(row) && row.h5?.slug"
+                    command="editH5"
+                  >
+                    H5配置
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canSuperLogin(row)"
+                    command="superLogin"
+                    :icon="SwitchButton"
+                  >
+                    超级登录
+                  </el-dropdown-item>
+                  <el-dropdown-item command="resetPassword" :icon="Key">
+                    重置密码
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    command="toggleStatus"
+                    :icon="row.status === 'enable' ? Lock : Unlock"
+                  >
+                    {{ row.status === 'enable' ? '禁用' : '启用' }}
+                  </el-dropdown-item>
+                  <el-dropdown-item divided command="delete" :icon="Delete">
+                    删除
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -258,7 +231,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock, SwitchButton, Setting } from '@element-plus/icons-vue'
+import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock, SwitchButton, Setting, MoreFilled } from '@element-plus/icons-vue'
 import { userApi } from '@/api/modules/user'
 import { formatDateTime, formatMoney } from '@/utils/formatter'
 import type { User, UserListParams } from '@/types/user'
@@ -520,6 +493,41 @@ const handleAssignPermission = (user: User) => {
   permissionDialogVisible.value = true
 }
 
+const handleRowAction = (command: string | number | object, user: User) => {
+  switch (command) {
+    case 'edit':
+      handleEdit(user)
+      break
+    case 'assignPermission':
+      handleAssignPermission(user)
+      break
+    case 'grantBalance':
+      handleGrantBalance(user)
+      break
+    case 'apiCredentials':
+      handleManageApiCredentials(user)
+      break
+    case 'generateH5':
+      handleGenerateH5(user)
+      break
+    case 'editH5':
+      handleEditH5(user)
+      break
+    case 'superLogin':
+      handleSuperLogin(user)
+      break
+    case 'resetPassword':
+      handleResetPassword(user)
+      break
+    case 'toggleStatus':
+      handleToggleStatus(user)
+      break
+    case 'delete':
+      handleDelete(user)
+      break
+  }
+}
+
 const handleGrantBalance = (user: User) => {
   currentUser.value = user
   grantBalanceDialogVisible.value = true
@@ -683,6 +691,11 @@ onMounted(async () => {
     color: #606266;
     font-size: 12px;
     word-break: break-all;
+  }
+
+  .more-actions-btn {
+    padding: 4px;
+    font-size: 18px;
   }
 }
 </style>

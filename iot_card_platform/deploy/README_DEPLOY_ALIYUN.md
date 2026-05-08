@@ -29,7 +29,7 @@
 当前项目生产环境的 SSH 连接方式如下：
 
 ```bash
-ssh -i /Users/renhui/Desktop/aliyun.pem deploy@47.100.81.73
+ssh -i /Users/renhui/Desktop/aliyun.pem -p 22222 deploy@47.100.81.73
 ```
 
 说明：
@@ -43,10 +43,13 @@ ssh -i /Users/renhui/Desktop/aliyun.pem deploy@47.100.81.73
 
 - 服务器：`47.100.81.73`
 - SSH 用户：`deploy`
+- SSH 端口：`22222`（密钥登录，密码登录禁用）
 - 项目目录：`/home/deploy/iot_card_platform`
 - Compose 文件：`docker-compose.yml`
 - 环境文件：`.env`
 - 健康检查脚本：`./check_system.sh`
+- HTTPS 域名：`zerodaai.com` / `www.zerodaai.com`
+- HTTPS 证书目录：`/home/deploy/iot_card_platform/certs`
 
 登录后建议先执行：
 
@@ -59,6 +62,7 @@ cd /home/deploy/iot_card_platform
 
 - `./check_system.sh` 比单看容器状态更可靠，适合作为发布后的首选验收命令
 - 前端重建时可能会连带触发后端容器重建，发布后务必再次执行健康检查
+- 当前线上 HTTP `/` 会 301 跳转 HTTPS，前端健康检查应使用 `http://127.0.0.1/healthz`
 - 发布前备份文件会包含敏感数据，`release_backups` 目录建议权限为 `700`，备份文件建议权限为 `600`
 
 ## 服务器建议
@@ -68,7 +72,7 @@ cd /home/deploy/iot_card_platform
 - 安全组：
   - `80/tcp`
   - `443/tcp`
-  - `22/tcp` 仅办公网开放
+  - `22222/tcp` 仅办公网开放，迁移完成后关闭公网 `22/tcp`
   - `3306/tcp` 不对公网开放
   - `6379/tcp` 不对公网开放
 
@@ -141,7 +145,7 @@ curl http://127.0.0.1/health
 ### 1. 登录并进入项目目录
 
 ```bash
-ssh -i /Users/renhui/Desktop/aliyun.pem deploy@47.100.81.73
+ssh -i /Users/renhui/Desktop/aliyun.pem -p 22222 deploy@47.100.81.73
 cd /home/deploy/iot_card_platform
 ```
 
@@ -183,7 +187,7 @@ chmod 600 "$BACKUP_DIR"/mysql/* "$BACKUP_DIR"/redis/*
 
 ```bash
 tar czf - <changed_files...> | \
-ssh -i /Users/renhui/Desktop/aliyun.pem deploy@47.100.81.73 \
+ssh -i /Users/renhui/Desktop/aliyun.pem -p 22222 deploy@47.100.81.73 \
   'bash -lc "cd /home/deploy/iot_card_platform && tar xzf -"'
 ```
 
@@ -219,6 +223,8 @@ docker compose -f docker-compose.yml up -d --build app frontend
 ./check_system.sh
 curl http://127.0.0.1/health
 curl -I http://127.0.0.1
+curl -I http://zerodaai.com/
+curl -I https://zerodaai.com/
 docker compose -f docker-compose.yml ps
 ```
 
@@ -226,7 +232,9 @@ docker compose -f docker-compose.yml ps
 
 - `iot_card_app`、`iot_card_frontend`、`iot_mysql`、`iot_redis` 状态正常
 - 后端 `/health` 返回 `{"status":"ok",...}`
-- 前端首页返回 `HTTP 200`
+- `http://zerodaai.com/` 返回 `301` 并跳转到 HTTPS
+- `https://zerodaai.com/` 和 `https://www.zerodaai.com/` 返回 `HTTP 200`
+- 证书 SAN 覆盖 `zerodaai.com` 和 `www.zerodaai.com`
 - 如本次涉及导出、停复机、同步任务，需要补做对应业务验收
 
 ## 发布顺序

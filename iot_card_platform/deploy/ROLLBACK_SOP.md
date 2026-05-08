@@ -76,7 +76,7 @@
 ### Step 1：登录服务器
 
 ```bash
-ssh deploy@47.100.81.73
+ssh -i /Users/renhui/Desktop/aliyun.pem -p 22222 deploy@47.100.81.73
 ```
 
 

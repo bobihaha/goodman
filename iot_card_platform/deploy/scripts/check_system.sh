@@ -83,7 +83,7 @@ compose exec -T "${BACKEND_SERVICE}" python -c "import urllib.request; print(url
 echo
 
 echo "[4/7] Frontend Health"
-curl -fsS -o /tmp/check_system_frontend.out -w "time_total=%{time_total} code=%{http_code}\n" http://127.0.0.1/
+curl -fsS -o /tmp/check_system_frontend.out -w "time_total=%{time_total} code=%{http_code}\n" http://127.0.0.1/healthz
 head -c 200 /tmp/check_system_frontend.out || true
 echo
 echo
