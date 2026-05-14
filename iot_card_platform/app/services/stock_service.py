@@ -2,7 +2,7 @@
 出入库管理服务层
 """
 from typing import Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.crud.stock_crud import (
@@ -15,6 +15,15 @@ from app.db.models.iot_card import IotCardModel
 from app.db.models.supplier import SupplierModel
 from app.db.models.sys_user import UserLevel
 from app.utils.exceptions import BusinessException
+
+
+CHINA_TIME_OFFSET = timedelta(hours=8)
+
+
+def _storage_time_to_china_string(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return (value + CHINA_TIME_OFFSET).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _format_package_period(period_type: Optional[str], period_months: Optional[int] = None, period_days: Optional[int] = None) -> Optional[str]:
@@ -47,6 +56,10 @@ class StockService:
     async def _enrich_stock_card(self, db: AsyncSession, item) -> dict:
         """补充库存卡片关联的供应商、批次、底层套餐周期信息。"""
         data = item.to_dict()
+        data["stock_in_at"] = _storage_time_to_china_string(item.stock_in_at)
+        data["stock_out_at"] = _storage_time_to_china_string(item.stock_out_at)
+        data["created_at"] = _storage_time_to_china_string(item.created_at)
+        data["updated_at"] = _storage_time_to_china_string(item.updated_at)
 
         if item.supplier_id:
             supplier_query = select(SupplierModel.name).where(

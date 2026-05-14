@@ -137,6 +137,23 @@ async def test_get_card_lifecycle_prefers_deactivated_device_status(client):
 
 
 @pytest.mark.asyncio
+async def test_get_card_lifecycle_prefers_deactivation_status(client):
+    api_data = {
+        "code": "0",
+        "data": {
+            "iccid": "8986112425408902079",
+            "status": "deactivation",
+            "deviceStatus": "ACTIVATED_NAME",
+        },
+    }
+
+    with patch.object(client, "_post", AsyncMock(return_value=api_data)):
+        result = await client.get_card_lifecycle("8986112425408902079")
+
+    assert result["status"] == "suspended"
+
+
+@pytest.mark.asyncio
 async def test_get_batch_usage_chunks_by_100(client):
     async def fake_post(endpoint, params):
         return {
@@ -163,9 +180,12 @@ async def test_get_batch_usage_chunks_by_100(client):
 @pytest.mark.asyncio
 async def test_suspend_and_resume_send_simboss_status(client):
     mock_post = AsyncMock(return_value={"code": "0", "data": "success"})
-    mock_device_status = AsyncMock(side_effect=["DEACTIVATED_NAME", "ACTIVATED_NAME"])
+    mock_status_payload = AsyncMock(side_effect=[
+        {"status": "deactivation", "deviceStatus": "ACTIVATED_NAME"},
+        {"status": "activation", "deviceStatus": "ACTIVATED_NAME"},
+    ])
     with patch.object(client, "_post", mock_post), \
-         patch.object(client, "_get_device_status", mock_device_status):
+         patch.object(client, "_get_status_payload", mock_status_payload):
         assert await client.suspend_card("8986") is True
         assert await client.resume_card("8986") is True
 
@@ -182,12 +202,29 @@ async def test_suspend_and_resume_send_simboss_status(client):
 @pytest.mark.asyncio
 async def test_resume_returns_false_when_device_status_remains_deactivated(client):
     with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": "success"})), \
-         patch.object(client, "_get_device_status", AsyncMock(return_value="DEACTIVATED_NAME")):
+         patch.object(client, "_get_status_payload", AsyncMock(return_value={
+             "status": "activation",
+             "deviceStatus": "DEACTIVATED_NAME",
+         })):
         result = await client.resume_card("8986")
 
     assert result is False
     assert client.last_sor_result["submitted"] is False
     assert client.last_sor_result["observed_device_status"] == "DEACTIVATED_NAME"
+
+
+@pytest.mark.asyncio
+async def test_resume_returns_false_when_status_remains_deactivation(client):
+    with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": "success"})), \
+         patch.object(client, "_get_status_payload", AsyncMock(return_value={
+             "status": "deactivation",
+             "deviceStatus": "ACTIVATED_NAME",
+         })):
+        result = await client.resume_card("8986")
+
+    assert result is False
+    assert client.last_sor_result["submitted"] is False
+    assert client.last_sor_result["observed_status"] == "deactivation"
 
 
 @pytest.mark.asyncio

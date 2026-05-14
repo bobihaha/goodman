@@ -115,18 +115,29 @@ class SimbossSupplierClient(SupplierAPIClient):
         return text[:10]
 
     def _map_status(self, payload: Dict[str, Any]) -> str:
-        device_status = str(payload.get("deviceStatus") or "").strip()
-        if device_status in {"ACTIVATED_NAME", "DEACTIVATED_NAME", "RETIRED_NAME", "PURGED_NAME"}:
-            return SIMBOSS_DEVICE_STATUS_MAP.get(device_status, "unknown")
         status = str(payload.get("status") or "").strip()
+        device_status = str(payload.get("deviceStatus") or "").strip()
+        if status == "deactivation" or device_status == "DEACTIVATED_NAME":
+            return "suspended"
+        if status in {"retired"} or device_status in {"RETIRED_NAME", "PURGED_NAME"}:
+            return "cancelled"
+        if device_status in {"ACTIVATED_NAME"}:
+            return SIMBOSS_DEVICE_STATUS_MAP.get(device_status, "unknown")
         if status in SIMBOSS_STATUS_MAP:
             return SIMBOSS_STATUS_MAP[status]
         return SIMBOSS_DEVICE_STATUS_MAP.get(device_status, "unknown")
 
-    async def _get_device_status(self, iccid: str) -> str:
+    async def _get_status_payload(self, iccid: str) -> Dict[str, Any]:
         result = await self._post("device/detail", {"iccid": iccid})
-        payload = result.get("data") or {}
-        return str(payload.get("deviceStatus") or "").strip()
+        return result.get("data") or {}
+
+    def _is_network_suspended(self, payload: Dict[str, Any]) -> bool:
+        return self._map_status(payload) == "suspended"
+
+    def _is_network_activated(self, payload: Dict[str, Any]) -> bool:
+        status = str(payload.get("status") or "").strip()
+        device_status = str(payload.get("deviceStatus") or "").strip()
+        return status == "activation" and device_status == "ACTIVATED_NAME"
 
     def _normalize_usage(self, payload: Dict[str, Any], iccid: str) -> Dict[str, Any]:
         month_usage = self._parse_float(payload.get("dataUsage"))
@@ -189,18 +200,20 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "iccid": iccid,
                 "status": "DEACTIVATED_NAME",
             })
-            observed_status = await self._get_device_status(iccid)
-            if observed_status != "DEACTIVATED_NAME":
+            observed_payload = await self._get_status_payload(iccid)
+            if not self._is_network_suspended(observed_payload):
                 self.last_sor_result = {
                     "submitted": False,
                     "expected_device_status": "DEACTIVATED_NAME",
-                    "observed_device_status": observed_status,
+                    "observed_status": observed_payload.get("status"),
+                    "observed_device_status": observed_payload.get("deviceStatus"),
                     "supplier_msg": "SIMBOSS返回成功，但供应商侧网络状态未变为关停",
                 }
                 return False
             self.last_sor_result = {
                 "submitted": True,
-                "observed_device_status": observed_status,
+                "observed_status": observed_payload.get("status"),
+                "observed_device_status": observed_payload.get("deviceStatus"),
                 "reconciled_status": "suspended",
             }
             return True
@@ -216,18 +229,20 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "iccid": iccid,
                 "status": "ACTIVATED_NAME",
             })
-            observed_status = await self._get_device_status(iccid)
-            if observed_status != "ACTIVATED_NAME":
+            observed_payload = await self._get_status_payload(iccid)
+            if not self._is_network_activated(observed_payload):
                 self.last_sor_result = {
                     "submitted": False,
                     "expected_device_status": "ACTIVATED_NAME",
-                    "observed_device_status": observed_status,
+                    "observed_status": observed_payload.get("status"),
+                    "observed_device_status": observed_payload.get("deviceStatus"),
                     "supplier_msg": "SIMBOSS返回成功，但供应商侧网络状态未恢复",
                 }
                 return False
             self.last_sor_result = {
                 "submitted": True,
-                "observed_device_status": observed_status,
+                "observed_status": observed_payload.get("status"),
+                "observed_device_status": observed_payload.get("deviceStatus"),
                 "reconciled_status": "activated",
             }
             return True
