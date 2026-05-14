@@ -16,7 +16,7 @@ from app.db.models.suspend import (
     SuspendPolicyModel, SuspendLogModel, SupplierSuspendOperationModel, AlertLogModel,
     SuspendActionType, AlertLevel, AlertTargetType
 )
-from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
+from app.db.models.iot_card import IotCardModel, CardStatus, CardType, SuspendType
 from app.db.models.supplier import SupplierModel
 from app.db.models.sys_user import SysUserModel, UserLevel
 from app.schemas.suspend import (
@@ -104,6 +104,17 @@ class SuspendPolicyService:
 
 class SuspendActionService:
     """停卡/复机操作服务"""
+
+    @staticmethod
+    def _supplier_supports_network_switch(card: IotCardModel, supplier: Optional[SupplierModel]) -> bool:
+        """判断供应商是否支持当前卡片的网络开关操作。"""
+        if not supplier:
+            return False
+        supplier_code = str(supplier.code or "").strip()
+        if supplier_code != "002":
+            return True
+        card_type = card.card_type.value if hasattr(card.card_type, "value") else str(card.card_type or "")
+        return card_type == CardType.pool.value
 
     @staticmethod
     async def _create_alert_and_notify(
@@ -366,7 +377,9 @@ class SuspendActionService:
                     supplier_id=card.supplier_id,
                     api_url=supplier.api_url or "",
                     api_key=supplier.api_key or "",
-                    api_secret=supplier.api_secret or ""
+                    api_secret=supplier.api_secret or "",
+                    supplier_code=supplier.code,
+                    api_config=supplier.api_config,
                 )
                 lifecycle_data = await supplier_client.get_card_lifecycle(card.iccid)
                 lifecycle_status = lifecycle_data.get("status")
@@ -557,7 +570,13 @@ class SuspendActionService:
         reason: Optional[str],
         operator_id: Optional[int] = None
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        if not supplier:
+        if not SuspendActionService._supplier_supports_network_switch(card, supplier):
+            logger.warning(
+                "供应商不支持当前卡片网络关停: supplier_code=%s iccid=%s card_type=%s",
+                getattr(supplier, "code", None),
+                card.iccid,
+                card.card_type,
+            )
             return False, None, None
         callback_no = SuspendActionService._generate_callback_no(SuspendActionType.suspend, card.iccid)
         request_payload = {"number": card.iccid, "type": "01", "callback_no": callback_no}
@@ -574,7 +593,9 @@ class SuspendActionService:
                 supplier_id=card.supplier_id,
                 api_url=supplier.api_url or "",
                 api_key=supplier.api_key or "",
-                api_secret=supplier.api_secret or ""
+                api_secret=supplier.api_secret or "",
+                supplier_code=supplier.code,
+                api_config=supplier.api_config,
             )
             result = await supplier_client.suspend_card(card.iccid, reason, callback_no=callback_no)
             request_meta = getattr(supplier_client, "last_sor_result", None) or {"submitted": result}
@@ -602,7 +623,13 @@ class SuspendActionService:
         supplier: Optional[SupplierModel],
         operator_id: Optional[int] = None
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        if not supplier:
+        if not SuspendActionService._supplier_supports_network_switch(card, supplier):
+            logger.warning(
+                "供应商不支持当前卡片网络恢复: supplier_code=%s iccid=%s card_type=%s",
+                getattr(supplier, "code", None),
+                card.iccid,
+                card.card_type,
+            )
             return False, None, None
         callback_no = SuspendActionService._generate_callback_no(SuspendActionType.resume, card.iccid)
         request_payload = {"number": card.iccid, "type": "00", "callback_no": callback_no}
@@ -619,7 +646,9 @@ class SuspendActionService:
                 supplier_id=card.supplier_id,
                 api_url=supplier.api_url or "",
                 api_key=supplier.api_key or "",
-                api_secret=supplier.api_secret or ""
+                api_secret=supplier.api_secret or "",
+                supplier_code=supplier.code,
+                api_config=supplier.api_config,
             )
             result = await supplier_client.resume_card(card.iccid, callback_no=callback_no)
             request_meta = getattr(supplier_client, "last_sor_result", None) or {"submitted": result}
@@ -789,7 +818,9 @@ class SuspendActionService:
                     supplier_id=card.supplier_id,
                     api_url=supplier.api_url or "",
                     api_key=supplier.api_key or "",
-                    api_secret=supplier.api_secret or ""
+                    api_secret=supplier.api_secret or "",
+                    supplier_code=supplier.code,
+                    api_config=supplier.api_config,
                 )
                 lifecycle_data = await supplier_client.get_card_lifecycle(card.iccid)
                 lifecycle_status = lifecycle_data.get("status")

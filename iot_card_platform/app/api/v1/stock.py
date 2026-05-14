@@ -363,6 +363,7 @@ async def export_inventory(
     supplier_id: Optional[int] = Body(None, description="供应商ID"),
     carrier: Optional[str] = Body(None, description="运营商"),
     package_id: Optional[int] = Body(None, description="套餐ID"),
+    iccids: Optional[List[str]] = Body(None, description="指定导出的ICCID列表"),
     sort_by: Optional[str] = Body("stock_in_at", description="排序字段"),
     sort_order: Optional[str] = Body("desc", description="排序方式"),
     db: AsyncSession = Depends(get_db),
@@ -374,6 +375,7 @@ async def export_inventory(
         supplier_id=supplier_id,
         carrier=carrier,
         package_id=package_id,
+        iccids=iccids,
         sort_by=sort_by,
         sort_order=sort_order
     )

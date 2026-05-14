@@ -52,6 +52,20 @@ class SyncService:
         return card.expired_at, True
 
     @staticmethod
+    def _resolve_lifecycle_activated_at(
+        card: IotCardModel,
+        supplier_activated_at: Optional[date]
+    ) -> Tuple[Optional[date], bool]:
+        """
+        供应商激活日可能是测激活/底层激活日期。本平台激活日只由本地规则产生：
+        检测到用量或平台强制激活时写入，因此生命周期同步不覆盖该字段。
+
+        Returns:
+            (最终应保留的本地激活日, 是否忽略了供应商激活日)
+        """
+        return card.activated_at, supplier_activated_at is not None
+
+    @staticmethod
     def _resolve_usage_data_total(
         card: IotCardModel,
         supplier_total: Optional[int]
@@ -293,7 +307,9 @@ class SyncService:
                         supplier_id=sup_id,
                         api_url=supplier.api_url or "",
                         api_key=supplier.api_key or "",
-                        api_secret=supplier.api_secret or ""
+                        api_secret=supplier.api_secret or "",
+                        supplier_code=supplier.code,
+                        api_config=supplier.api_config,
                     )
 
                     # 批量获取流量数据（带重试）
@@ -473,7 +489,9 @@ class SyncService:
                         supplier_id=sup_id,
                         api_url=supplier.api_url or "",
                         api_key=supplier.api_key or "",
-                        api_secret=supplier.api_secret or ""
+                        api_secret=supplier.api_secret or "",
+                        supplier_code=supplier.code,
+                        api_config=supplier.api_config,
                     )
 
                     iccids = [card.iccid for card in sup_cards]
@@ -497,10 +515,13 @@ class SyncService:
                                 card.silent_expire_date = datetime.strptime(
                                     data["silent_expire_date"], "%Y-%m-%d"
                                 ).date()
+                            ignored_supplier_activated_at = False
                             if data.get("activated_at"):
-                                card.activated_at = datetime.strptime(
-                                    data["activated_at"], "%Y-%m-%d"
-                                ).date()
+                                supplier_activated_at = self._parse_supplier_date(data["activated_at"])
+                                card.activated_at, ignored_supplier_activated_at = self._resolve_lifecycle_activated_at(
+                                    card,
+                                    supplier_activated_at
+                                )
                             if data.get("expired_at"):
                                 supplier_expired_at = self._parse_supplier_date(
                                     data["expired_at"]
@@ -537,6 +558,7 @@ class SyncService:
                             sync_details.append({
                                 "iccid": card.iccid,
                                 "status": "success",
+                                "ignored_supplier_activated_at": ignored_supplier_activated_at,
                                 "preserved_local_expiry": preserved_local_expiry if data.get("expired_at") else False
                             })
                         else:
@@ -663,7 +685,9 @@ class SyncService:
                 supplier_id=card.supplier_id,
                 api_url=supplier.api_url or "",
                 api_key=supplier.api_key or "",
-                api_secret=supplier.api_secret or ""
+                api_secret=supplier.api_secret or "",
+                supplier_code=supplier.code,
+                api_config=supplier.api_config,
             )
 
             # 同步流量（带重试）

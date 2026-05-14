@@ -78,23 +78,28 @@ class SupplierService:
         if not supplier:
             raise BusinessException(code=404, msg="供应商不存在")
 
-        if not supplier.api_url:
+        supplier_code = str(supplier.code or "").strip()
+        if not supplier.api_url and supplier_code != "002":
             raise BusinessException(code=400, msg="供应商未配置 API 地址")
 
-        if not supplier.api_key or not supplier.api_secret:
+        if (not supplier.api_key or not supplier.api_secret) and supplier_code != "002":
             raise BusinessException(code=400, msg="供应商未配置 API Key 或 API Secret")
 
         client = get_supplier_client(
             supplier_id,
-            supplier.api_url,
-            supplier.api_key,
-            supplier.api_secret,
+            supplier.api_url or "",
+            supplier.api_key or "",
+            supplier.api_secret or "",
+            supplier_code=supplier.code,
+            api_config=supplier.api_config,
         )
 
         try:
-            # 用一个不存在的 ICCID 探测：网络通且签名正确时 upiot 返回业务错误码（非 200）
-            # 但不会抛出 HTTP 层异常，说明连通性和认证均正常
-            await client.get_card_usage("000000000000000")
+            test_iccid = "000000000000000"
+            if supplier_code == "002":
+                from app.config import settings
+                test_iccid = settings.simboss_test_iccid or test_iccid
+            await client.get_card_usage(test_iccid)
             # 如果没抛异常说明连通且认证通过
             return {"success": True, "message": "API 连接测试成功", "supplier_id": supplier_id, "api_url": supplier.api_url}
         except Exception as e:

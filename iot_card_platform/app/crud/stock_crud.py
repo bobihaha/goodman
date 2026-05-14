@@ -431,6 +431,7 @@ class StockOutCRUD:
                 card.suspend_at = None
                 card.suspend_reason = None
                 # 出库后规格以销售套餐为准，而不是采购入库规格
+                card.carrier = sale_pkg.carrier
                 card.flow_size = sale_pkg.flow_size
                 card.period_type = sale_pkg.period_type
                 card.data_total = sale_pkg.flow_size
@@ -445,7 +446,7 @@ class StockOutCRUD:
 
                 # 根据运营商类型设置初始状态
                 from app.db.models.package import CarrierType
-                if card.carrier == CarrierType.cmcc and test_expire_date:
+                if sale_pkg.carrier == CarrierType.cmcc and test_expire_date:
                     card.status = CardStatus.testing
                 else:
                     card.status = CardStatus.silent
@@ -621,6 +622,22 @@ class StockOutCRUD:
 class StockSummaryCRUD:
     """库存统计 CRUD"""
 
+    @staticmethod
+    def _parse_iccid_query(iccids: List[str]) -> Tuple[List[str], List[str]]:
+        normalized = []
+        seen = set()
+        duplicates = []
+        for item in iccids:
+            iccid = (item or "").strip()
+            if not iccid:
+                continue
+            if iccid in seen:
+                duplicates.append(iccid)
+                continue
+            seen.add(iccid)
+            normalized.append(iccid)
+        return normalized, duplicates
+
     async def get_summary(self, db: AsyncSession) -> dict:
         """获取库存统计"""
         # 总卡数 (库存中的)
@@ -722,27 +739,26 @@ class StockSummaryCRUD:
         return items, total
 
     async def batch_query_cards(self, db: AsyncSession, iccids: List[str]) -> dict:
-        """批量查询卡片"""
-        # 查询找到的卡片
+        """批量查询库存卡片"""
+        normalized_iccids, duplicate_iccids = self._parse_iccid_query(iccids)
+
         query = select(IotCardModel).where(
-            IotCardModel.iccid.in_(iccids),
+            IotCardModel.iccid.in_(normalized_iccids),
+            IotCardModel.status == CardStatus.stock,
+            IotCardModel.user_id.is_(None),
             IotCardModel.is_deleted == 0
         )
         result = await db.execute(query)
         found_cards = list(result.scalars().all())
         
-        # 找到的ICCID
         found_iccids = {card.iccid for card in found_cards}
-        
-        # 未找到的ICCID
-        not_found = [iccid for iccid in iccids if iccid not in found_iccids]
-        
-        # 转换为字典
+        not_found = [iccid for iccid in normalized_iccids if iccid not in found_iccids]
         found_data = [card.to_dict() for card in found_cards]
         
         return {
             "found": found_data,
-            "not_found": not_found
+            "not_found": not_found,
+            "duplicate_iccids": duplicate_iccids
         }
 
     async def export_inventory(
@@ -751,6 +767,7 @@ class StockSummaryCRUD:
         supplier_id: Optional[int] = None,
         carrier: Optional[str] = None,
         package_id: Optional[int] = None,
+        iccids: Optional[List[str]] = None,
         sort_by: str = "stock_in_at",
         sort_order: str = "desc"
     ) -> List[dict]:
@@ -768,6 +785,8 @@ class StockSummaryCRUD:
         if package_id:
             query = query.join(PurchaseBatchModel, IotCardModel.batch_id == PurchaseBatchModel.id)
             query = query.where(PurchaseBatchModel.package_id == package_id)
+        if iccids:
+            query = query.where(IotCardModel.iccid.in_(iccids))
 
         # 排序
         if sort_by == "stock_in_at":

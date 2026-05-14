@@ -497,7 +497,8 @@ class StockService:
 
         return {
             "found": found_items,
-            "not_found": query_result["not_found"]
+            "not_found": query_result["not_found"],
+            "duplicate_iccids": query_result.get("duplicate_iccids", [])
         }
 
     async def export_inventory(
@@ -506,6 +507,7 @@ class StockService:
         supplier_id: Optional[int] = None,
         carrier: Optional[str] = None,
         package_id: Optional[int] = None,
+        iccids: Optional[List[str]] = None,
         sort_by: str = "stock_in_at",
         sort_order: str = "desc"
     ) -> List[dict]:
@@ -515,6 +517,7 @@ class StockService:
             supplier_id=supplier_id,
             carrier=carrier,
             package_id=package_id,
+            iccids=iccids,
             sort_by=sort_by,
             sort_order=sort_order
         )
@@ -589,6 +592,10 @@ class StockService:
                 card.user_id = item.user_id
                 card.sale_package_id = item.sale_package_id
                 card.period_count = item.period_count
+                card.carrier = package.carrier
+                card.flow_size = package.flow_size
+                card.period_type = package.period_type
+                card.data_total = package.flow_size
 
                 if item.card_type:
                     card.card_type = CardType(item.card_type)
@@ -599,7 +606,7 @@ class StockService:
 
                 # 根据运营商类型设置初始状态
                 from app.db.models.package import CarrierType
-                if card.carrier == CarrierType.cmcc and item.test_expire_date:
+                if package.carrier == CarrierType.cmcc and item.test_expire_date:
                     card.status = CardStatus.testing
                 else:
                     card.status = CardStatus.silent

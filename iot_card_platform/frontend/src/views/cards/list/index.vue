@@ -594,12 +594,14 @@
     <!-- 批量划拨对话框 -->
     <BatchTransferDialog
       v-model="batchTransferVisible"
+      :initial-iccids="selectedCardIccids"
       @success="handleBatchTransferSuccess"
     />
 
     <!-- 批量备注对话框 -->
     <BatchRemarkDialog
       v-model="batchRemarkVisible"
+      :initial-iccids="selectedCardIccids"
       @success="handleBatchRemarkSuccess"
     />
 
@@ -615,24 +617,28 @@
     <!-- 批量续费对话框 -->
     <BatchRenewDialog
       v-model="batchRenewVisible"
+      :initial-iccids="selectedCardIccids"
       @success="handleBatchRenewSuccess"
     />
 
     <!-- 批量补量对话框 -->
     <BatchAddFlowDialog
       v-model="batchAddFlowVisible"
+      :initial-iccids="selectedCardIccids"
       @success="handleBatchAddFlowSuccess"
     />
 
     <!-- 批量停机对话框 -->
     <BatchSuspendDialog
       v-model="batchSuspendVisible"
+      :initial-iccids="selectedCardIccids"
       @success="handleBatchSuspendSuccess"
     />
 
     <!-- 批量复机对话框 -->
     <BatchResumeDialog
       v-model="batchResumeVisible"
+      :initial-iccids="selectedCardIccids"
       @success="handleBatchResumeSuccess"
     />
 
@@ -1028,6 +1034,7 @@ const exportHistoryFilterParams = computed(() => ({
   expired_start: expiredRange.value?.[0] || undefined,
   expired_end: expiredRange.value?.[1] || undefined
 }))
+const selectedCardIccids = computed(() => selectedCards.value.map(card => card.iccid).filter(Boolean))
 const allDraggableColumns = computed(() =>
   columnOrder.value
     .map(key => DRAGGABLE_COLUMN_MAP[key])
@@ -1363,7 +1370,24 @@ const viewDetail = (id: number) => {
 }
 
 // 显示批量查询对话框
-const showBatchQueryDialog = () => {
+const showBatchQueryDialog = async () => {
+  if (selectedCardIccids.value.length > 0) {
+    loading.value = true
+    try {
+      const result = await cardApi.batchQuery({ iccids: selectedCardIccids.value })
+      handleBatchQuerySuccess({
+        ...result,
+        iccids: selectedCardIccids.value
+      })
+      ElMessage.success(`已按勾选的 ${selectedCardIccids.value.length} 张卡片查询`)
+    } catch (error) {
+      console.error('批量查询失败:', error)
+      ElMessage.error('批量查询失败')
+    } finally {
+      loading.value = false
+    }
+    return
+  }
   batchQueryVisible.value = true
 }
 

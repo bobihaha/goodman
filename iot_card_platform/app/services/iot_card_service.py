@@ -241,7 +241,9 @@ class IotCardService:
                         supplier_id=card.supplier_id,
                         api_url=supplier.api_url or "",
                         api_key=supplier.api_key or "",
-                        api_secret=supplier.api_secret or ""
+                        api_secret=supplier.api_secret or "",
+                        supplier_code=supplier.code,
+                        api_config=supplier.api_config,
                     )
                     lifecycle = await client.get_card_lifecycle(card.iccid)
                     supplier_expired_at = self._parse_supplier_expired_at(
@@ -321,7 +323,9 @@ class IotCardService:
             supplier_id=card.supplier_id,
             api_url=supplier.api_url or "",
             api_key=supplier.api_key or "",
-            api_secret=supplier.api_secret or ""
+            api_secret=supplier.api_secret or "",
+            supplier_code=supplier.code,
+            api_config=supplier.api_config,
         )
         lifecycle = await supplier_client.get_card_lifecycle(card.iccid)
         return str(lifecycle.get("status") or "").strip()
@@ -488,7 +492,9 @@ class IotCardService:
                 supplier_id=card.supplier_id,
                 api_url=supplier.api_url or "",
                 api_key=supplier.api_key or "",
-                api_secret=supplier.api_secret or ""
+                api_secret=supplier.api_secret or "",
+                supplier_code=supplier.code,
+                api_config=supplier.api_config,
             )
             result = await client.get_card_diagnostics(card.iccid)
         except Exception as exc:

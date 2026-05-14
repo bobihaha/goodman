@@ -489,6 +489,36 @@ class TestGetSupplierClient:
         c = get_supplier_client(1, "http://ec.upiot.net", "K", "S")
         assert isinstance(c, UpiotSupplierClient)
 
+    def test_supplier_code_002_returns_simboss_client(self):
+        from app.clients.simboss_client import SimbossSupplierClient
+        from app.clients.supplier_api import get_supplier_client
+
+        c = get_supplier_client(
+            2,
+            "https://api.simboss.com",
+            "APPID",
+            "SECRET",
+            supplier_code="002",
+        )
+
+        assert isinstance(c, SimbossSupplierClient)
+        assert c.appid == "APPID"
+
+    def test_supplier_code_002_normalizes_docs_url(self):
+        from app.clients.simboss_client import SimbossSupplierClient
+        from app.clients.supplier_api import get_supplier_client
+
+        c = get_supplier_client(
+            2,
+            "https://simboss.com/www/service/api",
+            "APPID",
+            "SECRET",
+            supplier_code="002",
+        )
+
+        assert isinstance(c, SimbossSupplierClient)
+        assert c.api_url == "https://api.simboss.com"
+
     def test_unknown_url_returns_mock_client(self):
         from app.clients.supplier_api import get_supplier_client, MockSupplierAPIClient
         c = get_supplier_client(1, "http://other-supplier.com", "K", "S")

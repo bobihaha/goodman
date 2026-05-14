@@ -85,7 +85,9 @@ class H5Service:
             supplier_id=card.supplier_id,
             api_url=supplier.api_url or "",
             api_key=supplier.api_key or "",
-            api_secret=supplier.api_secret or ""
+            api_secret=supplier.api_secret or "",
+            supplier_code=supplier.code,
+            api_config=supplier.api_config,
         )
         lifecycle = await supplier_client.get_card_lifecycle(card.iccid)
         return str(lifecycle.get('status') or '').strip()
@@ -373,7 +375,9 @@ class H5Service:
             supplier_id=card.supplier_id,
             api_url=supplier.api_url or "",
             api_key=supplier.api_key or "",
-            api_secret=supplier.api_secret or ""
+            api_secret=supplier.api_secret or "",
+            supplier_code=supplier.code,
+            api_config=supplier.api_config,
         )
 
         try:

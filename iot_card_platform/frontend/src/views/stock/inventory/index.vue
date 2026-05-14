@@ -143,17 +143,32 @@
 
       <el-alert
         v-if="isBatchQueryMode"
-        :title="`批量查询结果：找到 ${tableData.length} 张库存卡片，未找到 ${batchQueryNotFound.length} 个卡号`"
-        :type="batchQueryNotFound.length > 0 ? 'warning' : 'success'"
+        :title="batchQuerySummary"
+        :type="batchQueryNotFound.length > 0 || batchQueryDuplicates.length > 0 ? 'warning' : 'success'"
         :closable="false"
         style="margin-bottom: 16px"
-      />
-      <div v-if="isBatchQueryMode && batchQueryNotFound.length > 0" class="not-found-bar">
-        <span class="not-found-label">未找到：</span>
-        <el-tag v-for="iccid in batchQueryNotFound" :key="iccid" type="danger" class="not-found-tag">
-          {{ iccid }}
-        </el-tag>
-      </div>
+      >
+        <template #default>
+          <div v-if="batchQueryNotFound.length > 0 || batchQueryDuplicates.length > 0" class="batch-query-actions">
+            <el-button
+              v-if="batchQueryNotFound.length > 0"
+              type="warning"
+              link
+              @click="notFoundDialogVisible = true"
+            >
+              查看未找到卡号
+            </el-button>
+            <el-button
+              v-if="batchQueryDuplicates.length > 0"
+              type="warning"
+              link
+              @click="duplicateDialogVisible = true"
+            >
+              查看重复卡号
+            </el-button>
+          </div>
+        </template>
+      </el-alert>
 
       <!-- 表格 -->
       <el-table :data="tableData" v-loading="loading" border stripe>
@@ -219,6 +234,44 @@
         class="pagination"
       />
     </el-card>
+
+    <el-dialog
+      v-model="notFoundDialogVisible"
+      :title="`未找到的卡号（${batchQueryNotFound.length}）`"
+      width="520px"
+    >
+      <div class="iccid-list">
+        <div v-for="iccid in batchQueryNotFound" :key="iccid" class="iccid-line">
+          {{ iccid }}
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="notFoundDialogVisible = false">关闭</el-button>
+        <el-button type="primary" @click="exportIccidList(batchQueryNotFound, '未找到卡号')">
+          <el-icon><Download /></el-icon>
+          导出
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="duplicateDialogVisible"
+      :title="`重复输入的卡号（${batchQueryDuplicates.length}）`"
+      width="520px"
+    >
+      <div class="iccid-list">
+        <div v-for="iccid in batchQueryDuplicates" :key="iccid" class="iccid-line">
+          {{ iccid }}
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="duplicateDialogVisible = false">关闭</el-button>
+        <el-button type="primary" @click="exportIccidList(batchQueryDuplicates, '重复卡号')">
+          <el-icon><Download /></el-icon>
+          导出
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 批量查询对话框 -->
     <el-dialog
@@ -301,7 +354,10 @@ const showBatchQueryDialog = ref(false)
 const batchQueryText = ref('')
 const batchQuerying = ref(false)
 const batchQueryNotFound = ref<string[]>([])
+const batchQueryDuplicates = ref<string[]>([])
 const isBatchQueryMode = ref(false)
+const notFoundDialogVisible = ref(false)
+const duplicateDialogVisible = ref(false)
 
 // 批量查询卡号数量
 const batchQueryCount = computed(() => {
@@ -312,6 +368,34 @@ const batchQueryCount = computed(() => {
     .filter(s => s)
   return iccids.length
 })
+
+const batchQuerySummary = computed(() => {
+  const duplicateText = batchQueryDuplicates.value.length > 0
+    ? `，重复 ${batchQueryDuplicates.value.length} 个卡号`
+    : ''
+  return `批量查询结果：找到 ${tableData.value.length} 张库存卡片，未找到 ${batchQueryNotFound.value.length} 个卡号${duplicateText}`
+})
+
+const parseBatchQueryIccids = (text: string) => {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  const duplicates: string[] = []
+
+  text
+    .split(/[\n,，]/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .forEach(iccid => {
+      if (seen.has(iccid)) {
+        duplicates.push(iccid)
+        return
+      }
+      seen.add(iccid)
+      normalized.push(iccid)
+    })
+
+  return { normalized, duplicates }
+}
 
 // 获取库存统计
 const fetchSummary = async () => {
@@ -336,6 +420,7 @@ const fetchInventory = async () => {
     pagination.total = res.total || 0
     isBatchQueryMode.value = false
     batchQueryNotFound.value = []
+    batchQueryDuplicates.value = []
   } catch (error) {
     ElMessage.error('获取库存列表失败')
   } finally {
@@ -408,11 +493,7 @@ const handleBatchQuery = async () => {
     return
   }
 
-  // 解析ICCID列表
-  const iccids = batchQueryText.value
-    .split(/[\n,，]/)
-    .map(s => s.trim())
-    .filter(s => s)
+  const { normalized: iccids, duplicates: localDuplicates } = parseBatchQueryIccids(batchQueryText.value)
 
   if (iccids.length === 0) {
     ElMessage.warning('请输入有效的ICCID')
@@ -429,7 +510,12 @@ const handleBatchQuery = async () => {
     const res = await stockApi.batchQuery({ iccids })
     tableData.value = res.found || []
     pagination.total = tableData.value.length
-    batchQueryNotFound.value = res.not_found || []
+    const foundIccids = new Set(tableData.value.map((item: any) => item.iccid).filter(Boolean))
+    const backendNotFound = res.not_found || []
+    batchQueryNotFound.value = backendNotFound.length > 0
+      ? backendNotFound
+      : iccids.filter(iccid => !foundIccids.has(iccid))
+    batchQueryDuplicates.value = res.duplicate_iccids?.length > 0 ? res.duplicate_iccids : localDuplicates
     isBatchQueryMode.value = true
     showBatchQueryDialog.value = false
     pagination.page = 1
@@ -452,7 +538,16 @@ const handleExport = async () => {
 
     ElMessage.info('正在导出，请稍候...')
     
-    const res = await stockApi.exportInventory(queryParams)
+    const exportParams = isBatchQueryMode.value
+      ? {
+          iccids: tableData.value.map((item: any) => item.iccid).filter(Boolean),
+          sort_by: queryParams.sort_by,
+          sort_order: queryParams.sort_order
+        }
+      : queryParams
+    const res = isBatchQueryMode.value
+      ? tableData.value
+      : await stockApi.exportInventory(exportParams)
     
     // 创建工作簿并下载
     const ws = XLSX.utils.json_to_sheet(res)
@@ -466,6 +561,14 @@ const handleExport = async () => {
       ElMessage.error(error.message || '导出失败')
     }
   }
+}
+
+const exportIccidList = (iccids: string[], sheetName: string) => {
+  const rows = iccids.map(iccid => ({ ICCID: iccid }))
+  const ws = XLSX.utils.json_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, sheetName)
+  XLSX.writeFile(wb, `${sheetName}_${new Date().getTime()}.xlsx`)
 }
 
 // 刷新
@@ -571,18 +674,25 @@ onMounted(() => {
     gap: 10px;
   }
 
-  .not-found-bar {
-    margin-bottom: 16px;
-    font-size: 13px;
+  .batch-query-actions {
+    margin-top: 6px;
   }
 
-  .not-found-label {
-    color: #606266;
-    margin-right: 8px;
+  .iccid-list {
+    max-height: 420px;
+    overflow-y: auto;
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
   }
 
-  .not-found-tag {
-    margin: 0 8px 8px 0;
+  .iccid-line {
+    padding: 8px 12px;
+    font-family: monospace;
+    border-bottom: 1px solid #ebeef5;
+
+    &:last-child {
+      border-bottom: none;
+    }
   }
 
   .pagination {

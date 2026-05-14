@@ -26,6 +26,19 @@ UNLIMITED_QUOTA = -1
 
 
 class SysUserService:
+    DEFAULT_USER_PERMISSION_MODULES = ["dashboard", "user", "card", "renewal", "pool", "system"]
+    DEFAULT_USER_MENU_CODES = [
+        "dashboard",
+        "card_manage",
+        "card_list",
+        "user_manage",
+        "user_list",
+        "renewal_manage",
+        "pool_manage",
+        "pool_list",
+        "system_manage",
+    ]
+
     @staticmethod
     def _mask_open_api_secret(secret: Optional[str]) -> Optional[str]:
         if not secret:
@@ -499,12 +512,9 @@ class SysUserService:
             from sqlalchemy import select
             from app.db.models.permission import PermissionModel
 
-            # 默认模块：仪表盘、客户管理、卡片管理、续费管理、流量池管理、设置
-            default_modules = ["dashboard", "user", "card", "package", "pool", "system"]
-
             # 获取这些模块的所有权限ID
             stmt = select(PermissionModel.id).where(
-                PermissionModel.module.in_(default_modules),
+                PermissionModel.module.in_(SysUserService.DEFAULT_USER_PERMISSION_MODULES),
                 PermissionModel.is_deleted == 0
             )
             result = await db.execute(stmt)
@@ -523,12 +533,9 @@ class SysUserService:
             from sqlalchemy import select, insert
             from app.db.models.sys_menu import SysUserMenuModel, SysMenuModel
 
-            # 默认菜单code：仪表盘、客户管理、卡片管理、续费管理、流量池管理、系统配置
-            default_menu_codes = ["dashboard", "users", "cards", "renewal", "pools", "system_config"]
-
             # 获取这些菜单的ID
             stmt = select(SysMenuModel.id).where(
-                SysMenuModel.code.in_(default_menu_codes),
+                SysMenuModel.code.in_(SysUserService.DEFAULT_USER_MENU_CODES),
                 SysMenuModel.is_deleted == 0
             )
             result = await db.execute(stmt)

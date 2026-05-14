@@ -4,13 +4,36 @@
 import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.crud.system_crud import SysConfigCRUD, SysLoginLogCRUD, SysOperationLogCRUD, SysNotifyTemplateCRUD
 from app.db.models.sys_log import SysConfigModel, SysNotifyTemplateModel
 from app.db.models.sys_user import UserLevel
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.schemas.system import ConfigCreate, ConfigUpdate, NotifyTemplateCreate, NotifyTemplateUpdate, AlertRules
+
+
+CHINA_TIME_OFFSET = timedelta(hours=8)
+
+
+def _storage_time_to_china_string(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return (value + CHINA_TIME_OFFSET).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _china_time_to_storage(value: Optional[datetime]) -> Optional[datetime]:
+    if not value:
+        return None
+    return value - CHINA_TIME_OFFSET
+
+
+def _format_log_china_time(log: dict) -> dict:
+    formatted = dict(log)
+    created_at = formatted.get("created_at")
+    if isinstance(created_at, datetime):
+        formatted["created_at"] = _storage_time_to_china_string(created_at)
+    return formatted
 
 
 class SystemConfigService:
@@ -278,12 +301,12 @@ class LoginLogService:
             user_id=scoped_user_id,
             account=account,
             is_success=is_success,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=_china_time_to_storage(start_time),
+            end_time=_china_time_to_storage(end_time),
             page=page,
             page_size=page_size
         )
-        return [log.to_dict() for log in logs], total
+        return [_format_log_china_time(log.to_dict()) for log in logs], total
 
 
 class OperationLogService:
@@ -361,12 +384,12 @@ class OperationLogService:
             target_type=target_type,
             target_id=target_id,
             is_success=is_success,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=_china_time_to_storage(start_time),
+            end_time=_china_time_to_storage(end_time),
             page=page,
             page_size=page_size
         )
-        return [log.to_dict() for log in logs], total
+        return [_format_log_china_time(log.to_dict()) for log in logs], total
 
     @staticmethod
     def _parse_renew_period(detail: Optional[str]) -> Optional[str]:
@@ -442,13 +465,13 @@ class OperationLogService:
             actions=actions,
             target_type="card",
             is_success=True,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=_china_time_to_storage(start_time),
+            end_time=_china_time_to_storage(end_time),
             page=page,
             page_size=page_size
         )
 
         return [
-            OperationLogService._build_card_record(log.to_dict(), record_type)
+            OperationLogService._build_card_record(_format_log_china_time(log.to_dict()), record_type)
             for log in logs
         ], total

@@ -9,6 +9,15 @@
     <div class="batch-add-flow-dialog">
       <div v-if="!operationResult" class="input-section">
         <el-alert
+          v-if="hasInitialIccids"
+          :title="`已选择 ${iccidCount} 张卡片，将直接对勾选卡片执行批量补量`"
+          type="success"
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
+
+        <el-alert
+          v-else
           title="批量补量说明"
           type="info"
           :closable="false"
@@ -45,7 +54,7 @@
             />
           </el-form-item>
 
-          <el-form-item label="ICCID">
+          <el-form-item v-if="!hasInitialIccids" label="ICCID">
             <el-input
               v-model="iccidText"
               type="textarea"
@@ -55,7 +64,7 @@
           </el-form-item>
         </el-form>
 
-        <div class="input-info">
+        <div v-if="!hasInitialIccids" class="input-info">
           <span>已输入: <strong>{{ iccidCount }}</strong> 个 ICCID</span>
           <span v-if="iccidCount > BATCH_MAX_COUNT" class="error-text">
             超出限制，最多支持 {{ BATCH_MAX_COUNT }} 个
@@ -111,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { cardApi } from '@/api'
 import { FLOW_PACKAGE_OPTIONS, getFlowPackageLabel } from '@/constants/flow'
@@ -120,6 +129,7 @@ const BATCH_MAX_COUNT = 10000
 
 interface Props {
   modelValue: boolean
+  initialIccids?: string[]
 }
 
 interface Emits {
@@ -148,6 +158,14 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 })
+const hasInitialIccids = computed(() => (props.initialIccids?.length || 0) > 0)
+const initialIccidText = computed(() => [...new Set(props.initialIccids || [])].join('\n'))
+
+const syncInitialIccids = () => {
+  if (hasInitialIccids.value) {
+    iccidText.value = initialIccidText.value
+  }
+}
 
 const parseICCIDs = (text: string): string[] => {
   if (!text.trim()) return []
@@ -208,7 +226,7 @@ const handleSubmit = async () => {
 
 const handleReset = () => {
   operationResult.value = null
-  iccidText.value = ''
+  iccidText.value = hasInitialIccids.value ? initialIccidText.value : ''
   addedFlowMb.value = 1024
   remark.value = ''
 }
@@ -217,6 +235,12 @@ const handleClose = () => {
   handleReset()
   visible.value = false
 }
+
+watch(visible, (newVal) => {
+  if (newVal) {
+    syncInitialIccids()
+  }
+})
 </script>
 
 <style scoped lang="scss">

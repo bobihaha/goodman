@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     db_name: str = "iot_card_platform"
     
     # JWT 配置
-    secret_key: str
+    secret_key: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 120
     refresh_token_expire_days: int = 7
@@ -56,8 +56,14 @@ class Settings(BaseSettings):
     refresh_suspend_confirm_timeout_seconds: int = 45
     refresh_resume_confirm_timeout_seconds: int = 90
 
+    # Supplier 002: SIMBOSS
+    simboss_api_url: str = "https://api.simboss.com"
+    simboss_appid: str = ""
+    simboss_app_secret: str = ""
+    simboss_test_iccid: str = ""
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"  # 忽略额外的环境变量

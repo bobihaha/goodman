@@ -278,6 +278,7 @@ class BatchQueryResult(BaseModel):
     """批量查询结果"""
     found: List[dict]
     not_found: List[str]
+    duplicate_iccids: List[str] = []
 
 
 # ============ Excel批量出库 ============

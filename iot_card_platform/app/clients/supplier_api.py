@@ -253,25 +253,55 @@ class MockSupplierAPIClient(SupplierAPIClient):
         }
 
 
-def get_supplier_client(supplier_id: int, api_url: str, api_key: str, api_secret: str) -> SupplierAPIClient:
+def get_supplier_client(
+    supplier_id: int,
+    api_url: str,
+    api_key: str,
+    api_secret: str,
+    supplier_code: Optional[str] = None,
+    api_config: Optional[Dict[str, Any]] = None,
+) -> SupplierAPIClient:
     """
-    根据供应商ID获取对应的API客户端
+    根据供应商信息获取对应的API客户端。
 
-    supplier_id 对应 suppliers 表的 id
-    通过 api_url 判断供应商类型:
-      - 包含 upiot.net 或 api_config 中标记为 upiot -> UpiotSupplierClient
-      - 其他 -> MockSupplierAPIClient (后续可扩展)
+    supplier_id 对应 suppliers 表的 id；supplier_code 对应业务供应商编码。
+    优先按明确供应商编码分发，避免新供应商影响已上线供应商。
     """
     from app.clients.upiot_client import UpiotSupplierClient
+    from app.clients.simboss_client import SimbossSupplierClient
     from app.utils.const import decrypt_secret
 
     normalized_url = (api_url or "").strip()
     normalized_key = decrypt_secret((api_key or "").strip())
     normalized_secret = decrypt_secret((api_secret or "").strip())
+    normalized_code = str(supplier_code or "").strip()
+    config = api_config or {}
+
+    def normalize_simboss_url(url: str) -> str:
+        if not url:
+            return settings.simboss_api_url
+        lowered = url.lower()
+        if "simboss.com/www" in lowered or "simboss.com/2.0" in lowered:
+            return settings.simboss_api_url
+        return url
+
+    if normalized_code == "002" or str(config.get("platform") or "").lower() == "simboss":
+        return SimbossSupplierClient(
+            normalize_simboss_url(normalized_url),
+            normalized_key or settings.simboss_appid,
+            normalized_secret or settings.simboss_app_secret,
+        )
 
     # 根据 api_url 判断供应商平台类型
     if normalized_url and "upiot" in normalized_url.lower():
         return UpiotSupplierClient(normalized_url, normalized_key, normalized_secret)
+
+    if normalized_url and "simboss" in normalized_url.lower():
+        return SimbossSupplierClient(
+            normalize_simboss_url(normalized_url),
+            normalized_key or settings.simboss_appid,
+            normalized_secret or settings.simboss_app_secret,
+        )
 
     # 仅开发环境允许兜底 mock，避免生产环境生成随机脏数据
     if settings.app_env != "production":

@@ -27,6 +27,7 @@ class DummyCard:
         self.data_used_month = data_used_month
         self.addon_flow = 0
         self.addon_flow_month = None
+        self.activated_at = None
 
 
 def test_resolve_lifecycle_expired_at_prefers_supplier_when_longer():
@@ -45,6 +46,26 @@ def test_resolve_lifecycle_expired_at_preserves_local_when_supplier_is_shorter()
 
     assert resolved == date(2028, 1, 31)
     assert preserved is True
+
+
+def test_resolve_lifecycle_activated_at_ignores_supplier_test_activation_date():
+    card = DummyCard()
+    card.activated_at = None
+
+    resolved, ignored = SyncService._resolve_lifecycle_activated_at(card, date(2025, 11, 17))
+
+    assert resolved is None
+    assert ignored is True
+
+
+def test_resolve_lifecycle_activated_at_preserves_local_platform_date():
+    card = DummyCard()
+    card.activated_at = date(2026, 5, 11)
+
+    resolved, ignored = SyncService._resolve_lifecycle_activated_at(card, date(2025, 11, 17))
+
+    assert resolved == date(2026, 5, 11)
+    assert ignored is True
 
 
 def test_resolve_usage_data_total_preserves_yearly_local_renew_total():

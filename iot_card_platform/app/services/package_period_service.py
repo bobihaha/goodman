@@ -1,6 +1,8 @@
 """
 套餐周期管理服务
 """
+import asyncio
+import logging
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
@@ -10,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.supplier_api import get_supplier_client
 from app.crud.system_crud import SysOperationLogCRUD
 from app.db.models.iot_card import CardStatus, IotCardModel, SuspendType
-from app.db.models.sys_user import UserLevel
 from app.db.models.supplier import SupplierModel
+from app.db.models.sys_log import SysOperationLogModel
 from app.schemas.package_period import (
     BatchCancelPackagePeriodRequest,
     BatchForceActivateRequest,
@@ -20,9 +22,20 @@ from app.services.sync_service import sync_service
 from app.utils.date_utils import calculate_expiry_date, reduce_expiry_date
 from app.utils.exceptions import BusinessException
 
+logger = logging.getLogger(__name__)
+
 
 class PackagePeriodService:
     MODULE_NAME = "package_period"
+    FORCE_ACTIVATE_RETRY_DELAYS = (3, 8)
+    RATE_LIMIT_KEYWORDS = (
+        "访问频率",
+        "频率限制",
+        "限流",
+        "rate limit",
+        "too many",
+        "429",
+    )
 
     @staticmethod
     def _normalize_iccids(iccids: List[str]) -> List[str]:
@@ -116,9 +129,95 @@ class PackagePeriodService:
             supplier_id=supplier.id,
             api_url=supplier.api_url or "",
             api_key=supplier.api_key or "",
-            api_secret=supplier.api_secret or ""
+            api_secret=supplier.api_secret or "",
+            supplier_code=supplier.code,
+            api_config=supplier.api_config,
         )
         return await client.get_card_lifecycle(card.iccid)
+
+    @staticmethod
+    def _resolve_force_activate_expired_at(card: IotCardModel, activated_at: date) -> Optional[date]:
+        if not card.period_type:
+            return None
+        return calculate_expiry_date(
+            start_date=activated_at,
+            period_type=card.period_type.value,
+            period_months=card.period_count * 12 if card.period_type.value == "yearly" else card.period_count,
+            carrier=card.carrier.value if card.carrier else None
+        )
+
+    @staticmethod
+    def _supplier_error_text(supplier_meta: Dict[str, Any]) -> str:
+        for key in ("supplier_msg", "error", "result", "message", "msg"):
+            value = supplier_meta.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    @staticmethod
+    def _is_rate_limited_supplier_result(supplier_meta: Dict[str, Any]) -> bool:
+        text = PackagePeriodService._supplier_error_text(supplier_meta).lower()
+        return any(keyword.lower() in text for keyword in PackagePeriodService.RATE_LIMIT_KEYWORDS)
+
+    @staticmethod
+    async def _call_force_activate_supplier(
+        client: Any,
+        card: IotCardModel
+    ) -> tuple[bool, Dict[str, Any]]:
+        attempts = len(PackagePeriodService.FORCE_ACTIVATE_RETRY_DELAYS) + 1
+        last_meta: Dict[str, Any] = {}
+
+        for attempt in range(attempts):
+            supplier_success = await client.force_activate_card(
+                iccid=card.iccid,
+                card_no=card.msisdn or card.iccid
+            )
+            supplier_meta = dict(getattr(client, "last_force_activate_result", None) or {"submitted": supplier_success})
+            supplier_meta["attempts"] = attempt + 1
+            last_meta = supplier_meta
+
+            if supplier_success:
+                return True, supplier_meta
+
+            if (
+                attempt < attempts - 1
+                and PackagePeriodService._is_rate_limited_supplier_result(supplier_meta)
+            ):
+                delay_seconds = PackagePeriodService.FORCE_ACTIVATE_RETRY_DELAYS[attempt]
+                logger.warning(
+                    "force activate rate limited, retrying: iccid=%s attempt=%s delay=%ss error=%s",
+                    card.iccid,
+                    attempt + 1,
+                    delay_seconds,
+                    PackagePeriodService._supplier_error_text(supplier_meta),
+                )
+                await asyncio.sleep(delay_seconds)
+                continue
+
+            return False, supplier_meta
+
+        return False, last_meta
+
+    @staticmethod
+    def _add_operation_log(
+        db: AsyncSession,
+        action: str,
+        operator_id: int,
+        operator_name: Optional[str],
+        card: IotCardModel,
+        detail: str
+    ) -> None:
+        db.add(SysOperationLogModel(
+            module=PackagePeriodService.MODULE_NAME,
+            action=action,
+            user_id=operator_id,
+            user_name=operator_name,
+            target_type="card",
+            target_id=card.id,
+            target_name=card.iccid,
+            detail=detail,
+            is_success=1,
+        ))
 
     @staticmethod
     async def batch_force_activate(
@@ -157,52 +256,25 @@ class PackagePeriodService:
                     supplier_id=supplier.id,
                     api_url=supplier.api_url or "",
                     api_key=supplier.api_key or "",
-                    api_secret=supplier.api_secret or ""
+                    api_secret=supplier.api_secret or "",
+                    supplier_code=supplier.code,
+                    api_config=supplier.api_config,
                 )
-                supplier_success = await client.force_activate_card(
-                    iccid=card.iccid,
-                    card_no=card.msisdn or card.iccid
-                )
-                supplier_meta = getattr(client, "last_force_activate_result", None) or {"submitted": supplier_success}
+                supplier_success, supplier_meta = await PackagePeriodService._call_force_activate_supplier(client, card)
                 if not supplier_success:
                     failed_list.append({
                         "iccid": iccid,
-                        "error": supplier_meta.get("supplier_msg") or "供应商接口调用失败"
+                        "error": PackagePeriodService._supplier_error_text(supplier_meta) or "供应商接口调用失败"
                     })
                     continue
 
-                lifecycle_source = "fallback_local"
-                lifecycle = {}
-                try:
-                    lifecycle = await PackagePeriodService._fetch_supplier_lifecycle(card, supplier)
-                except Exception:
-                    lifecycle = {}
-
-                supplier_status = str(lifecycle.get("status") or "").strip()
-                supplier_activated_at = lifecycle.get("activated_at")
-                supplier_expired_at = lifecycle.get("expired_at")
-
                 today = date.today()
                 activated_at = today
-                if supplier_activated_at:
-                    activated_at = datetime.strptime(supplier_activated_at, "%Y-%m-%d").date()
-                    lifecycle_source = "supplier_lifecycle"
-
-                expired_at = None
-                if supplier_expired_at:
-                    expired_at = datetime.strptime(supplier_expired_at, "%Y-%m-%d").date()
-                    lifecycle_source = "supplier_lifecycle"
-                elif card.period_type:
-                    expired_at = calculate_expiry_date(
-                        start_date=activated_at,
-                        period_type=card.period_type.value,
-                        period_months=card.period_count * 12 if card.period_type.value == "yearly" else card.period_count,
-                        carrier=card.carrier.value if card.carrier else None
-                    )
+                expired_at = PackagePeriodService._resolve_force_activate_expired_at(card, activated_at)
 
                 card.activated_at = activated_at
                 card.expired_at = expired_at
-                card.status = CardStatus.activated if supplier_status not in {"testing", "silent"} else CardStatus.activated
+                card.status = CardStatus.activated
                 card.suspend_type = SuspendType.none
                 card.suspend_at = None
                 card.suspend_reason = None
@@ -216,22 +288,18 @@ class PackagePeriodService:
                     old_activated_at=old_activated_at,
                     old_expired_at=old_expired_at,
                     reason=data.reason,
-                    lifecycle_source=lifecycle_source
+                    lifecycle_source="local_force_activate"
+                )
+                PackagePeriodService._add_operation_log(
+                    db=db,
+                    action="force_activate",
+                    operator_id=operator_id,
+                    operator_name=operator_name,
+                    card=card,
+                    detail=detail
                 )
                 await db.commit()
                 await db.refresh(card)
-
-                await SysOperationLogCRUD.create(
-                    db=db,
-                    module=PackagePeriodService.MODULE_NAME,
-                    action="force_activate",
-                    user_id=operator_id,
-                    user_name=operator_name,
-                    target_type="card",
-                    target_id=card.id,
-                    target_name=card.iccid,
-                    detail=detail
-                )
 
                 success_list.append({
                     "iccid": card.iccid,
@@ -303,20 +371,16 @@ class PackagePeriodService:
                     unit_name="年" if card.period_type.value == "yearly" else "个月",
                     reason=data.reason
                 )
-                await db.commit()
-                await db.refresh(card)
-
-                await SysOperationLogCRUD.create(
+                PackagePeriodService._add_operation_log(
                     db=db,
-                    module=PackagePeriodService.MODULE_NAME,
                     action="cancel_period",
-                    user_id=operator_id,
-                    user_name=operator_name,
-                    target_type="card",
-                    target_id=card.id,
-                    target_name=card.iccid,
+                    operator_id=operator_id,
+                    operator_name=operator_name,
+                    card=card,
                     detail=detail
                 )
+                await db.commit()
+                await db.refresh(card)
 
                 success_list.append({
                     "iccid": card.iccid,

@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from datetime import datetime
 
 import pytest
 
 from app.schemas.auth import UserLevel
-from app.services.system_service import LoginLogService
+from app.services.system_service import LoginLogService, _china_time_to_storage, _storage_time_to_china_string
 
 
 class TestLoginLogService:
@@ -42,3 +43,9 @@ class TestLoginLogService:
 
         assert mock_get_list.await_args.kwargs["user_id"] == 88
         assert mock_get_list.await_args.kwargs["account"] == "target-account"
+
+    def test_log_time_is_returned_as_china_time(self):
+        assert _storage_time_to_china_string(datetime(2026, 5, 14, 1, 30, 0)) == "2026-05-14 09:30:00"
+
+    def test_china_query_time_is_converted_to_storage_time(self):
+        assert _china_time_to_storage(datetime(2026, 5, 14, 9, 30, 0)) == datetime(2026, 5, 14, 1, 30, 0)

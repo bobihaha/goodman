@@ -10,6 +10,15 @@
       <!-- 输入区域 -->
       <div v-if="!operationResult" class="input-section">
         <el-alert
+          v-if="hasInitialIccids"
+          :title="`已选择 ${iccidCount} 张卡片，将直接对勾选卡片执行批量划拨`"
+          type="success"
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
+
+        <el-alert
+          v-else
           title="批量划拨说明"
           type="info"
           :closable="false"
@@ -25,6 +34,7 @@
         </el-alert>
 
         <el-input
+          v-if="!hasInitialIccids"
           v-model="iccidText"
           type="textarea"
           :rows="8"
@@ -32,7 +42,7 @@
           @input="handleInput"
         />
 
-        <div class="input-info">
+        <div v-if="!hasInitialIccids" class="input-info">
           <span>已输入: <strong>{{ iccidCount }}</strong> 个ICCID</span>
           <span v-if="iccidCount > BATCH_MAX_COUNT" class="error-text">
             超出限制！最多支持 {{ BATCH_MAX_COUNT }} 个
@@ -169,6 +179,7 @@ const BATCH_MAX_COUNT = 10000
 
 interface Props {
   modelValue: boolean
+  initialIccids?: string[]
 }
 
 interface Emits {
@@ -211,6 +222,14 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 })
+const hasInitialIccids = computed(() => (props.initialIccids?.length || 0) > 0)
+const initialIccidText = computed(() => [...new Set(props.initialIccids || [])].join('\n'))
+
+const syncInitialIccids = () => {
+  if (hasInitialIccids.value) {
+    iccidText.value = initialIccidText.value
+  }
+}
 
 const iccidCount = computed(() => {
   if (!iccidText.value.trim()) return 0
@@ -378,7 +397,7 @@ const handleCopyFailed = async () => {
 // 重置
 const handleReset = () => {
   operationResult.value = null
-  iccidText.value = ''
+  iccidText.value = hasInitialIccids.value ? initialIccidText.value : ''
   form.value.to_user_id = undefined
   form.value.remark = ''
   formRef.value?.clearValidate()
@@ -392,7 +411,7 @@ const handleClose = () => {
 // 监听对话框关闭，重置数据
 watch(visible, (newVal) => {
   if (newVal) {
-    // 对话框打开时，加载初始用户列表
+    syncInitialIccids()
     loadInitialUsers()
   } else {
     setTimeout(() => {
