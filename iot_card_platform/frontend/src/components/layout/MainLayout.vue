@@ -171,6 +171,8 @@ const activeMenu = computed(() => route.path)
 // 图标映射（根据菜单code或path匹配图标）
 const iconMap: Record<string, any> = {
   'dashboard': DataBoard,
+  'supplier_traffic_pools': Connection,
+  'supplier-traffic-pools': Connection,
   'cards': CreditCard,
   'card': CreditCard,
   'packages': Box,

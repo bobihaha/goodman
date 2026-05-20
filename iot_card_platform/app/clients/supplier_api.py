@@ -119,6 +119,20 @@ class SupplierAPIClient(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_traffic_pool_list(self) -> List[Dict[str, Any]]:
+        """
+        获取供应商侧流量池列表。
+        """
+        pass
+
+    @abstractmethod
+    async def get_traffic_pool_usage(self) -> List[Dict[str, Any]]:
+        """
+        获取供应商侧流量池当前用量。
+        """
+        pass
+
     async def _request(
         self,
         method: str,
@@ -251,6 +265,28 @@ class MockSupplierAPIClient(SupplierAPIClient):
             "bind_status": "bind_support",
             "lock_triggered": False,
         }
+
+    async def get_traffic_pool_list(self) -> List[Dict[str, Any]]:
+        """模拟供应商侧流量池列表"""
+        return [
+            {
+                "supplier_pool_code": "MOCK_POOL_001",
+                "supplier_pool_name": "模拟流量池",
+                "carrier": "cmcc",
+                "total_flow": 10240,
+                "used_flow": 2048,
+                "remaining_flow": 8192,
+                "usage_percent": 20.0,
+                "total_card_count": 10,
+                "active_card_count": 8,
+                "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "raw_data": {},
+            }
+        ]
+
+    async def get_traffic_pool_usage(self) -> List[Dict[str, Any]]:
+        """模拟供应商侧流量池当前用量"""
+        return await self.get_traffic_pool_list()
 
 
 def get_supplier_client(

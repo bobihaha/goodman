@@ -40,6 +40,15 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'supplier-traffic-pools',
+        name: 'SupplierTrafficPools',
+        component: () => import('@/views/supplier-traffic-pools/index.vue'),
+        meta: {
+          title: '供应商流量池管理',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'cards/list',
         name: 'CardList',
         component: () => import('@/views/cards/list/index.vue'),

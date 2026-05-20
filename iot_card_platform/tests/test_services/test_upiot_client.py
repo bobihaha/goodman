@@ -90,6 +90,16 @@ class TestHelpers:
         assert client._map_status("99") == "unknown"
         assert client._map_status("XX") == "unknown"
 
+    def test_extract_pool_specification_from_billing_groups(self, client):
+        row = {"bgs": ["109230028MWL5GB1211Y"]}
+
+        assert client._extract_pool_specification(row) == 5120
+
+    def test_extract_pool_specification_returns_none_when_mixed(self, client):
+        row = {"bgs": ["CMCC-1GB-M", "CMCC-5GB-M"]}
+
+        assert client._extract_pool_specification(row) is None
+
 
 # ========== GET 请求 ==========
 
@@ -217,6 +227,100 @@ class TestPostRequest:
         with patch("app.clients.upiot_client.httpx.AsyncClient", return_value=mock_http):
             with pytest.raises(Exception, match="upiot POST error"):
                 await client._post("sor", {"number": "8986", "type": "01"})
+
+
+class TestTrafficPoolUsage:
+    @pytest.mark.asyncio
+    async def test_get_traffic_pool_list_normalizes_rows(self, client):
+        api_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {
+                        "code": "LLC00652001",
+                        "name": "移动-测试流量池",
+                        "carrier": "中国移动",
+                        "bgs": ["lx-test-YD"],
+                        "data_plan": "2048.000",
+                    }
+                ]
+            },
+        }
+
+        with patch.object(client, "_get", AsyncMock(return_value=api_data)) as mock_get:
+            result = await client.get_traffic_pool_list()
+
+        mock_get.assert_awaited_once_with("usage_pool")
+        assert result[0]["supplier_pool_code"] == "LLC00652001"
+        assert result[0]["carrier"] == "cmcc"
+        assert result[0]["total_flow"] == 2048.0
+        assert result[0]["pool_specification"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_traffic_pool_usage_normalizes_current_usage(self, client):
+        usage_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {
+                        "code": "LLC00652001",
+                        "total_card_count": 3,
+                        "active_card_count": 2,
+                        "data_plan": "1024.000",
+                        "data_usage": "256.000",
+                    }
+                ]
+            },
+        }
+        list_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {
+                        "code": "LLC00652001",
+                        "name": "移动-测试流量池",
+                        "carrier": "中国移动",
+                        "bgs": ["109230028MWL5GB1211Y"],
+                    }
+                ]
+            },
+        }
+
+        with patch.object(client, "_get", AsyncMock(side_effect=[usage_data, list_data])) as mock_get:
+            result = await client.get_traffic_pool_usage()
+
+        assert mock_get.await_args_list[0].args == ("usage_pool/info",)
+        assert mock_get.await_args_list[1].args == ("usage_pool",)
+        assert result[0]["supplier_pool_name"] == "移动-测试流量池"
+        assert result[0]["carrier"] == "cmcc"
+        assert result[0]["pool_specification"] == 5120
+        assert result[0]["used_flow"] == 256.0
+        assert result[0]["remaining_flow"] == 768.0
+        assert result[0]["usage_percent"] == 25.0
+        assert result[0]["total_card_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_get_traffic_pool_usage_keeps_usage_when_metadata_fails(self, client):
+        usage_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {
+                        "code": "LLC00652001",
+                        "name": "移动-测试流量池",
+                        "carrier": "中国移动",
+                        "data_plan": "1024.000",
+                        "data_usage": "256.000",
+                    }
+                ]
+            },
+        }
+
+        with patch.object(client, "_get", AsyncMock(side_effect=[usage_data, Exception("limit")])):
+            result = await client.get_traffic_pool_usage()
+
+        assert result[0]["supplier_pool_code"] == "LLC00652001"
+        assert result[0]["used_flow"] == 256.0
 
 
 # ========== 业务接口 ==========

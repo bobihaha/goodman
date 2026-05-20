@@ -36,6 +36,45 @@ def test_build_url(client):
     assert client._build_url("/device/detail") == "https://api.simboss.com/2.0/device/detail"
 
 
+def test_normalize_pool_usage_generates_readable_name_from_spec(client):
+    payload = {
+        "id": 18246,
+        "poolSpecification": 51200,
+        "totalVolume": 51200,
+        "useVolume": 10240,
+        "useRate": 0.2,
+    }
+
+    result = client._normalize_pool_usage(payload)
+
+    assert result["supplier_pool_code"] == "18246"
+    assert result["supplier_pool_name"] == "网络50GB/月"
+    assert result["pool_specification"] == 51200
+
+
+def test_normalize_pool_usage_prefers_supplier_name(client):
+    payload = {
+        "id": 46464,
+        "poolName": "网络50GB/月",
+        "poolSpecification": 51200,
+    }
+
+    result = client._normalize_pool_usage(payload)
+
+    assert result["supplier_pool_name"] == "网络50GB/月"
+
+
+def test_normalize_pool_usage_names_all_package_spec(client):
+    payload = {
+        "id": 18246,
+        "poolSpecification": -1,
+    }
+
+    result = client._normalize_pool_usage(payload)
+
+    assert result["supplier_pool_name"] == "全套餐"
+
+
 @pytest.mark.asyncio
 async def test_post_sends_form_payload_with_sign(client):
     mock_resp = MagicMock()
@@ -175,6 +214,41 @@ async def test_get_batch_usage_chunks_by_100(client):
 
     assert len(result) == 101
     assert mock_post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_traffic_pool_list_normalizes_rows(client):
+    api_data = {
+        "code": "0",
+        "data": [
+            {
+                "id": 908,
+                "poolSpecification": -1,
+                "carrier": "cmcc",
+                "totalVolume": 15.0,
+                "useVolume": 3.264,
+                "leftVolume": 11.736,
+                "packageVolume": 0.0,
+                "useRate": 0.2176,
+                "totalCount": 4,
+                "currentActivationCount": 2,
+                "currentDeactivationCount": 1,
+            }
+        ],
+    }
+
+    with patch.object(client, "_post", AsyncMock(return_value=api_data)) as mock_post:
+        result = await client.get_traffic_pool_list()
+
+    mock_post.assert_awaited_once_with("card/pool/list", {})
+    assert result[0]["supplier_pool_code"] == "908"
+    assert result[0]["carrier"] == "cmcc"
+    assert result[0]["total_flow"] == 15.0
+    assert result[0]["used_flow"] == 3.264
+    assert result[0]["remaining_flow"] == 11.736
+    assert result[0]["usage_percent"] == 21.76
+    assert result[0]["total_card_count"] == 4
+    assert result[0]["active_card_count"] == 2
 
 
 @pytest.mark.asyncio

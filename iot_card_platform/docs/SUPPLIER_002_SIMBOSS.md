@@ -30,6 +30,8 @@ SIMBOSS_TEST_ICCID=...
 | 流量池卡开关网络 | `/2.0/device/modifyDeviceStatus` | 仅对系统 `card_type=pool` 的 SIMBOSS 卡调用；开：`ACTIVATED_NAME`，关：`DEACTIVATED_NAME` |
 | 强制激活 | `/2.0/device/activate` | 文档说明需要联系客服开放权限 |
 | IMEI 查询 | `/2.0/device/queryNum` | 配合详情中的 `imeiStatus` 判断机卡分离 |
+| 流量池列表/用量 | `/2.0/card/pool/list` | 返回供应商侧流量池总量、用量、剩余量、卡数 |
+| 流量池详情 | `/2.0/card/pool/detail` | 通过 `iccid`/`imsi`/`msisdn` 查询该卡所在流量池 |
 
 ## 状态映射
 

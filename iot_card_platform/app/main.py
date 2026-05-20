@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
-from app.api.v1 import auth, sys_user, sys_menu, supplier, package, iot_card, stock, pool, suspend, dashboard, system, sync, permission, project, debug, h5, callback, open_api, package_period
+from app.api.v1 import auth, sys_user, sys_menu, supplier, supplier_pool, package, iot_card, stock, pool, suspend, dashboard, system, sync, permission, project, debug, h5, callback, open_api, package_period
 from app.config import settings
 from app.utils.logger import logger
 from app.utils.exceptions import BusinessException, business_exception_handler, global_exception_handler
@@ -54,6 +54,7 @@ app.include_router(sys_user.router, prefix="/api/v1/users", tags=["用户管理"
 app.include_router(sys_menu.router, prefix="/api/v1/menus", tags=["菜单管理"])
 app.include_router(permission.router, prefix="/api/v1/permissions", tags=["权限管理"])
 app.include_router(supplier.router, prefix="/api/v1/suppliers", tags=["供应商管理"])
+app.include_router(supplier_pool.router, prefix="/api/v1/supplier-traffic-pools", tags=["供应商流量池管理"])
 app.include_router(package.router, prefix="/api/v1/packages", tags=["套餐管理"])
 app.include_router(iot_card.router, prefix="/api/v1", tags=["卡片管理"])
 app.include_router(stock.router, prefix="/api/v1/stock", tags=["出入库管理"])

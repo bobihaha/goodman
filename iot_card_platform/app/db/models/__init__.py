@@ -9,6 +9,7 @@ from app.db.models.sys_log import (
     LoginType, NotifyType, LOGIN_TYPE_NAMES, NOTIFY_TYPE_NAMES
 )
 from app.db.models.supplier import SupplierModel, SupplierType, SupplierStatus
+from app.db.models.supplier_pool import SupplierTrafficPoolHistoryModel, SupplierTrafficPoolModel
 from app.db.models.package import (
     SupplierPackageModel, SalePackageModel,
     CarrierType, PeriodType, PackageStatus
@@ -39,6 +40,7 @@ __all__ = [
     "SysLoginLogModel", "SysOperationLogModel", "SysConfigModel", "SysNotifyTemplateModel",
     "LoginType", "NotifyType", "LOGIN_TYPE_NAMES", "NOTIFY_TYPE_NAMES",
     "SupplierModel", "SupplierType", "SupplierStatus",
+    "SupplierTrafficPoolHistoryModel", "SupplierTrafficPoolModel",
     "SupplierPackageModel", "SalePackageModel",
     "CarrierType", "PeriodType", "PackageStatus",
     "IotCardModel", "CardTransferModel", "CardH5RemarkLogModel",

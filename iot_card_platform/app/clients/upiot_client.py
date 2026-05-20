@@ -44,6 +44,18 @@ UPIOT_WORK_STATUS_MAP = {
     "3": "未知",
 }
 
+UPIOT_CARRIER_MAP = {
+    "中国移动": "cmcc",
+    "移动": "cmcc",
+    "CMCC": "cmcc",
+    "中国联通": "cucc",
+    "联通": "cucc",
+    "CUCC": "cucc",
+    "中国电信": "ctcc",
+    "电信": "ctcc",
+    "CTCC": "ctcc",
+}
+
 # 批量接口单次最大卡数
 BATCH_MAX_SIZE = 50
 
@@ -168,6 +180,12 @@ class UpiotSupplierClient(SupplierAPIClient):
         except (ValueError, TypeError):
             return 0.0
 
+    def _parse_int(self, value) -> int:
+        try:
+            return int(float(value)) if value not in (None, "") else 0
+        except (ValueError, TypeError):
+            return 0
+
     def _map_status(self, account_status: str) -> str:
         """将upiot卡状态码映射为系统状态"""
         return UPIOT_STATUS_MAP.get(str(account_status), "unknown")
@@ -218,6 +236,75 @@ class UpiotSupplierClient(SupplierAPIClient):
         except ValueError:
             return False
         return (expiry - valid).days >= 300
+
+    def _extract_pool_specification(self, row: Dict[str, Any]) -> Optional[int]:
+        for key in ("pool_specification", "flow_size", "data_traffic_amount", "package_flow"):
+            parsed = self._parse_int(row.get(key))
+            if parsed:
+                return parsed
+
+        candidates = [
+            str(row.get("name") or ""),
+            str(row.get("code") or ""),
+            str(row.get("bg_code") or ""),
+        ]
+        bgs = row.get("bgs") or []
+        if isinstance(bgs, str):
+            candidates.append(bgs)
+        elif isinstance(bgs, list):
+            candidates.extend(str(item) for item in bgs)
+
+        specs = set()
+        for candidate in candidates:
+            for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(GB|G|MB|M)(?![A-Z])", candidate, re.IGNORECASE):
+                value = float(match.group(1))
+                unit = match.group(2).upper()
+                specs.add(int(value * 1024) if unit in {"G", "GB"} else int(value))
+        return specs.pop() if len(specs) == 1 else None
+
+    def _merge_pool_metadata(
+        self,
+        usage_rows: List[Dict[str, Any]],
+        list_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        metadata_by_code = {
+            str(row.get("code") or row.get("bg_code") or ""): row
+            for row in list_rows
+            if row.get("code") or row.get("bg_code")
+        }
+        merged_rows = []
+        for usage_row in usage_rows:
+            code = str(usage_row.get("code") or usage_row.get("bg_code") or "")
+            metadata = metadata_by_code.get(code, {})
+            merged = {**metadata, **usage_row}
+            if metadata.get("bgs") and not usage_row.get("bgs"):
+                merged["bgs"] = metadata.get("bgs")
+            if metadata.get("name") and not usage_row.get("name"):
+                merged["name"] = metadata.get("name")
+            if metadata.get("carrier") and not usage_row.get("carrier"):
+                merged["carrier"] = metadata.get("carrier")
+            merged_rows.append(merged)
+        return merged_rows
+
+    def _normalize_pool_usage(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        total_flow = self._parse_float(row.get("data_plan") or row.get("pool_size"))
+        used_flow = self._parse_float(row.get("data_usage"))
+        usage_percent = round((used_flow / total_flow) * 100, 2) if total_flow else 0.0
+        return {
+            "supplier_pool_code": row.get("code") or row.get("bg_code"),
+            "supplier_pool_name": row.get("name"),
+            "carrier": UPIOT_CARRIER_MAP.get(str(row.get("carrier") or "").strip(), row.get("carrier")),
+            "pool_specification": self._extract_pool_specification(row),
+            "billing_group_codes": row.get("bgs") or ([row.get("bg_code")] if row.get("bg_code") else []),
+            "total_flow": total_flow,
+            "used_flow": used_flow,
+            "remaining_flow": max(0.0, total_flow - used_flow),
+            "usage_percent": usage_percent,
+            "total_card_count": self._parse_int(row.get("total_card_count")),
+            "active_card_count": self._parse_int(row.get("active_card_count")),
+            "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "raw_data": row,
+        }
 
     # ========== 核心接口实现 ==========
 
@@ -298,6 +385,31 @@ class UpiotSupplierClient(SupplierAPIClient):
                     "status": self._map_status(row.get("account_status", "99")),
                 })
         return results
+
+    async def get_traffic_pool_list(self) -> List[Dict[str, Any]]:
+        """
+        供应商侧流量池列表
+        upiot接口: GET /usage_pool/
+        """
+        data = await self._get("usage_pool")
+        rows = data.get("data", {}).get("rows", [])
+        return [self._normalize_pool_usage(row) for row in rows]
+
+    async def get_traffic_pool_usage(self) -> List[Dict[str, Any]]:
+        """
+        供应商侧流量池当前统计信息
+        upiot接口: GET /usage_pool/info/
+        """
+        usage_data = await self._get("usage_pool/info")
+        usage_rows = usage_data.get("data", {}).get("rows", [])
+        try:
+            list_data = await self._get("usage_pool")
+            list_rows = list_data.get("data", {}).get("rows", [])
+        except Exception as exc:
+            logger.warning("UPIOT流量池列表元数据补齐失败: %s", exc)
+            list_rows = []
+        rows = self._merge_pool_metadata(usage_rows, list_rows)
+        return [self._normalize_pool_usage(row) for row in rows]
 
     async def suspend_card(self, iccid: str, reason: Optional[str] = None, callback_no: Optional[str] = None) -> bool:
         """

@@ -34,6 +34,14 @@ SIMBOSS_DEVICE_STATUS_MAP = {
     "PURGED_NAME": "cancelled",
 }
 
+SIMBOSS_CARRIER_MAP = {
+    "cmcc": "cmcc",
+    "unicom": "cucc",
+    "cucc": "cucc",
+    "chinanet": "ctcc",
+    "ctcc": "ctcc",
+}
+
 SIMBOSS_BATCH_MAX_SIZE = 100
 
 
@@ -106,6 +114,12 @@ class SimbossSupplierClient(SupplierAPIClient):
         except (TypeError, ValueError):
             return 0.0
 
+    def _parse_int(self, value: Any) -> int:
+        try:
+            return int(float(value)) if value not in (None, "") else 0
+        except (TypeError, ValueError):
+            return 0
+
     def _parse_date(self, value: Any) -> str:
         if not value:
             return ""
@@ -113,6 +127,19 @@ class SimbossSupplierClient(SupplierAPIClient):
         if not text or text.lower() in {"false", "null", "none"}:
             return ""
         return text[:10]
+
+    def _format_pool_display_name(self, payload: Dict[str, Any], pool_specification: int) -> Optional[str]:
+        for key in ("poolName", "name", "packageName", "ratePlanName"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                return value
+        if pool_specification == -1:
+            return "全套餐"
+        if pool_specification <= 0:
+            return None
+        if pool_specification % 1024 == 0:
+            return f"网络{pool_specification // 1024}GB/月"
+        return f"网络{pool_specification}MB/月"
 
     def _map_status(self, payload: Dict[str, Any]) -> str:
         status = str(payload.get("status") or "").strip()
@@ -165,6 +192,36 @@ class SimbossSupplierClient(SupplierAPIClient):
             "status": self._map_status(payload),
         }
 
+    def _normalize_pool_usage(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        total_flow = self._parse_float(payload.get("totalVolume"))
+        used_flow = self._parse_float(payload.get("useVolume"))
+        remaining_flow = payload.get("leftVolume")
+        use_rate = self._parse_float(payload.get("useRate"))
+        pool_specification = self._parse_int(payload.get("poolSpecification"))
+        usage_percent = round(use_rate * 100, 2) if 0 < use_rate <= 1 else round(use_rate, 2)
+        if not usage_percent and total_flow:
+            usage_percent = round((used_flow / total_flow) * 100, 2)
+        return {
+            "supplier_pool_code": str(payload.get("id") or ""),
+            "supplier_pool_name": self._format_pool_display_name(payload, pool_specification),
+            "carrier": SIMBOSS_CARRIER_MAP.get(str(payload.get("carrier") or "").strip(), payload.get("carrier")),
+            "pool_specification": pool_specification,
+            "total_flow": total_flow,
+            "used_flow": used_flow,
+            "remaining_flow": self._parse_float(remaining_flow) if remaining_flow is not None else max(0.0, total_flow - used_flow),
+            "package_flow": self._parse_float(payload.get("packageVolume")),
+            "usage_percent": usage_percent,
+            "total_card_count": self._parse_int(payload.get("totalCount")),
+            "active_card_count": self._parse_int(payload.get("currentActivationCount")),
+            "suspended_card_count": self._parse_int(payload.get("currentDeactivationCount")),
+            "stock_card_count": self._parse_int(payload.get("currentInventoryCount")),
+            "testing_card_count": self._parse_int(payload.get("currentTestingCount")),
+            "cancelled_card_count": self._parse_int(payload.get("currentRetiredCount")),
+            "activation_ready_count": self._parse_int(payload.get("activationReadyCount")),
+            "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "raw_data": payload,
+        }
+
     async def get_card_usage(self, iccid: str) -> Dict[str, Any]:
         result = await self._post("device/detail", {"iccid": iccid})
         return self._normalize_usage(result.get("data") or {}, iccid)
@@ -192,6 +249,14 @@ class SimbossSupplierClient(SupplierAPIClient):
             for row in rows:
                 results.append(self._normalize_lifecycle(row, row.get("iccid") or ""))
         return results
+
+    async def get_traffic_pool_list(self) -> List[Dict[str, Any]]:
+        result = await self._post("card/pool/list", {})
+        rows = result.get("data") or []
+        return [self._normalize_pool_usage(row) for row in rows]
+
+    async def get_traffic_pool_usage(self) -> List[Dict[str, Any]]:
+        return await self.get_traffic_pool_list()
 
     async def suspend_card(self, iccid: str, reason: Optional[str] = None, callback_no: Optional[str] = None) -> bool:
         self.last_sor_result = None
