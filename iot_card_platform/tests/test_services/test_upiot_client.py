@@ -334,6 +334,9 @@ class TestGetCardUsage:
                 "iccid": "898600000000001",
                 "data_usage": "512.000",
                 "data_traffic_amount": "1024.000",
+                "account_status": "00",
+                "active_date": "2026-05-01",
+                "expiry_date": "2027-05-01",
             }
         }
         with patch.object(client, "_get", AsyncMock(return_value=api_data)):
@@ -344,6 +347,9 @@ class TestGetCardUsage:
         assert result["data_used_month"] == 512.0
         assert result["data_used_scope"] == "month"
         assert result["data_total"] == 1024.0
+        assert result["status"] == "activated"
+        assert result["activated_at"] == "2026-05-01"
+        assert result["expired_at"] == "2027-05-01"
         assert "sync_time" in result
 
     @pytest.mark.asyncio

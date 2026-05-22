@@ -320,6 +320,11 @@ class UpiotSupplierClient(SupplierAPIClient):
             "iccid": card.get("iccid", iccid),
             **usage_payload,
             "data_total": self._parse_float(card.get("data_traffic_amount")),
+            "test_expire_date": card.get("test_valid_date", ""),
+            "silent_expire_date": card.get("silent_valid_date", ""),
+            "activated_at": card.get("active_date", ""),
+            "expired_at": card.get("expiry_date", ""),
+            "status": self._map_status(card.get("account_status", "99")),
             "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 

@@ -123,6 +123,10 @@ async def test_get_card_usage_normalizes_fields(client):
             "dataUsage": 12.5,
             "usedDataVolume": 30.2,
             "totalDataVolume": 1024,
+            "status": "activation",
+            "deviceStatus": "ACTIVATED_NAME",
+            "startDate": "2026-05-02 12:00:00",
+            "ratePlanExpirationDate": "2027-05-31 23:59:59",
         },
     }
 
@@ -134,6 +138,9 @@ async def test_get_card_usage_normalizes_fields(client):
     assert result["data_used_month"] == 12.5
     assert result["data_used_scope"] == "cycle"
     assert result["data_total"] == 1024.0
+    assert result["status"] == "activated"
+    assert result["activated_at"] == "2026-05-02"
+    assert result["expired_at"] == "2027-05-31"
 
 
 @pytest.mark.asyncio

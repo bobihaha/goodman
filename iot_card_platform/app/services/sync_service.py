@@ -165,6 +165,11 @@ class SyncService:
         card: IotCardModel,
         lifecycle_status: str
     ) -> str:
+        valid_statuses = {status.value for status in CardStatus}
+        if not lifecycle_status or lifecycle_status not in valid_statuses:
+            current_status = card.status.value if hasattr(card.status, "value") else card.status
+            return current_status
+
         protected_suspend_types = {
             SuspendType.manual,
             SuspendType.expired,
@@ -197,6 +202,54 @@ class SyncService:
                         return CardStatus.activated.value
 
         return lifecycle_status
+
+    @staticmethod
+    def _apply_resolved_lifecycle_status(
+        card: IotCardModel,
+        lifecycle_status: str
+    ) -> None:
+        """Apply supplier lifecycle status while keeping suspend metadata consistent."""
+        card.status = CardStatus(lifecycle_status)
+
+        if card.status == CardStatus.suspended:
+            if (card.suspend_type or SuspendType.none) == SuspendType.none:
+                card.suspend_type = SuspendType.none
+                if card.suspend_at is None:
+                    card.suspend_at = datetime.now()
+                if not card.suspend_reason:
+                    card.suspend_reason = "供应商状态同步为停机"
+            return
+
+        if card.status in {
+            CardStatus.activated,
+            CardStatus.testing,
+            CardStatus.silent,
+            CardStatus.expired,
+            CardStatus.cancelled,
+            CardStatus.stock,
+        }:
+            card.suspend_type = SuspendType.none
+            card.suspend_at = None
+            card.suspend_reason = None
+
+    @staticmethod
+    def _extract_lifecycle_from_usage(
+        usage_data: dict,
+        iccid: str
+    ) -> dict:
+        keys = [
+            "test_expire_date",
+            "silent_expire_date",
+            "activated_at",
+            "expired_at",
+            "status",
+        ]
+        lifecycle_data = {"iccid": usage_data.get("iccid") or iccid}
+        for key in keys:
+            value = usage_data.get(key)
+            if value not in (None, ""):
+                lifecycle_data[key] = value
+        return lifecycle_data
 
     async def _record_usage_snapshot(self, db: AsyncSession, card, snapshot_type: str):
         """记录用量快照"""
@@ -539,7 +592,12 @@ class SyncService:
 
                             # 更新状态
                             if data.get("status"):
-                                card.status = CardStatus(data["status"])
+                                resolved_status = await self._resolve_lifecycle_status(
+                                    db,
+                                    card,
+                                    data["status"]
+                                )
+                                self._apply_resolved_lifecycle_status(card, resolved_status)
 
                             # 检查并更新卡片状态（根据沉默期等规则）
                             from app.services.card_status_service import check_and_update_card_status
@@ -704,6 +762,42 @@ class SyncService:
             )
             card.data_sync_at = datetime.now()
 
+            lifecycle_data = {}
+            lifecycle_error = None
+            try:
+                lifecycle_data = self._extract_lifecycle_from_usage(usage_data, iccid)
+                if not lifecycle_data.get("status"):
+                    lifecycle_data = await self._retry_api_call(client.get_card_lifecycle, iccid)
+                if lifecycle_data.get("test_expire_date"):
+                    card.test_expire_date = datetime.strptime(
+                        lifecycle_data["test_expire_date"], "%Y-%m-%d"
+                    ).date()
+                if lifecycle_data.get("silent_expire_date"):
+                    card.silent_expire_date = datetime.strptime(
+                        lifecycle_data["silent_expire_date"], "%Y-%m-%d"
+                    ).date()
+                if lifecycle_data.get("activated_at"):
+                    supplier_activated_at = self._parse_supplier_date(lifecycle_data["activated_at"])
+                    card.activated_at, _ = self._resolve_lifecycle_activated_at(
+                        card,
+                        supplier_activated_at
+                    )
+                if lifecycle_data.get("expired_at"):
+                    supplier_expired_at = self._parse_supplier_date(lifecycle_data["expired_at"])
+                    card.expired_at, _ = self._resolve_lifecycle_expired_at(
+                        card,
+                        supplier_expired_at
+                    )
+                if lifecycle_data.get("status"):
+                    resolved_status = await self._resolve_lifecycle_status(
+                        db,
+                        card,
+                        lifecycle_data["status"]
+                    )
+                    self._apply_resolved_lifecycle_status(card, resolved_status)
+            except Exception as exc:
+                lifecycle_error = str(exc)
+
             imei_info = {}
             try:
                 imei_info = await self._retry_api_call(client.get_card_imei_info, iccid)
@@ -807,6 +901,8 @@ class SyncService:
                 total_count=1, success_count=1, fail_count=0,
                 sync_data={
                     "usage": usage_data,
+                    "lifecycle": lifecycle_data,
+                    "lifecycle_error": lifecycle_error,
                     "imei": imei_info,
                     "month_usage_reset": month_usage_reset
                 }

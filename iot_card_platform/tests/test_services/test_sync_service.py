@@ -1,5 +1,8 @@
 from datetime import date
 
+import pytest
+
+from app.db.models.iot_card import CardStatus, SuspendType
 from app.services.sync_service import SyncService
 
 
@@ -28,6 +31,9 @@ class DummyCard:
         self.addon_flow = 0
         self.addon_flow_month = None
         self.activated_at = None
+        self.suspend_type = SuspendType.none
+        self.suspend_at = None
+        self.suspend_reason = None
 
 
 def test_resolve_lifecycle_expired_at_prefers_supplier_when_longer():
@@ -66,6 +72,62 @@ def test_resolve_lifecycle_activated_at_preserves_local_platform_date():
 
     assert resolved == date(2026, 5, 11)
     assert ignored is True
+
+
+def test_apply_resolved_lifecycle_status_clears_stale_supplier_suspend_state():
+    card = DummyCard()
+    card.status = CardStatus.suspended
+    card.suspend_type = SuspendType.none
+    card.suspend_at = date(2026, 4, 27)
+    card.suspend_reason = "供应商状态同步为停机"
+
+    SyncService._apply_resolved_lifecycle_status(card, CardStatus.activated.value)
+
+    assert card.status == CardStatus.activated
+    assert card.suspend_type == SuspendType.none
+    assert card.suspend_at is None
+    assert card.suspend_reason is None
+
+
+def test_extract_lifecycle_from_usage_reuses_supplier_snapshot():
+    usage_data = {
+        "iccid": "8986",
+        "data_used": 10,
+        "status": CardStatus.activated.value,
+        "activated_at": "2026-05-01",
+        "expired_at": "2027-05-01",
+    }
+
+    lifecycle = SyncService._extract_lifecycle_from_usage(usage_data, "fallback")
+
+    assert lifecycle == {
+        "iccid": "8986",
+        "activated_at": "2026-05-01",
+        "expired_at": "2027-05-01",
+        "status": CardStatus.activated.value,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_lifecycle_status_preserves_business_suspend():
+    service = SyncService()
+    card = DummyCard()
+    card.suspend_type = SuspendType.manual
+
+    resolved = await service._resolve_lifecycle_status(None, card, CardStatus.activated.value)
+
+    assert resolved == CardStatus.suspended.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_lifecycle_status_ignores_unknown_supplier_status():
+    service = SyncService()
+    card = DummyCard()
+    card.status = CardStatus.activated
+
+    resolved = await service._resolve_lifecycle_status(None, card, "unknown")
+
+    assert resolved == CardStatus.activated.value
 
 
 def test_resolve_usage_data_total_preserves_yearly_local_renew_total():

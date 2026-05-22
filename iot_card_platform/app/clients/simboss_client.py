@@ -177,6 +177,7 @@ class SimbossSupplierClient(SupplierAPIClient):
             "data_used_month": month_usage,
             "data_used_scope": "cycle",
             "data_total": self._parse_float(payload.get("totalDataVolume")),
+            **self._normalize_lifecycle(payload, iccid),
             "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
