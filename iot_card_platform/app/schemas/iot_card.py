@@ -40,7 +40,7 @@ class CardQuery(BaseModel):
     pool_id: Optional[int] = Field(None, description="流量池ID")
     is_pool_member: Optional[bool] = Field(None, description="是否加入流量池")
     page: int = Field(1, ge=1, description="页码")
-    page_size: int = Field(20, ge=1, le=100, description="每页数量")
+    page_size: int = Field(20, ge=1, le=200, description="每页数量")
 
 
 class CardSearchRequest(BaseModel):
