@@ -180,8 +180,8 @@
           :total="pagination.total"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSearch"
-          @current-change="handleSearch"
+          @size-change="handlePageSizeChange"
+          @current-change="fetchUserList"
         />
       </div>
     </el-card>
@@ -448,6 +448,11 @@ const handleSuperLogin = async (user: User) => {
  * 搜索
  */
 const handleSearch = () => {
+  pagination.page = 1
+  fetchUserList()
+}
+
+const handlePageSizeChange = () => {
   pagination.page = 1
   fetchUserList()
 }

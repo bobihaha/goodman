@@ -2,17 +2,17 @@
 仪表盘服务层
 """
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from app.db.models.iot_card import IotCardModel, CardStatus, CARD_STATUS_NAMES
-from app.db.models.package import CarrierType, CARRIER_NAMES
-from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
+from app.db.models.package import CARRIER_NAMES
+from app.db.models.sys_user import SysUserModel, UserLevel
 from app.db.models.package import SupplierPackageModel, SalePackageModel
-from app.db.models.pool import TrafficPoolModel
 from app.db.models.suspend import AlertLogModel, SuspendLogModel, AlertLevel, ALERT_LEVEL_NAMES
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
+from app.crud.pool_crud import pool_crud
 from app.schemas.dashboard import (
     CardStats, CardStatsItem, UserStats, PackageStats, PoolStats, AlertStats,
     DashboardOverview, UsageTrend, UsageTrendItem
@@ -22,38 +22,6 @@ from app.utils.const import cache_result
 
 class DashboardService:
     """仪表盘服务"""
-
-    @staticmethod
-    def _build_pool_scope_conditions(
-        user_id: Optional[int] = None,
-        user_ids: Optional[List[int]] = None
-    ) -> List[Any]:
-        """构建流量池可见范围条件。
-
-        和流量池列表保持一致：
-        1. 自己名下的流量池
-        2. 自己名下卡片所在的共享流量池
-        """
-        base_condition = [TrafficPoolModel.is_deleted == 0]
-        if user_ids is not None:
-            visible_pool_ids = (
-                select(IotCardModel.pool_id)
-                .where(
-                    IotCardModel.user_id.in_(user_ids),
-                    IotCardModel.pool_id.is_not(None),
-                    IotCardModel.is_deleted == 0
-                )
-                .distinct()
-            )
-            base_condition.append(
-                or_(
-                    TrafficPoolModel.user_id.in_(user_ids),
-                    TrafficPoolModel.id.in_(visible_pool_ids)
-                )
-            )
-        elif user_id:
-            base_condition.append(TrafficPoolModel.user_id == user_id)
-        return base_condition
 
     @staticmethod
     async def get_accessible_user_ids(
@@ -266,20 +234,10 @@ class DashboardService:
         user_ids: Optional[List[int]] = None
     ) -> PoolStats:
         """获取流量池统计"""
-        base_condition = DashboardService._build_pool_scope_conditions(user_id, user_ids)
-
-        result = await db.execute(
-            select(
-                func.count(TrafficPoolModel.id).label('count'),
-                func.sum(TrafficPoolModel.data_total).label('total'),
-                func.sum(TrafficPoolModel.data_used).label('used')
-            ).where(*base_condition)
-        )
-        row = result.first()
-        
-        total_pools = row[0] or 0
-        total_data = row[1] or 0
-        used_data = row[2] or 0
+        stats = await pool_crud.get_stats(db, user_id=user_id, user_ids=user_ids)
+        total_pools = stats["total"]
+        total_data = stats["total_flow"]
+        used_data = stats["used_flow"]
         usage_percent = round((used_data / total_data * 100), 2) if total_data > 0 else 0
 
         return PoolStats(
@@ -488,15 +446,13 @@ class DashboardService:
         user_ids: Optional[List[int]] = None
     ) -> List[Dict[str, Any]]:
         """获取流量池用量百分比"""
-        base_condition = DashboardService._build_pool_scope_conditions(user_id, user_ids)
-
-        result = await db.execute(
-            select(TrafficPoolModel)
-            .where(*base_condition)
-            .order_by(TrafficPoolModel.id.desc())
-            .limit(10)
+        pools, _ = await pool_crud.get_list(
+            db=db,
+            user_id=user_id,
+            user_ids=user_ids,
+            page=1,
+            page_size=10
         )
-        pools = result.scalars().all()
         
         return [
             {

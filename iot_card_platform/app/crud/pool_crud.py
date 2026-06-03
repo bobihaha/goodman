@@ -10,9 +10,36 @@ from app.db.models.iot_card import IotCardModel, CardStatus
 from app.db.models.suspend import AlertLevel, AlertTargetType
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 
+AUTO_POOL_REMARK = "系统自动创建的流量池"
+
+
+def valid_pool_member_conditions(pool_id_expr):
+    """有效池成员：已归属用户、仍标记为池成员、未删除。"""
+    return (
+        IotCardModel.pool_id == pool_id_expr,
+        IotCardModel.is_pool_member == 1,
+        IotCardModel.user_id.is_not(None),
+        IotCardModel.is_deleted == 0,
+    )
+
 
 class TrafficPoolCRUD:
     """流量池 CRUD"""
+
+    def _exclude_empty_auto_pools(self, query):
+        """隐藏没有有效成员的系统自动池，避免历史空池继续展示。"""
+        member_exists = (
+            select(IotCardModel.id)
+            .where(*valid_pool_member_conditions(TrafficPoolModel.id))
+            .exists()
+        )
+        return query.where(
+            or_(
+                TrafficPoolModel.remark.is_(None),
+                TrafficPoolModel.remark != AUTO_POOL_REMARK,
+                member_exists,
+            )
+        )
 
     def _apply_user_scope(self, query, user_ids: Optional[List[int]] = None):
         """按用户可见范围过滤流量池。
@@ -29,6 +56,7 @@ class TrafficPoolCRUD:
             .where(
                 IotCardModel.user_id.in_(user_ids),
                 IotCardModel.pool_id.is_not(None),
+                IotCardModel.is_pool_member == 1,
                 IotCardModel.is_deleted == 0
             )
             .distinct()
@@ -112,6 +140,8 @@ class TrafficPoolCRUD:
         """获取流量池列表"""
         query = select(TrafficPoolModel).where(TrafficPoolModel.is_deleted == 0)
         count_query = select(func.count(TrafficPoolModel.id)).where(TrafficPoolModel.is_deleted == 0)
+        query = self._exclude_empty_auto_pools(query)
+        count_query = self._exclude_empty_auto_pools(count_query)
 
         if user_ids is not None:
             query = self._apply_user_scope(query, user_ids)
@@ -182,8 +212,7 @@ class TrafficPoolCRUD:
             func.coalesce(func.sum(IotCardModel.data_total), 0).label("data_total"),
             func.coalesce(func.sum(IotCardModel.data_used), 0).label("data_used")
         ).where(
-            IotCardModel.pool_id == pool_id,
-            IotCardModel.is_deleted == 0
+            *valid_pool_member_conditions(pool_id)
         )
         result = await db.execute(query)
         row = result.one()
@@ -378,6 +407,7 @@ class TrafficPoolCRUD:
     ) -> dict:
         """获取流量池总体统计"""
         query = select(TrafficPoolModel).where(TrafficPoolModel.is_deleted == 0)
+        query = self._exclude_empty_auto_pools(query)
 
         if user_ids is not None:
             query = self._apply_user_scope(query, user_ids)
@@ -461,7 +491,7 @@ class TrafficPoolCRUD:
             alert_threshold_2=90,
             alert_threshold_3=95,
             created_by=created_by,
-            remark="系统自动创建的流量池"
+            remark=AUTO_POOL_REMARK
         )
 
         return pool
@@ -628,12 +658,10 @@ class PoolCardCRUD:
     ) -> Tuple[List[IotCardModel], int]:
         """获取流量池内卡片列表"""
         query = select(IotCardModel).where(
-            IotCardModel.pool_id == pool_id,
-            IotCardModel.is_deleted == 0
+            *valid_pool_member_conditions(pool_id)
         )
         count_query = select(func.count(IotCardModel.id)).where(
-            IotCardModel.pool_id == pool_id,
-            IotCardModel.is_deleted == 0
+            *valid_pool_member_conditions(pool_id)
         )
         if user_ids is not None:
             query = query.where(IotCardModel.user_id.in_(user_ids))

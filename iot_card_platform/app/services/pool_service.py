@@ -168,6 +168,8 @@ class PoolService:
                 func.count(IotCardModel.id).label('count')
             ).where(
                 IotCardModel.pool_id.in_(pool_ids),
+                IotCardModel.is_pool_member == 1,
+                IotCardModel.user_id.is_not(None),
                 IotCardModel.is_deleted == 0
             ).group_by(IotCardModel.pool_id, IotCardModel.status)
 
@@ -229,6 +231,8 @@ class PoolService:
         if not pool_dict.get("last_sync_at"):
             last_sync_stmt = select(func.max(IotCardModel.data_sync_at)).where(
                 IotCardModel.pool_id == pool.id,
+                IotCardModel.is_pool_member == 1,
+                IotCardModel.user_id.is_not(None),
                 IotCardModel.is_deleted == 0
             )
             last_sync_result = await db.execute(last_sync_stmt)

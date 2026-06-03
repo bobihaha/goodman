@@ -1,10 +1,11 @@
 """
 出入库管理 CRUD 操作
 """
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Set
 from datetime import datetime
 import json
 import uuid
+import logging
 from sqlalchemy import select, func, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.stock import (
@@ -13,6 +14,8 @@ from app.db.models.stock import (
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.package import SupplierPackageModel
+
+logger = logging.getLogger(__name__)
 
 
 def generate_batch_no() -> str:
@@ -583,10 +586,10 @@ class StockOutCRUD:
                         .where(IotCardModel.id.in_(out_card_ids))
                         .values(pool_id=pool.id, is_pool_member=1)
                     )
-                    # 更新流量池卡片数
-                    pool.card_count = (pool.card_count or 0) + len(out_card_ids)
                     await db.commit()
+                    await pool_crud.update_stats(db, pool.id)
             except Exception as e:
+                await db.rollback()
                 import traceback
                 print(f"出库预创建流量池失败: {str(e)}")
                 traceback.print_exc()
@@ -1244,6 +1247,22 @@ class StockRecycleCRUD:
 
         await db.execute(insert_sql, rows)
 
+    async def _refresh_recycled_pool_stats(self, db: AsyncSession, pool_ids: Set[int]) -> None:
+        """回收后刷新旧流量池统计，避免空自动池继续显示旧卡数。"""
+        if not pool_ids:
+            return
+
+        from app.crud.pool_crud import pool_crud
+
+        for pool_id in pool_ids:
+            if not pool_id:
+                continue
+            try:
+                await pool_crud.update_stats(db, pool_id)
+            except Exception as exc:
+                await db.rollback()
+                logger.warning("回收后刷新流量池统计失败 pool_id=%s error=%s", pool_id, exc)
+
     async def recycle_cards(
         self,
         db: AsyncSession,
@@ -1259,6 +1278,7 @@ class StockRecycleCRUD:
             success_count = 0
             failed_count = 0
             recycled_cards = []
+            affected_pool_ids: Set[int] = set()
 
             for card_id in card_ids:
                 card_query = select(IotCardModel).where(
@@ -1273,9 +1293,14 @@ class StockRecycleCRUD:
                     original_user_id = card.user_id
                     original_status = card.status.value if hasattr(card.status, 'value') else card.status
                     original_sale_package_id = card.sale_package_id
+                    original_pool_id = card.pool_id
+                    if original_pool_id:
+                        affected_pool_ids.add(original_pool_id)
 
                     card.user_id = None
                     card.sale_package_id = None
+                    card.pool_id = None
+                    card.is_pool_member = 0
                     card.status = CardStatus.stock
                     card.stock_out_at = None
                     card.stock_out_date = None
@@ -1313,6 +1338,7 @@ class StockRecycleCRUD:
             )
 
             await db.commit()
+            await self._refresh_recycled_pool_stats(db, affected_pool_ids)
 
             return {
                 "success": success_count,
@@ -1339,6 +1365,7 @@ class StockRecycleCRUD:
             failed_count = 0
             not_found = []
             recycled_cards = []
+            affected_pool_ids: Set[int] = set()
 
             for iccid in iccids:
                 iccid = iccid.strip()
@@ -1356,9 +1383,14 @@ class StockRecycleCRUD:
                     original_user_id = card.user_id
                     original_status = card.status.value if hasattr(card.status, 'value') else card.status
                     original_sale_package_id = card.sale_package_id
+                    original_pool_id = card.pool_id
+                    if original_pool_id:
+                        affected_pool_ids.add(original_pool_id)
 
                     card.user_id = None
                     card.sale_package_id = None
+                    card.pool_id = None
+                    card.is_pool_member = 0
                     card.status = CardStatus.stock
                     card.stock_out_at = None
                     card.stock_out_date = None
@@ -1397,6 +1429,7 @@ class StockRecycleCRUD:
             )
 
             await db.commit()
+            await self._refresh_recycled_pool_stats(db, affected_pool_ids)
 
             return {
                 "success": success_count,
