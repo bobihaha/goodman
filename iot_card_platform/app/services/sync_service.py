@@ -15,6 +15,7 @@ from app.db.models.suspend import SupplierSuspendOperationModel, SuspendActionTy
 from app.db.models.supplier import SupplierModel
 from app.clients.supplier_api import get_supplier_client
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
+from app.utils.date_utils import calculate_expiry_date
 from app.utils.exceptions import BusinessException
 from app.config import settings
 
@@ -31,6 +32,47 @@ class SyncService:
         if not value:
             return None
         return datetime.strptime(value, "%Y-%m-%d").date()
+
+    @staticmethod
+    def _enum_value(value) -> Optional[str]:
+        if not value:
+            return None
+        return value.value if hasattr(value, "value") else value
+
+    @staticmethod
+    def _resolve_sales_period_expired_at(card: IotCardModel) -> Optional[date]:
+        """按本地销售出库周期计算到期日下限。"""
+        if not getattr(card, "sale_package_id", None) or not card.activated_at:
+            return None
+
+        period_type = SyncService._enum_value(card.period_type)
+        period_count = int(card.period_count or 0)
+        if not period_type or period_count <= 0:
+            return None
+
+        period_months = period_count * 12 if period_type == "yearly" else period_count
+        return calculate_expiry_date(
+            start_date=card.activated_at,
+            period_type=period_type,
+            period_months=period_months,
+            carrier=SyncService._enum_value(card.carrier),
+        )
+
+    @staticmethod
+    def _protect_sales_period_expired_at(card: IotCardModel) -> bool:
+        """
+        生命周期同步后保护本地销售周期，避免供应商底层套餐日期压短出库周期。
+
+        Returns:
+            是否按本地销售周期抬高了到期日
+        """
+        sales_expired_at = SyncService._resolve_sales_period_expired_at(card)
+        if not sales_expired_at:
+            return False
+        if not card.expired_at or card.expired_at < sales_expired_at:
+            card.expired_at = sales_expired_at
+            return True
+        return False
 
     @staticmethod
     def _resolve_lifecycle_expired_at(
@@ -602,6 +644,7 @@ class SyncService:
                             # 检查并更新卡片状态（根据沉默期等规则）
                             from app.services.card_status_service import check_and_update_card_status
                             await check_and_update_card_status(db, card)
+                            protected_sales_period_expiry = self._protect_sales_period_expired_at(card)
 
                             # 如果卡片从非激活状态变为激活状态，且是流量池卡，自动加入流量池
                             from app.db.models.iot_card import CardType
@@ -617,7 +660,8 @@ class SyncService:
                                 "iccid": card.iccid,
                                 "status": "success",
                                 "ignored_supplier_activated_at": ignored_supplier_activated_at,
-                                "preserved_local_expiry": preserved_local_expiry if data.get("expired_at") else False
+                                "preserved_local_expiry": preserved_local_expiry if data.get("expired_at") else False,
+                                "protected_sales_period_expiry": protected_sales_period_expiry
                             })
                         else:
                             fail_count += 1
@@ -828,6 +872,7 @@ class SyncService:
             # 先基于本地规则修正基础状态，再处理机卡分离锁卡，避免后续状态机把停机覆盖掉。
             from app.services.card_status_service import check_and_update_card_status
             await check_and_update_card_status(db, card)
+            protected_sales_period_expiry = self._protect_sales_period_expired_at(card)
 
             if (
                 imei_lock_reason
@@ -904,7 +949,8 @@ class SyncService:
                     "lifecycle": lifecycle_data,
                     "lifecycle_error": lifecycle_error,
                     "imei": imei_info,
-                    "month_usage_reset": month_usage_reset
+                    "month_usage_reset": month_usage_reset,
+                    "protected_sales_period_expiry": protected_sales_period_expiry
                 }
             )
 

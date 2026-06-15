@@ -13,10 +13,12 @@
 
       <el-form-item label="续费月数">
         <el-select v-model="renewMonths" style="width: 220px">
-          <el-option label="1个月" :value="1" />
-          <el-option label="3个月" :value="3" />
-          <el-option label="6个月" :value="6" />
-          <el-option label="12个月" :value="12" />
+          <el-option
+            v-for="option in RENEW_PERIOD_OPTIONS"
+            :key="option.value"
+            :label="option.label"
+            :value="option.value"
+          />
         </el-select>
       </el-form-item>
 
@@ -44,6 +46,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { cardApi } from '@/api'
 import type { Card } from '@/types/card'
 import { useAuthStore } from '@/stores/modules/auth'
+import { RENEW_PERIOD_OPTIONS } from '@/constants/card'
 import { formatMoney } from '@/utils/formatter'
 
 interface Props {

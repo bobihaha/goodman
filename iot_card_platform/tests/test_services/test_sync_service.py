@@ -19,11 +19,16 @@ class DummyCard:
         data_total=0,
         flow_size=0,
         data_used=0,
-        data_used_month=0
+        data_used_month=0,
+        period_count=1,
+        carrier="cmcc",
+        sale_package_id=1
     ):
         self.expired_at = expired_at
         self.status = DummyStatus("activated")
         self.period_type = DummyStatus(period_type)
+        self.period_count = period_count
+        self.carrier = DummyStatus(carrier)
         self.data_total = data_total
         self.flow_size = flow_size
         self.data_used = data_used
@@ -31,6 +36,7 @@ class DummyCard:
         self.addon_flow = 0
         self.addon_flow_month = None
         self.activated_at = None
+        self.sale_package_id = sale_package_id
         self.suspend_type = SuspendType.none
         self.suspend_at = None
         self.suspend_reason = None
@@ -52,6 +58,54 @@ def test_resolve_lifecycle_expired_at_preserves_local_when_supplier_is_shorter()
 
     assert resolved == date(2028, 1, 31)
     assert preserved is True
+
+
+def test_protect_sales_period_expired_at_raises_supplier_short_cycle():
+    card = DummyCard(
+        expired_at=date(2026, 6, 30),
+        period_type="monthly",
+        period_count=3,
+        carrier="ctcc",
+        sale_package_id=29,
+    )
+    card.activated_at = date(2026, 6, 15)
+
+    protected = SyncService._protect_sales_period_expired_at(card)
+
+    assert protected is True
+    assert card.expired_at == date(2026, 8, 31)
+
+
+def test_protect_sales_period_expired_at_keeps_supplier_longer_cycle():
+    card = DummyCard(
+        expired_at=date(2026, 9, 30),
+        period_type="monthly",
+        period_count=3,
+        carrier="ctcc",
+        sale_package_id=29,
+    )
+    card.activated_at = date(2026, 6, 15)
+
+    protected = SyncService._protect_sales_period_expired_at(card)
+
+    assert protected is False
+    assert card.expired_at == date(2026, 9, 30)
+
+
+def test_protect_sales_period_expired_at_skips_cards_without_sale_package():
+    card = DummyCard(
+        expired_at=date(2026, 6, 30),
+        period_type="monthly",
+        period_count=3,
+        carrier="ctcc",
+        sale_package_id=None,
+    )
+    card.activated_at = date(2026, 6, 15)
+
+    protected = SyncService._protect_sales_period_expired_at(card)
+
+    assert protected is False
+    assert card.expired_at == date(2026, 6, 30)
 
 
 def test_resolve_lifecycle_activated_at_ignores_supplier_test_activation_date():

@@ -154,7 +154,7 @@ export interface CardRemarkRequest {
 // 批量续费请求
 export interface CardBatchRenewRequest {
   card_ids: number[]
-  renew_period: 1 | 3 | 6 | 12
+  renew_period: 1 | 3 | 6 | 12 | 24 | 36 | 48 | 60
 }
 
 // 批量停机请求

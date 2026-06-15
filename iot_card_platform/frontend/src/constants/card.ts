@@ -85,7 +85,11 @@ export const RENEW_PERIOD_OPTIONS = [
   { label: '1个月', value: 1 },
   { label: '3个月', value: 3 },
   { label: '6个月', value: 6 },
-  { label: '12个月', value: 12 }
+  { label: '12个月', value: 12 },
+  { label: '24个月', value: 24 },
+  { label: '36个月', value: 36 },
+  { label: '48个月', value: 48 },
+  { label: '60个月', value: 60 }
 ]
 
 // 批量查询最大数量
@@ -93,7 +97,6 @@ export const BATCH_QUERY_MAX_COUNT = 10000
 
 // 流量单位转换阈值（MB）
 export const FLOW_UNIT_THRESHOLD = 1024
-
 
 
 

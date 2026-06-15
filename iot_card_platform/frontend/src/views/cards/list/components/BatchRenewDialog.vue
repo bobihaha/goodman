@@ -62,10 +62,12 @@
               placeholder="请选择续费月数"
               style="width: 200px"
             >
-              <el-option label="1个月" :value="1" />
-              <el-option label="3个月" :value="3" />
-              <el-option label="6个月" :value="6" />
-              <el-option label="12个月" :value="12" />
+              <el-option
+                v-for="option in RENEW_PERIOD_OPTIONS"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
           </el-form-item>
         </el-form>
@@ -172,6 +174,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import { cardApi } from '@/api'
+import { RENEW_PERIOD_OPTIONS } from '@/constants/card'
 
 const BATCH_MAX_COUNT = 10000
 

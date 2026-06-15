@@ -182,7 +182,7 @@ sequenceDiagram
     participant LOG as "sys_operation_logs"
     participant RPT as "续费记录页"
 
-    U->>FE: 选择续费月数(1/3/6/12)
+    U->>FE: 选择续费月数(1/3/6/12/24/36/48/60)
     FE->>API: POST /api/v1/cards/{id}/renew 或 /batch/renew-by-iccids
     API->>SVC: purchase_card_renew(...) / batch_renew_by_iccids(...)
     SVC->>DB: 查询卡片当前 expired_at / sale_package_id / period_type
