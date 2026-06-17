@@ -300,15 +300,41 @@
         style="margin-bottom: 20px"
       >
         <div>1. 每行输入一个ICCID，或使用逗号分隔</div>
-        <div>2. 系统会从当前库存中查询可出库卡片并加入已选列表</div>
-        <div>3. 单次最多查询10000个ICCID</div>
+        <div>2. 也可以输入起始和结束ICCID，系统自动生成连续卡号</div>
+        <div>3. 系统会从当前库存中查询可出库卡片并加入已选列表</div>
+        <div>4. 单次最多查询10000个ICCID</div>
       </el-alert>
+
+      <div class="range-query">
+        <div class="range-title">卡号范围</div>
+        <el-form :inline="true" class="range-form">
+          <el-form-item label="起始ICCID">
+            <el-input
+              v-model="rangeStartIccid"
+              placeholder="如 898607B91025D0524900"
+              clearable
+              style="width: 230px"
+            />
+          </el-form-item>
+          <el-form-item label="结束ICCID">
+            <el-input
+              v-model="rangeEndIccid"
+              placeholder="如 898607B91025D0524914"
+              clearable
+              style="width: 230px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button @click="generateRangeIccids">生成范围</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
 
       <el-input
         v-model="batchQueryText"
         type="textarea"
         :rows="8"
-        placeholder="请输入ICCID，每行一个或使用逗号分隔"
+        placeholder="请输入ICCID，每行一个或使用逗号分隔；也可先用上方范围生成"
       />
 
       <div style="margin-top: 10px; color: #909399; font-size: 12px">
@@ -449,6 +475,8 @@ const showBatchQueryDialog = ref(false)
 const batchQueryText = ref('')
 const batchQuerying = ref(false)
 const batchQueryNotFound = ref<string[]>([])
+const rangeStartIccid = ref('')
+const rangeEndIccid = ref('')
 
 // 供应商、用户、套餐列表
 const suppliers = ref<any[]>([])
@@ -608,6 +636,63 @@ const handleSelectionChange = (selection: any[]) => {
   selectedCards.value = selection
 }
 
+const splitIccidRangePart = (iccid: string) => {
+  const value = iccid.trim()
+  const match = value.match(/^(.*?)(\d+)$/)
+  if (!match) return null
+  const prefix = match[1] ?? ''
+  const numberText = match[2]
+  if (!numberText) return null
+
+  return {
+    prefix,
+    numberText,
+    numberValue: BigInt(numberText)
+  }
+}
+
+const buildRangeIccids = (startIccid: string, endIccid: string) => {
+  const start = splitIccidRangePart(startIccid)
+  const end = splitIccidRangePart(endIccid)
+  if (!start || !end) {
+    throw new Error('起始和结束ICCID必须以数字结尾')
+  }
+  if (start.prefix !== end.prefix) {
+    throw new Error('起始和结束ICCID前缀必须一致')
+  }
+  if (end.numberValue < start.numberValue) {
+    throw new Error('结束ICCID不能小于起始ICCID')
+  }
+
+  const count = end.numberValue - start.numberValue + 1n
+  if (count > 10000n) {
+    throw new Error('单次最多生成10000个ICCID')
+  }
+
+  const width = Math.max(start.numberText.length, end.numberText.length)
+  const iccids: string[] = []
+  for (let current = start.numberValue; current <= end.numberValue; current++) {
+    iccids.push(`${start.prefix}${current.toString().padStart(width, '0')}`)
+  }
+  return iccids
+}
+
+const generateRangeIccids = () => {
+  if (!rangeStartIccid.value.trim() || !rangeEndIccid.value.trim()) {
+    ElMessage.warning('请输入起始ICCID和结束ICCID')
+    return
+  }
+
+  try {
+    const iccids = buildRangeIccids(rangeStartIccid.value, rangeEndIccid.value)
+    batchQueryText.value = iccids.join('\n')
+    batchQueryNotFound.value = []
+    ElMessage.success(`已生成 ${iccids.length} 个连续ICCID`)
+  } catch (error: any) {
+    ElMessage.warning(error.message || '生成卡号范围失败')
+  }
+}
+
 const handleBatchSelectCards = async () => {
   if (!batchQueryText.value.trim()) {
     ElMessage.warning('请输入要出库的ICCID')
@@ -647,6 +732,8 @@ const handleBatchSelectCards = async () => {
 
     showBatchQueryDialog.value = false
     batchQueryText.value = ''
+    rangeStartIccid.value = ''
+    rangeEndIccid.value = ''
 
     if (batchQueryNotFound.value.length > 0) {
       ElMessage.warning(`已加入 ${found.length} 张卡片，未找到 ${batchQueryNotFound.value.length} 个ICCID`)
@@ -930,6 +1017,24 @@ onMounted(() => {
         color: #e6a23c;
       }
     }
+  }
+}
+
+.range-query {
+  padding: 12px 12px 0;
+  margin-bottom: 16px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background: #fafafa;
+
+  .range-title {
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: #303133;
+  }
+
+  .range-form {
+    margin-bottom: 0;
   }
 }
 </style>
