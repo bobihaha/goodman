@@ -142,6 +142,20 @@ export interface PoolRechargeLog {
   created_by_name?: string
 }
 
+// 流量池本地停卡状态修复结果
+export interface PoolRepairSuspendStatusResult {
+  checked: number
+  repaired: number
+  skipped: number
+  repaired_iccids: string[]
+  skipped_list: Array<{
+    iccid: string
+    reason: string
+  }>
+  usage_percent: number
+  stop_threshold: number
+}
+
 // 流量池详情（包含卡片列表）
 export interface PoolDetail extends Pool {
   cards?: Array<{

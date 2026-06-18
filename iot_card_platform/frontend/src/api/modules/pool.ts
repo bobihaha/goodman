@@ -14,7 +14,8 @@ import type {
   PoolPackage,
   PoolRechargeRequest,
   PoolRechargeLog,
-  PoolDetail
+  PoolDetail,
+  PoolRepairSuspendStatusResult
 } from '@/types/pool'
 import type { PageResponse } from '@/types/common'
 
@@ -115,6 +116,13 @@ export function rechargePool(data: PoolRechargeRequest) {
     added_flow_mb: data.added_flow_mb,
     remark: data.remark
   })
+}
+
+/**
+ * 修复流量池本地停卡状态
+ */
+export function repairPoolSuspendStatus(poolId: number) {
+  return request.post<PoolRepairSuspendStatusResult>(`/pools/${poolId}/repair-suspend-status`)
 }
 
 export function quotePoolTopup(poolId: number, quantity: number) {

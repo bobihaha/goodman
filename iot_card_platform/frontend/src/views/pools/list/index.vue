@@ -167,6 +167,16 @@
         <div class="pool-actions" @click.stop>
           <el-button size="small" @click="handleEdit(pool)">告警设置</el-button>
           <el-button size="small" type="warning" plain @click="handleRecharge(pool)">后台补量</el-button>
+          <el-button
+            size="small"
+            type="danger"
+            plain
+            :disabled="!(pool.card_stats?.suspended)"
+            :loading="repairingPoolId === pool.id"
+            @click="handleRepairStatus(pool)"
+          >
+            状态修复
+          </el-button>
         </div>
       </el-card>
 
@@ -217,7 +227,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, ArrowRight } from '@element-plus/icons-vue'
-import { getPoolList, getPoolStats } from '@/api/modules/pool'
+import { getPoolList, getPoolStats, repairPoolSuspendStatus } from '@/api/modules/pool'
 import { formatFlowValue } from '@/utils/formatter'
 import { CARRIER_OPTIONS } from '@/constants/card'
 import { POOL_STATUS_MAP, POOL_STATUS_OPTIONS } from '@/constants/pool'
@@ -252,6 +262,7 @@ const currentPool = ref<Pool | null>(null)
 
 // 统计数据
 const poolStats = ref<PoolStats | null>(null)
+const repairingPoolId = ref<number | null>(null)
 
 /**
  * 获取流量池统计
@@ -341,6 +352,31 @@ const handleViewDetail = (pool: Pool) => {
 const handleRecharge = (pool: Pool) => {
   currentPool.value = pool
   rechargeDialogVisible.value = true
+}
+
+/**
+ * 修复本地停卡状态
+ */
+const handleRepairStatus = async (pool: Pool) => {
+  try {
+    repairingPoolId.value = pool.id
+    const result: any = await repairPoolSuspendStatus(pool.id)
+    const message = `已检查 ${result.checked} 张，修复 ${result.repaired} 张，跳过 ${result.skipped} 张`
+    if (result.repaired > 0) {
+      ElMessage.success(message)
+    } else {
+      ElMessage.warning(message)
+    }
+    await fetchPoolList()
+    await fetchPoolStats()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('流量池状态修复失败:', error)
+      ElMessage.error(error?.message || '状态修复失败')
+    }
+  } finally {
+    repairingPoolId.value = null
+  }
 }
 
 /**

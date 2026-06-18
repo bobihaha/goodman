@@ -13,6 +13,7 @@
     <!-- 操作按钮 -->
     <div class="action-buttons">
       <el-button type="primary" @click="handleRecharge">后台补量</el-button>
+      <el-button type="danger" plain :loading="repairingStatus" @click="handleRepairStatus">状态修复</el-button>
       <el-button type="success" @click="handleAutoPool">自动续池</el-button>
       <el-button @click="handleEdit">告警设置</el-button>
     </div>
@@ -179,7 +180,7 @@
     <el-card class="table-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>补量日志</span>
+          <span>池子操作日志</span>
           <el-button type="text" size="small" @click="fetchFlowLogs">
             刷新
           </el-button>
@@ -229,7 +230,8 @@ import * as echarts from 'echarts'
 import type { ECharts } from 'echarts'
 import {
   getPoolDetail,
-  getPoolCards
+  getPoolCards,
+  repairPoolSuspendStatus
 } from '@/api/modules/pool'
 import { cardApi } from '@/api'
 import { systemApi } from '@/api/modules/system'
@@ -254,9 +256,11 @@ const poolDetail = ref<PoolDetail>({} as PoolDetail)
 const cardList = ref<any[]>([])
 const cardsLoading = ref(false)
 const selectedCardIds = ref<number[]>([])
+const selectedCards = ref<any[]>([])
 const iccidKeyword = ref('')
 const flowLogLoading = ref(false)
 const flowLogs = ref<OperationLog[]>([])
+const repairingStatus = ref(false)
 
 // 分页
 const pagination = reactive({
@@ -326,7 +330,6 @@ const fetchFlowLogs = async () => {
   try {
     const res: any = await systemApi.getOperationLogs({
       module: 'pools',
-      action: 'add_flow',
       target_type: 'pool',
       target_id: poolId,
       page: 1,
@@ -504,6 +507,30 @@ const handleRecharge = () => {
 }
 
 /**
+ * 修复本地停卡状态
+ */
+const handleRepairStatus = async () => {
+  try {
+    repairingStatus.value = true
+    const result: any = await repairPoolSuspendStatus(poolId)
+    const message = `已检查 ${result.checked} 张，修复 ${result.repaired} 张，跳过 ${result.skipped} 张`
+    if (result.repaired > 0) {
+      ElMessage.success(message)
+    } else {
+      ElMessage.warning(message)
+    }
+    handleRefresh()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('流量池状态修复失败:', error)
+      ElMessage.error(error?.message || '状态修复失败')
+    }
+  } finally {
+    repairingStatus.value = false
+  }
+}
+
+/**
  * 自动续池
  */
 const handleAutoPool = () => {
@@ -522,6 +549,7 @@ const handleSearchIccid = () => {
  * 选择变化
  */
 const handleSelectionChange = (selection: any[]) => {
+  selectedCards.value = selection
   selectedCardIds.value = selection.map(c => c.id)
 }
 
@@ -597,21 +625,39 @@ const handleRowForceResume = async (row: any) => {
  */
 const handleBatchCloseNetwork = async () => {
   try {
+    const iccids = selectedCards.value.map(card => card.iccid).filter(Boolean)
+    if (iccids.length === 0) {
+      ElMessage.warning('请选择卡片')
+      return
+    }
+
     await ElMessageBox.confirm(
-      `确定要关闭 ${selectedCardIds.value.length} 张卡片的网络吗？`,
-      '确认操作',
+      `确定要关闭 ${iccids.length} 张卡片的网络吗？`,
+      '关闭网络确认',
       {
-        confirmButtonText: '确定',
+        confirmButtonText: '确定关闭',
         cancelButtonText: '取消',
         type: 'warning'
       }
     )
-    ElMessage.success('关闭网络成功')
-    fetchCards()
+    const result = await cardApi.batchSuspendByIccids({
+      iccids,
+      reason: '流量池详情页关闭网络'
+    })
+
+    const success = result.success_count || result.success || 0
+    const failed = result.fail_count || result.failed || 0
+    if (success > 0) {
+      ElMessage.success(`成功关闭 ${success} 张卡片网络`)
+    }
+    if (failed > 0) {
+      ElMessage.warning(`${failed} 张卡片关闭网络失败`)
+    }
+    handleRefresh()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('关闭网络失败:', error)
-      ElMessage.error('关闭网络失败')
+      ElMessage.error(error?.message || '关闭网络失败')
     }
   }
 }
@@ -621,21 +667,37 @@ const handleBatchCloseNetwork = async () => {
  */
 const handleBatchOpenNetwork = async () => {
   try {
+    const iccids = selectedCards.value.map(card => card.iccid).filter(Boolean)
+    if (iccids.length === 0) {
+      ElMessage.warning('请选择卡片')
+      return
+    }
+
     await ElMessageBox.confirm(
-      `确定要打开 ${selectedCardIds.value.length} 张卡片的网络吗？`,
-      '确认操作',
+      `确定要打开 ${iccids.length} 张卡片的网络吗？`,
+      '打开网络确认',
       {
-        confirmButtonText: '确定',
+        confirmButtonText: '确定打开',
         cancelButtonText: '取消',
         type: 'warning'
       }
     )
-    ElMessage.success('打开网络成功')
-    fetchCards()
+    const result = await cardApi.batchResumeByIccids({ iccids })
+    const success = result.success || 0
+    const failed = result.failed || 0
+
+    if (success > 0) {
+      ElMessage.success(`成功打开 ${success} 张卡片网络`)
+    }
+    if (failed > 0) {
+      const firstError = result.failed_list?.[0]?.error || `${failed} 张卡片打开网络失败`
+      ElMessage.warning(firstError)
+    }
+    handleRefresh()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('打开网络失败:', error)
-      ElMessage.error('打开网络失败')
+      ElMessage.error(error?.message || '打开网络失败')
     }
   }
 }

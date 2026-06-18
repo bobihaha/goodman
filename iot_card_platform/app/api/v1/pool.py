@@ -317,6 +317,26 @@ async def recharge_pool(
     )
 
 
+@router.post("/{pool_id}/repair-suspend-status", summary="修复流量池本地停卡状态", response_model=ResponseModel)
+async def repair_pool_suspend_status(
+    pool_id: int = Path(..., description="流量池ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """核对供应商生命周期后，修复本地流量池超限停卡状态。"""
+    result = await pool_service.repair_pool_suspend_status(
+        db=db,
+        pool_id=pool_id,
+        current_user_id=current_user.id,
+        user_level=current_user.user_level,
+        operator_id=current_user.id
+    )
+    return ResponseModel(
+        data=result,
+        msg=f"状态修复完成，已修复 {result['repaired']} 张，跳过 {result['skipped']} 张"
+    )
+
+
 @router.post("/{pool_id}/topup/quote", summary="流量池加油包试算", response_model=ResponseModel)
 async def quote_pool_topup(
     pool_id: int = Path(..., description="流量池ID"),

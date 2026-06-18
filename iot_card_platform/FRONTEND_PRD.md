@@ -337,6 +337,7 @@ POST /api/v1/cards/export
 - 添加/移除卡片
 - 充值加油包
 - 用量统计
+- 状态修复：供应商侧已激活且本地因流量池超限停卡、当前池用量未超停卡阈值时，可批量纠正本地卡状态
 
 **表单字段**：
 ```typescript
@@ -357,6 +358,7 @@ POST   /api/v1/pools
 POST   /api/v1/pools/{id}/cards
 DELETE /api/v1/pools/{id}/cards
 POST   /api/v1/pools/{id}/recharge
+POST   /api/v1/pools/{id}/repair-suspend-status
 ```
 
 ---

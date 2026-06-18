@@ -1,13 +1,18 @@
 """
 流量池管理服务层
 """
+import json
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from app.clients.supplier_api import get_supplier_client
 from app.crud.pool_crud import pool_crud, pool_card_crud, pool_log_crud
 from app.db.models.pool import TrafficPoolModel
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
+from app.db.models.supplier import SupplierModel
+from app.db.models.suspend import SuspendActionType, SuspendLogModel
+from app.db.models.sys_user import SysUserModel
 from app.db.models.sys_user import UserLevel
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.crud.system_crud import SysOperationLogCRUD
@@ -39,6 +44,48 @@ class PoolService:
             pool.addon_flow_month = None
         pool.addon_flow = effective_addon + added_flow_mb
         pool.addon_flow_month = get_current_flow_cycle_month()
+
+    async def _get_pool_stop_threshold(self, db: AsyncSession, pool: TrafficPoolModel) -> int:
+        """获取用户配置的流量池停卡阈值，缺省按 100% 处理。"""
+        if not pool.user_id:
+            return 100
+
+        user_result = await db.execute(
+            select(SysUserModel.quota).where(
+                SysUserModel.id == pool.user_id,
+                SysUserModel.is_deleted == 0
+            )
+        )
+        quota_data = user_result.scalar_one_or_none()
+        if not quota_data:
+            return 100
+
+        try:
+            quota = quota_data if isinstance(quota_data, dict) else json.loads(quota_data)
+        except (TypeError, ValueError):
+            return 100
+
+        threshold = quota.get("pool_stop_threshold")
+        if threshold is None:
+            return 100
+        try:
+            return int(threshold)
+        except (TypeError, ValueError):
+            return 100
+
+    async def _load_supplier_map(self, db: AsyncSession, cards: List[IotCardModel]) -> dict:
+        """批量加载卡片供应商，避免逐卡查询。"""
+        supplier_ids = {card.supplier_id for card in cards if card.supplier_id}
+        if not supplier_ids:
+            return {}
+
+        supplier_result = await db.execute(
+            select(SupplierModel).where(
+                SupplierModel.id.in_(supplier_ids),
+                SupplierModel.is_deleted == 0
+            )
+        )
+        return {supplier.id: supplier for supplier in supplier_result.scalars().all()}
 
     async def _get_accessible_user_ids(
         self,
@@ -487,6 +534,129 @@ class PoolService:
         pool_dict["auto_resumed"] = auto_resume_result["resumed_count"]
         pool_dict["can_self_topup"] = pool.user_id == current_user_id
         return pool_dict
+
+    async def repair_pool_suspend_status(
+        self,
+        db: AsyncSession,
+        pool_id: int,
+        current_user_id: int,
+        user_level: int,
+        operator_id: int
+    ) -> dict:
+        """核对供应商生命周期后，修复本地流量池超限停卡状态。"""
+        if user_level == UserLevel.SUB_USER.value:
+            raise BusinessException(code=403, msg="子用户无权修复流量池状态")
+
+        await self._get_pool_in_scope(db, pool_id, current_user_id, user_level)
+        pool = await pool_crud.update_stats(db, pool_id)
+        if not pool:
+            raise BusinessException(code=404, msg="流量池不存在或无权访问")
+
+        stop_threshold = await self._get_pool_stop_threshold(db, pool)
+        usage_percent = pool.get_usage_percent()
+        if usage_percent >= stop_threshold:
+            raise BusinessException(
+                code=400,
+                msg=f"流量池当前用量{usage_percent}%，已达到停卡阈值{stop_threshold}%，不能修复"
+            )
+
+        cards_result = await db.execute(
+            select(IotCardModel).where(
+                IotCardModel.pool_id == pool.id,
+                IotCardModel.is_pool_member == 1,
+                IotCardModel.status == CardStatus.suspended,
+                IotCardModel.suspend_type == SuspendType.pool_exceed,
+                IotCardModel.is_deleted == 0
+            )
+        )
+        cards = list(cards_result.scalars().all())
+        supplier_map = await self._load_supplier_map(db, cards)
+        active_statuses = {
+            CardStatus.activated.value,
+            CardStatus.testing.value,
+            CardStatus.silent.value,
+        }
+        repaired_iccids = []
+        skipped_list = []
+
+        for card in cards:
+            supplier = supplier_map.get(card.supplier_id)
+            if not supplier:
+                skipped_list.append({"iccid": card.iccid, "reason": "缺少供应商配置"})
+                continue
+
+            try:
+                supplier_client = get_supplier_client(
+                    supplier_id=supplier.id,
+                    api_url=supplier.api_url or "",
+                    api_key=supplier.api_key or "",
+                    api_secret=supplier.api_secret or "",
+                    supplier_code=supplier.code,
+                    api_config=supplier.api_config,
+                )
+                lifecycle_data = await supplier_client.get_card_lifecycle(card.iccid)
+                supplier_status = str(lifecycle_data.get("status") or "").strip()
+            except Exception:
+                skipped_list.append({"iccid": card.iccid, "reason": "供应商状态查询失败"})
+                continue
+
+            if supplier_status not in active_statuses:
+                skipped_list.append({"iccid": card.iccid, "reason": f"供应商状态为 {supplier_status or '-'}"})
+                continue
+
+            card.status = CardStatus(supplier_status)
+            card.suspend_type = SuspendType.none
+            card.suspend_at = None
+            card.suspend_reason = None
+            repaired_iccids.append(card.iccid)
+            db.add(SuspendLogModel(
+                card_id=card.id,
+                iccid=card.iccid,
+                action=SuspendActionType.resume,
+                suspend_type=SuspendType.pool_exceed.value,
+                pool_id=pool.id,
+                reason=(
+                    f"状态修复：供应商状态为{supplier_status}，"
+                    f"流量池用量{usage_percent}%，未达到停卡阈值{stop_threshold}%"
+                ),
+                api_called=0,
+                api_result=json.dumps({
+                    "repair_type": "pool_exceed_local_status",
+                    "supplier_status": supplier_status,
+                    "usage_percent": usage_percent,
+                    "stop_threshold": stop_threshold
+                }, ensure_ascii=False),
+                operator_id=operator_id
+            ))
+
+        await db.commit()
+        pool = await pool_crud.update_stats(db, pool.id)
+
+        repaired_count = len(repaired_iccids)
+        skipped_count = len(skipped_list)
+        await SysOperationLogCRUD.create(
+            db=db,
+            module="pools",
+            action="repair_suspend_status",
+            user_id=current_user_id,
+            target_type="pool",
+            target_id=pool.id,
+            target_name=pool.name,
+            detail=(
+                f"流量池状态修复：检查{len(cards)}张，修复{repaired_count}张，"
+                f"跳过{skipped_count}张，用量{usage_percent}%，停卡阈值{stop_threshold}%"
+            )
+        )
+
+        return {
+            "checked": len(cards),
+            "repaired": repaired_count,
+            "skipped": skipped_count,
+            "repaired_iccids": repaired_iccids,
+            "skipped_list": skipped_list[:100],
+            "usage_percent": usage_percent,
+            "stop_threshold": stop_threshold
+        }
 
     async def quote_pool_topup(
         self,

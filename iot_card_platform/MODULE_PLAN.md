@@ -219,6 +219,7 @@ POST   /api/v1/pools/{id}/cards           # 添加卡片到池
 DELETE /api/v1/pools/{id}/cards           # 批量移除卡片
 
 GET    /api/v1/pools/{id}/usage           # 流量池用量统计
+POST   /api/v1/pools/{id}/repair-suspend-status # 修复供应商已激活但本地仍为流量池超限停卡的状态
 GET    /api/v1/pools/{id}/logs            # 操作日志
 ```
 
