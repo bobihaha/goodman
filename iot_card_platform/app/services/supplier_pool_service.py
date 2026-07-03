@@ -14,6 +14,7 @@ from app.db.models.supplier import SupplierModel, SupplierStatus
 from app.db.models.supplier_pool import SupplierTrafficPoolHistoryModel, SupplierTrafficPoolModel
 from app.services.notification_service import NotificationService
 from app.utils.exceptions import BusinessException
+from app.utils.timezone import beijing_now
 
 logger = logging.getLogger(__name__)
 
@@ -488,7 +489,7 @@ class SupplierTrafficPoolService:
         alert_threshold = max(reached_thresholds)
         if (
             pool.last_alert_at
-            and pool.last_alert_at >= datetime.now() - timedelta(hours=12)
+            and pool.last_alert_at >= beijing_now() - timedelta(hours=12)
             and (pool.last_alert_threshold or 0) >= alert_threshold
         ):
             return None
@@ -497,24 +498,30 @@ class SupplierTrafficPoolService:
         if not recipients:
             return None
 
-        subject = f"供应商流量池用量提醒：{supplier.name}"
-        content = (
-            f"供应商：{supplier.name}\n"
-            f"流量池：{pool.supplier_pool_name or pool.supplier_pool_code}\n"
-            f"运营商：{pool.carrier or '-'}\n"
-            f"规格：{pool.pool_specification if pool.pool_specification is not None else '-'} MB\n"
-            f"已用/总量：{pool.used_flow:.3f} / {pool.total_flow:.3f} MB\n"
-            f"使用率：{pool.usage_percent:.2f}%\n"
-            f"触发阈值：{alert_threshold}%\n"
-            f"全部阈值：{'/'.join(f'{item}%' for item in thresholds)}\n"
-            f"同步时间：{pool.last_sync_at.strftime('%Y-%m-%d %H:%M:%S') if pool.last_sync_at else '-'}"
-        )
+        pool_alert = {
+            "pool_name": pool.supplier_pool_name or pool.supplier_pool_code,
+            "carrier": pool.carrier or "-",
+            "pool_specification": f"{pool.pool_specification} MB" if pool.pool_specification is not None else "-",
+            "used_flow": pool.used_flow,
+            "total_flow": pool.total_flow,
+            "remaining_flow": pool.remaining_flow,
+            "usage_percent": pool.usage_percent,
+            "threshold": alert_threshold,
+            "thresholds": " / ".join(f"{item}%" for item in thresholds),
+            "sync_time": pool.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if pool.last_sync_at else "-",
+        }
 
         sent_any = False
         errors = []
         for email in recipients:
             try:
-                sent = await NotificationService.send_email(db, email, subject, content)
+                sent = await NotificationService.send_usage_summary_email(
+                    db=db,
+                    to_email=email,
+                    customer_name=pool.supplier_pool_name or pool.supplier_pool_code,
+                    pool_alerts=[pool_alert],
+                    card_alerts=[]
+                )
                 sent_any = sent_any or sent
             except Exception as exc:
                 logger.exception(
@@ -527,7 +534,7 @@ class SupplierTrafficPoolService:
                 errors.append(f"{email}: {exc}")
 
         if sent_any:
-            pool.last_alert_at = datetime.now()
+            pool.last_alert_at = beijing_now()
             pool.last_alert_usage_percent = pool.usage_percent
             pool.last_alert_threshold = alert_threshold
         return "; ".join(errors) if errors else None

@@ -479,6 +479,58 @@ class TestGetBatchUsage:
         mock_single.assert_awaited_once_with("A")
 
     @pytest.mark.asyncio
+    async def test_yearly_batch_rows_are_throttled(self, client):
+        api_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {"iccid": "A", "data_usage": "10", "data_plan": "1024", "bg_code": "PKG1Y"},
+                    {"iccid": "B", "data_usage": "20", "data_plan": "1024", "bg_code": "PKG1Y"},
+                ]
+            }
+        }
+        cycle_usage = {
+            "iccid": "A",
+            "data_used": 35.0,
+            "data_used_month": 10.0,
+            "data_used_scope": "cycle",
+            "data_total": 1024.0,
+            "sync_time": "2026-01-01 00:01:00",
+        }
+
+        with patch.object(client, "_post", AsyncMock(return_value=api_data)), \
+             patch.object(client, "get_card_usage", AsyncMock(return_value=cycle_usage)), \
+             patch("app.clients.upiot_client.asyncio.sleep", AsyncMock()) as mock_sleep:
+            await client.get_batch_usage(["A", "B"])
+
+        mock_sleep.assert_awaited_once_with(0.5)
+
+    @pytest.mark.asyncio
+    async def test_yearly_cycle_lookup_stops_after_consecutive_rate_limits(self, client):
+        api_data = {
+            "code": 200,
+            "data": {
+                "rows": [
+                    {"iccid": "A", "data_usage": "10", "data_plan": "1024", "bg_code": "PKG1Y"},
+                    {"iccid": "B", "data_usage": "20", "data_plan": "1024", "bg_code": "PKG1Y"},
+                    {"iccid": "C", "data_usage": "30", "data_plan": "1024", "bg_code": "PKG1Y"},
+                    {"iccid": "D", "data_usage": "40", "data_plan": "1024", "bg_code": "PKG1Y"},
+                ]
+            }
+        }
+        rate_limit_error = Exception("upiot GET error: code=505, msg=访问频率限制")
+
+        with patch.object(client, "_post", AsyncMock(return_value=api_data)), \
+             patch.object(client, "get_card_usage", AsyncMock(side_effect=rate_limit_error)) as mock_single, \
+             patch("app.clients.upiot_client.asyncio.sleep", AsyncMock()):
+            results = await client.get_batch_usage(["A", "B", "C", "D"])
+
+        assert mock_single.await_count == 12
+        assert [item["iccid"] for item in results] == ["A", "B", "C", "D"]
+        assert results[0]["data_used_scope"] == "month"
+        assert results[3]["data_used"] == 40.0
+
+    @pytest.mark.asyncio
     async def test_splits_into_batches_of_50(self, client):
         iccids = [str(i) for i in range(110)]
         api_data = {"code": 200, "data": {"rows": []}}

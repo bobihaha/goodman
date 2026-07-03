@@ -58,6 +58,9 @@ UPIOT_CARRIER_MAP = {
 
 # 批量接口单次最大卡数
 BATCH_MAX_SIZE = 50
+YEARLY_USAGE_SINGLE_QUERY_DELAY_SECONDS = 0.5
+YEARLY_USAGE_RATE_LIMIT_RETRY_DELAYS = (2, 5, 10)
+YEARLY_USAGE_MAX_CONSECUTIVE_RATE_LIMITS = 3
 
 
 class UpiotSupplierClient(SupplierAPIClient):
@@ -206,6 +209,14 @@ class UpiotSupplierClient(SupplierAPIClient):
             "msg": match.group(2).strip(),
         }
 
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        parsed = self._parse_supplier_error(error)
+        text = f"{parsed.get('code') or ''} {parsed.get('msg') or ''}".lower()
+        return any(
+            keyword in text
+            for keyword in ("505", "访问频率限制", "频率限制", "rate limit", "too many requests")
+        )
+
     def _resolve_usage_payload(self, card: Dict[str, Any]) -> Dict[str, Any]:
         monthly_used = self._parse_float(card.get("data_usage"))
         cycle_used = self._parse_float(card.get("cycle_data_usage"))
@@ -221,6 +232,36 @@ class UpiotSupplierClient(SupplierAPIClient):
             "data_used_month": monthly_used,
             "data_used_scope": "month",
         }
+
+    def _fallback_batch_usage_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        usage_payload = self._resolve_usage_payload(row)
+        return {
+            "iccid": row.get("iccid", ""),
+            **usage_payload,
+            "data_total": self._parse_float(row.get("data_plan")),
+            "sync_time": row.get("updated_time")
+                or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    async def _get_yearly_cycle_usage_with_backoff(self, iccid: str) -> Dict[str, Any]:
+        last_error: Optional[Exception] = None
+        for attempt, delay_seconds in enumerate((0, *YEARLY_USAGE_RATE_LIMIT_RETRY_DELAYS), start=1):
+            if delay_seconds:
+                await asyncio.sleep(delay_seconds)
+            try:
+                return await self.get_card_usage(iccid)
+            except Exception as exc:
+                last_error = exc
+                if not self._is_rate_limit_error(exc) or attempt > len(YEARLY_USAGE_RATE_LIMIT_RETRY_DELAYS):
+                    raise
+                logger.warning(
+                    "UPIOT年包周期累计用量补查触发限频，退避重试: iccid=%s attempt=%s delay=%ss error=%s",
+                    iccid,
+                    attempt,
+                    delay_seconds,
+                    exc,
+                )
+        raise last_error
 
     def _looks_like_yearly_usage_row(self, row: Dict[str, Any]) -> bool:
         product_code = str(row.get("bg_code") or row.get("code") or "").upper()
@@ -334,25 +375,38 @@ class UpiotSupplierClient(SupplierAPIClient):
         upiot接口: POST /card_usage_info/  (每次最多50卡)
         """
         results = []
+        yearly_single_query_count = 0
+        consecutive_rate_limit_errors = 0
+        cycle_lookup_disabled = False
         for i in range(0, len(iccid_list), BATCH_MAX_SIZE):
             batch = iccid_list[i : i + BATCH_MAX_SIZE]
             data = await self._post("card_usage_info", {"msisdns": batch})
             for row in data.get("data", {}).get("rows", []):
                 iccid = row.get("iccid", "")
-                if iccid and self._looks_like_yearly_usage_row(row):
+                if iccid and self._looks_like_yearly_usage_row(row) and not cycle_lookup_disabled:
                     try:
-                        results.append(await self.get_card_usage(iccid))
+                        if yearly_single_query_count > 0:
+                            await asyncio.sleep(YEARLY_USAGE_SINGLE_QUERY_DELAY_SECONDS)
+                        yearly_single_query_count += 1
+                        results.append(await self._get_yearly_cycle_usage_with_backoff(iccid))
+                        consecutive_rate_limit_errors = 0
                         continue
                     except Exception as exc:
-                        logger.warning("年包周期累计用量补查失败: iccid=%s, error=%s", iccid, exc)
-                usage_payload = self._resolve_usage_payload(row)
-                results.append({
-                    "iccid": iccid,
-                    **usage_payload,
-                    "data_total": self._parse_float(row.get("data_plan")),
-                    "sync_time": row.get("updated_time")
-                        or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                })
+                        if self._is_rate_limit_error(exc):
+                            consecutive_rate_limit_errors += 1
+                            if consecutive_rate_limit_errors >= YEARLY_USAGE_MAX_CONSECUTIVE_RATE_LIMITS:
+                                cycle_lookup_disabled = True
+                                logger.warning(
+                                    "UPIOT年包周期累计用量补查连续限频，停止本轮逐卡补查并使用批量月用量兜底: count=%s error=%s",
+                                    consecutive_rate_limit_errors,
+                                    exc,
+                                )
+                            else:
+                                logger.warning("年包周期累计用量补查限频，使用批量月用量兜底: iccid=%s, error=%s", iccid, exc)
+                        else:
+                            consecutive_rate_limit_errors = 0
+                            logger.warning("年包周期累计用量补查失败: iccid=%s, error=%s", iccid, exc)
+                results.append(self._fallback_batch_usage_row(row))
         return results
 
     async def get_card_lifecycle(self, iccid: str) -> Dict[str, Any]:

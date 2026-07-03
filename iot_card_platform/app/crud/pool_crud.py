@@ -253,22 +253,20 @@ class TrafficPoolCRUD:
         alert_rules = [
             (
                 pool.alert_threshold_1,
-                AlertLevel.warning,
-                "流量池达到一级预警阈值"
+                AlertLevel.warning
             ),
             (
                 pool.alert_threshold_2,
-                AlertLevel.critical,
-                "流量池达到二级预警阈值"
+                AlertLevel.critical
             ),
             (
                 pool.alert_threshold_3,
-                AlertLevel.exceed,
-                "流量池达到停卡预警阈值"
+                AlertLevel.exceed
             ),
         ]
 
-        for threshold, alert_level, reason in alert_rules:
+        should_notify = False
+        for threshold, alert_level in alert_rules:
             if not threshold or usage_percent < threshold:
                 continue
 
@@ -281,7 +279,7 @@ class TrafficPoolCRUD:
             if exists:
                 continue
 
-            alert = await AlertLogCRUD.create(
+            await AlertLogCRUD.create(
                 db=db,
                 target_type=AlertTargetType.pool,
                 target_id=pool.id,
@@ -291,17 +289,10 @@ class TrafficPoolCRUD:
                 threshold=threshold,
                 user_id=pool.user_id
             )
-            await NotificationService.send_alert_email(
-                db=db,
-                alert=alert,
-                extra_context={
-                    "pool_name": pool.name,
-                    "reason": reason,
-                    "card_count": pool.card_count,
-                    "data_used": pool.data_used,
-                    "data_total": pool.data_total,
-                }
-            )
+            should_notify = True
+
+        if should_notify:
+            await NotificationService.send_pending_usage_alerts_for_user(db, pool.user_id)
 
     async def _check_pool_stop_threshold(self, db: AsyncSession, pool: TrafficPoolModel) -> None:
         """检查流量池是否超过用户设置的停卡阈值，超过则全池停卡"""

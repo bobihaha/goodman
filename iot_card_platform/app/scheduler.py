@@ -3,10 +3,11 @@
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import AsyncSessionLocal
 from app.services.sync_service import sync_service
+from app.services.card_expiry_reminder_service import card_expiry_reminder_service
 from app.crud.supplier_crud import supplier_crud
+from app.utils.timezone import CHINA_TZ
 from app.utils.logger import logger
 
 scheduler = AsyncIOScheduler()
@@ -25,6 +26,23 @@ async def sync_supplier_usage(supplier_id: int = None):
             logger.info(f"定时同步完成 - 供应商ID: {supplier_id}, 成功: {result['success']}, 失败: {result['failed']}")
         except Exception as e:
             logger.error(f"定时同步失败 - 供应商ID: {supplier_id}, 错误: {str(e)}")
+
+
+async def send_card_expiry_reminders():
+    """发送本月到期卡邮件提醒"""
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await card_expiry_reminder_service.send_monthly_expiry_reminders(db)
+            logger.info(
+                "到期卡邮件提醒完成 - 用户: %s, 卡片: %s, 已发送: %s, 跳过: %s, 失败: %s",
+                result["users"],
+                result["cards"],
+                result["sent"],
+                result["skipped"],
+                result["failed"],
+            )
+        except Exception as e:
+            logger.error(f"到期卡邮件提醒失败 - 错误: {str(e)}")
 
 
 async def load_sync_tasks():
@@ -59,6 +77,12 @@ async def load_sync_tasks():
 
 def start_scheduler():
     """启动调度器"""
+    scheduler.add_job(
+        send_card_expiry_reminders,
+        CronTrigger(day="10,15", hour=9, minute=0, timezone=CHINA_TZ),
+        id="card_expiry_reminders",
+        replace_existing=True
+    )
     scheduler.start()
     logger.info("✅ 定时任务调度器已启动")
 
