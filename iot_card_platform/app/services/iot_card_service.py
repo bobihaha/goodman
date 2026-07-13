@@ -109,8 +109,10 @@ class IotCardService:
             related_user = user_map.get(item.get("user_id"))
             if related_user:
                 item["related_user_name"] = related_user.name or related_user.account
+                item["related_user_account"] = related_user.account
             else:
                 item["related_user_name"] = current_user_display_name
+                item["related_user_account"] = current_user.account if current_user else None
 
         return card_dicts
 
@@ -855,16 +857,50 @@ class IotCardService:
                 "IMSI": d["imsi"] or "",
                 "号码": d["msisdn"] or "",
                 "材质": d.get("material_name") or "",
+                "卡片类型": d.get("card_type_name") or "",
                 "运营商": d["carrier_name"] or "",
                 "套餐规格": d["spec_name"] or "",
+                "套餐流量(MB)": d.get("flow_size") or 0,
+                "套餐周期": d.get("period_name") or "",
+                "周期数量": d.get("period_count") or "",
                 "状态": d["status_name"] or "",
+                "停卡类型": d.get("suspend_type_name") or "",
+                "停卡时间": d.get("suspend_at") or "",
+                "停卡原因": d.get("suspend_reason") or "",
+                "本月已用流量(MB)": d.get("data_used_month") or 0,
                 "已用流量(MB)": d["data_used"],
                 "总流量(MB)": d["data_total"],
                 "剩余流量(MB)": d["data_remain"],
                 "使用率(%)": d["data_usage_percent"],
+                "当月补量(MB)": d.get("addon_flow") or 0,
+                "补量生效月份": d.get("addon_flow_month") or "",
+                "测试期到期日": d.get("test_expire_date") or "",
+                "沉默期到期日": d.get("silent_expire_date") or "",
                 "激活日期": d["activated_at"] or "",
                 "到期日期": d["expired_at"] or "",
-                "备注": d["remark"] or ""
+                "入库时间": d.get("stock_in_at") or "",
+                "出库时间": d.get("stock_out_at") or "",
+                "出库日期": d.get("stock_out_date") or "",
+                "出库单号": d.get("stock_out_no") or "",
+                "是否加入流量池": "是" if d.get("is_pool_member") else "否",
+                "流量池ID": d.get("pool_id") or "",
+                "关联账户ID": d.get("user_id") or "",
+                "关联账户名称": d.get("related_user_name") or "",
+                "关联登录账号": d.get("related_user_account") or "",
+                "供应商ID": d.get("supplier_id") or "",
+                "采购批次ID": d.get("batch_id") or "",
+                "销售套餐ID": d.get("sale_package_id") or "",
+                "套餐单价(元/周期)": d.get("sale_price") if d.get("sale_price") is not None else "",
+                "项目ID": d.get("project_id") or "",
+                "流量同步时间": d.get("data_sync_at") or "",
+                "最近IMEI": d.get("latest_imei") or "",
+                "上一次IMEI": d.get("previous_imei") or "",
+                "IMEI设备名称": d.get("imei_device_name") or "",
+                "IMEI检测时间": d.get("imei_checked_at") or "",
+                "是否检测到机卡分离": "是" if d.get("imei_separation_detected") else "否",
+                "备注": d["remark"] or "",
+                "创建时间": d.get("created_at") or "",
+                "更新时间": d.get("updated_at") or ""
             })
 
         return export_data
