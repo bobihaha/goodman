@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple, Optional
 import secrets
 import logging
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
@@ -82,7 +83,7 @@ class SysUserService:
         )
 
     @classmethod
-    def _build_user_info(cls, user: SysUserModel) -> UserInfo:
+    def _build_user_info(cls, user: SysUserModel, recommended_channel_name: Optional[str] = None) -> UserInfo:
         payload = {
             "id": user.id,
             "parent_id": user.parent_id,
@@ -95,6 +96,7 @@ class SysUserService:
             "alert_notify": user.alert_notify,
             "quota": user.quota,
             "remark": user.remark,
+            "recommended_channel_name": recommended_channel_name,
             "status": user.status.value if hasattr(user.status, "value") else user.status,
             "last_login_at": user.last_login_at,
             "created_at": user.created_at,
@@ -253,6 +255,19 @@ class SysUserService:
     async def get_user_list(cls, db: AsyncSession, operator: CurrentUser, query: UserQuery) -> Tuple[List[UserInfo], int]:
         if operator.is_super_admin():
             users, total = await sys_user_crud.get_all_users(db, query)
+            channel_map = {}
+            if users:
+                from app.db.models.channel import ChannelCustomerRelationModel, ChannelPartnerModel
+                rows = await db.execute(
+                    select(ChannelCustomerRelationModel.user_id, ChannelPartnerModel.name)
+                    .join(ChannelPartnerModel, ChannelPartnerModel.id == ChannelCustomerRelationModel.channel_id)
+                    .where(
+                        ChannelCustomerRelationModel.user_id.in_([user.id for user in users]),
+                        ChannelCustomerRelationModel.is_deleted == 0,
+                    )
+                )
+                channel_map = dict(rows.all())
+            return [cls._build_user_info(user, channel_map.get(user.id)) for user in users], total
         elif operator.is_user():
             users, total = await sys_user_crud.get_users_by_parent(db, operator.id, query)
         else:

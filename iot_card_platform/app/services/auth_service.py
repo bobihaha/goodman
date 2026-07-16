@@ -206,6 +206,8 @@ class AuthService:
     @classmethod
     async def refresh_token(cls, db: AsyncSession, request: RefreshTokenRequest) -> Dict[str, Any]:
         payload = cls.verify_token(request.refresh_token, token_type="refresh")
+        if payload.get("principal_type") == "channel":
+            raise AuthException()
         user_id = payload.get("sub")
         if not user_id:
             raise AuthException()
@@ -224,6 +226,8 @@ class AuthService:
     @classmethod
     async def get_current_user(cls, db: AsyncSession, token: str) -> CurrentUser:
         payload = cls.verify_token(token)
+        if payload.get("principal_type") == "channel":
+            raise AuthException()
         user_id = payload.get("sub")
         if not user_id:
             raise AuthException()
@@ -247,4 +251,3 @@ class AuthService:
 
 
 auth_service = AuthService()
-

@@ -336,6 +336,38 @@ DELETE /api/v1/projects/{id}              # 删除项目
 
 ---
 
+### 模块 11: 渠道推广积分 ✅
+
+**功能**：独立渠道伙伴账号、专属客户报备 H5、平台用户自动创建、出库/续费实时积分、逐笔账本和超管确认结算。
+
+**核心边界**：
+- 渠道伙伴独立于现有 `sys_users` 三级用户体系，只能访问自己的客户和积分。
+- 客户手机号首次有效报备锁定渠道归属，不发送短信验证码。
+- 出库按成功卡片逐笔计积分，在线续费先生成结构化订单再计积分。
+- 比例写入订单积分快照，修改比例不影响历史记录。
+- 卡片回收生成负积分冲正；首版不提供提现、兑换或打款。
+
+**API 端点**：
+```text
+GET  /api/v1/channels/public/{slug}
+POST /api/v1/channels/public/{slug}/register
+POST /api/v1/channels/auth/login
+GET  /api/v1/channels/me/summary
+GET  /api/v1/channels/me/customers
+GET  /api/v1/channels/me/points
+GET  /api/v1/channels/admin/settings
+PUT  /api/v1/channels/admin/settings
+GET  /api/v1/channels/admin/partners
+POST /api/v1/channels/admin/partners
+PUT  /api/v1/channels/admin/partners/{id}
+GET  /api/v1/channels/admin/points
+POST /api/v1/channels/admin/points/settle
+```
+
+**详细PRD**：[docs/CHANNEL_POINTS_COMMISSION_PRD.md](docs/CHANNEL_POINTS_COMMISSION_PRD.md)
+
+---
+
 ## 🛠️ 技术栈
 
 | 类型 | 技术 |
@@ -359,4 +391,5 @@ DELETE /api/v1/projects/{id}              # 删除项目
 - **系统架构**：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **开发指南**：[docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md)
 - **前端需求**：[FRONTEND_PRD.md](FRONTEND_PRD.md)
+- **渠道推广积分PRD**：[docs/CHANNEL_POINTS_COMMISSION_PRD.md](docs/CHANNEL_POINTS_COMMISSION_PRD.md)
 - **完整版文档**：[docs/archive/MODULE_PLAN_FULL.md](docs/archive/MODULE_PLAN_FULL.md)

@@ -112,6 +112,7 @@ class UserInfo(BaseModel):
     alert_notify: Optional[Dict[str, Any]] = None
     quota: Optional[Dict[str, Any]] = None
     remark: Optional[str] = None
+    recommended_channel_name: Optional[str] = None
     h5: Optional[UserH5Config] = None
     open_api: Optional[UserOpenApiCredential] = None
     status: str
@@ -124,6 +125,7 @@ class UserQuery(BaseModel):
     page_size: int = Field(default=10, ge=1, le=100)
     keyword: Optional[str] = None
     status: Optional[UserStatus] = None
+    channel_id: Optional[int] = Field(None, ge=1)
 
 
 class UserPasswordUpdate(BaseModel):

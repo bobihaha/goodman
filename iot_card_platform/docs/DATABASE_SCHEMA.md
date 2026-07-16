@@ -231,6 +231,25 @@ CREATE TABLE `projects` (
 ) COMMENT='项目表';
 ```
 
+### 8. 渠道推广积分表
+
+渠道积分模块使用五张新增表，完整可执行结构以迁移脚本 `app/db/migrations/20260715_add_channel_points.sql` 为准：
+
+- `channel_partners`：独立渠道账号、H5 标识、状态和比例覆盖。
+- `channel_commission_settings`：平台默认出库、续费积分比例。
+- `channel_customer_relations`：手机号和平台用户唯一渠道归属，并保存客户设备、场景、规模等用户情况快照。
+- `renewal_orders`：客户在线续费的结构化订单。
+- `channel_point_ledger`：出库、续费和冲正的逐卡积分账本。
+
+关键约束：
+
+- `channel_customer_relations.customer_phone` 唯一，防止重复渠道归属。
+- `channel_customer_relations.user_id` 唯一，保证一个平台用户只有一个有效渠道来源。
+- `channel_customer_relations.customer_profile` 使用 `VARCHAR(500)`；历史记录可为空，新 H5 报备由接口校验为必填，新增迁移见 `20260715_add_channel_customer_profile.sql`。
+- `channel_point_ledger(entry_type, order_type, source_order_id, card_id)` 唯一，保证计分和冲正幂等。
+- 金额使用 `DECIMAL(14,2)`，比例使用 `DECIMAL(7,4)`，积分使用 `DECIMAL(14,4)`。
+- 比例以账本快照保存，后续配置变化不回写历史数据。
+
 ## 索引设计
 
 ### 高频查询索引
@@ -241,6 +260,9 @@ CREATE TABLE `projects` (
 - `traffic_pools.user_id` - 普通索引
 - `sys_users.username` - 唯一索引
 
+- `channel_customer_relations.customer_phone` - 渠道归属唯一手机号
+- `channel_point_ledger(channel_id, status, created_at)` - 渠道积分和结算状态查询
 ### 联合索引
 - `iot_cards(carrier, status)` - 运营商+状态筛选
 - `iot_cards(user_id, status)` - 用户卡片筛选
+- `channel_point_ledger(entry_type, order_type, source_order_id, card_id)` - 积分来源幂等约束

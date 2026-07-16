@@ -49,6 +49,7 @@ export interface User {
   user_level: number    // 用户级别：1-超管，2-用户，3-子用户
   status: UserStatus    // 状态：enable/disable
   remark?: string       // 备注
+  recommended_channel_name?: string | null // 推荐渠道，仅超管一级用户列表返回
   alert_notify?: {      // 告警通知设置
     sms: boolean
     email: boolean
@@ -149,6 +150,7 @@ export interface UserListParams {
   page_size?: number
   keyword?: string      // 关键词搜索（账号、姓名、手机号）
   status?: UserStatus   // 状态筛选
+  channel_id?: number   // 推荐渠道筛选，仅超级管理员生效
   user_level?: number   // 用户级别筛选
 }
 

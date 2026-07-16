@@ -188,6 +188,7 @@
 | keyword | string | 否 | 搜索关键词（用户名/昵称） |
 | user_level | int | 否 | 用户级别筛选 |
 | status | string | 否 | 状态筛选：enable/disable |
+| channel_id | int | 否 | 推荐渠道筛选，仅超级管理员查询一级平台用户时生效 |
 
 **响应示例**:
 ```json
@@ -201,6 +202,7 @@
         "nickname": "管理员",
         "email": "admin@example.com",
         "phone": "13800138000",
+        "recommended_channel_name": "渠道伙伴A",
         "user_level": 1,
         "parent_id": null,
         "status": "enable",
@@ -213,6 +215,8 @@
   }
 }
 ```
+
+`recommended_channel_name` 仅用于超级管理员的一级平台用户列表；无渠道归属或一级平台用户查询自己的下级用户时返回 `null`，前端显示“—”。
 
 ### 2.2 创建用户
 **接口**: `POST /api/v1/users`
@@ -898,6 +902,32 @@
 
 
 
+
+## 12. 渠道推广积分 API
+
+### 12.1 渠道客户报备
+
+**接口**: `POST /api/v1/channels/public/{slug}/register`
+
+**必填参数**：`customer_name`、`customer_phone`、`customer_profile`（设备、场景、规模，5～500 字）、`consent`。
+
+### 12.2 渠道积分汇总
+
+**接口**: `GET /api/v1/channels/me/summary`
+
+汇总同时返回兼容字段 `settled_points`、`pending_points`，以及展示字段 `consumed_points`（已结算）、`remaining_points`（待结算）。
+
+### 12.3 渠道推荐客户
+
+**接口**: `GET /api/v1/channels/me/customers`
+
+仅渠道 JWT 可访问，按当前渠道分页返回客户姓名、手机号、用户情况、报备时间、积分笔数及累计、已消耗、剩余积分。
+
+### 12.4 渠道积分明细
+
+**接口**: `GET /api/v1/channels/me/points`
+
+---
 
 
 

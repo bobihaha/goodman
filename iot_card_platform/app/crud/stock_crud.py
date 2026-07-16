@@ -557,6 +557,17 @@ class StockOutCRUD:
                     target_user_name=user.name if user else None
                 )
                 db.add(relation)
+
+        if out_card_infos:
+            from app.services.channel_service import channel_service
+            await channel_service.create_stock_out_points(
+                db=db,
+                source_order_id=new_record_id,
+                source_order_no=record.record_no,
+                user_id=to_user_id,
+                cards=out_card_infos,
+                unit_price_cents=unit_price,
+            )
         
         await db.commit()
         await db.refresh(record)
@@ -1337,6 +1348,10 @@ class StockRecycleCRUD:
                 recycled_cards=recycled_cards
             )
 
+            if recycled_cards:
+                from app.services.channel_service import channel_service
+                await channel_service.reverse_stock_out_points(db, recycled_cards)
+
             await db.commit()
             await self._refresh_recycled_pool_stats(db, affected_pool_ids)
 
@@ -1427,6 +1442,10 @@ class StockRecycleCRUD:
                 record_id=record.id,
                 recycled_cards=recycled_cards
             )
+
+            if recycled_cards:
+                from app.services.channel_service import channel_service
+                await channel_service.reverse_stock_out_points(db, recycled_cards)
 
             await db.commit()
             await self._refresh_recycled_pool_stats(db, affected_pool_ids)

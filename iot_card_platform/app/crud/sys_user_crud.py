@@ -65,6 +65,13 @@ class SysUserCRUD(CRUDBase[SysUserModel]):
             conditions.append(or_(SysUserModel.name.like(keyword), SysUserModel.account.like(keyword)))
         if query.status:
             conditions.append(SysUserModel.status == query.status)
+        if query.channel_id:
+            from app.db.models.channel import ChannelCustomerRelationModel
+            channel_user_ids = select(ChannelCustomerRelationModel.user_id).where(
+                ChannelCustomerRelationModel.channel_id == query.channel_id,
+                ChannelCustomerRelationModel.is_deleted == 0,
+            )
+            conditions.append(SysUserModel.id.in_(channel_user_ids))
         
         count_stmt = select(func.count(SysUserModel.id)).where(*conditions)
         total_result = await db.execute(count_stmt)

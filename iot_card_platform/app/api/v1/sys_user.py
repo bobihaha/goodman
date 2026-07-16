@@ -29,10 +29,11 @@ async def get_user_list(
     page_size: int = Query(10, ge=1, le=100),
     keyword: str = Query(None),
     status: UserStatus = Query(None),
+    channel_id: int = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    query = UserQuery(page=page, page_size=page_size, keyword=keyword, status=status)
+    query = UserQuery(page=page, page_size=page_size, keyword=keyword, status=status, channel_id=channel_id)
     users, total = await sys_user_service.get_user_list(db, current_user, query)
     return ResponseModel(data={"list": [u.model_dump() for u in users], "total": total, "page": page, "page_size": page_size})
 

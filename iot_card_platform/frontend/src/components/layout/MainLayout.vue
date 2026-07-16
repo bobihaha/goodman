@@ -192,6 +192,8 @@ const iconMap: Record<string, any> = {
   'system_config': SettingIcon,
   'permissions': SettingIcon,
   'renewal': Money,
+  'channel_points': Money,
+  'channels': Money,
   'package_period': Calendar,
   'package_period_force_activate': Calendar
 }

@@ -32,6 +32,10 @@ from app.db.models.suspend import (
     SUSPEND_ACTION_NAMES, ALERT_LEVEL_NAMES, ALERT_TARGET_NAMES
 )
 from app.db.models.project import ProjectModel
+from app.db.models.channel import (
+    ChannelPartnerModel, ChannelCommissionSettingModel,
+    ChannelCustomerRelationModel, RenewalOrderModel, ChannelPointLedgerModel,
+)
 
 __all__ = [
     "Base", "BaseModel",
@@ -53,4 +57,6 @@ __all__ = [
     "SuspendActionType", "AlertLevel", "AlertTargetType",
     "SUSPEND_ACTION_NAMES", "ALERT_LEVEL_NAMES", "ALERT_TARGET_NAMES",
     "ProjectModel",
+    "ChannelPartnerModel", "ChannelCommissionSettingModel",
+    "ChannelCustomerRelationModel", "RenewalOrderModel", "ChannelPointLedgerModel",
 ]

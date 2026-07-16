@@ -25,6 +25,18 @@
             <el-option label="禁用" value="disable" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="showRecommendedChannel" label="推荐渠道">
+          <el-select
+            v-model="searchForm.channel_id"
+            placeholder="全部"
+            clearable
+            filterable
+            style="width: 160px"
+            @change="handleSearch"
+          >
+            <el-option v-for="item in channels" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Search" @click="handleSearch">
             搜索
@@ -63,6 +75,9 @@
         <el-table-column prop="account" label="账号" width="150" />
         <el-table-column prop="name" label="姓名" width="120" />
         <el-table-column prop="phone" label="手机号" width="130" />
+        <el-table-column v-if="showRecommendedChannel" label="推荐渠道" min-width="140">
+          <template #default="{ row }">{{ row.recommended_channel_name || '—' }}</template>
+        </el-table-column>
         <el-table-column prop="email" label="邮箱" min-width="180" />
         <el-table-column label="配额" width="150">
           <template #default="{ row }">
@@ -233,8 +248,10 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus, Edit, Delete, Key, Lock, Unlock, SwitchButton, Setting, MoreFilled } from '@element-plus/icons-vue'
 import { userApi } from '@/api/modules/user'
+import { channelAdminApi } from '@/api/modules/channel'
 import { formatDateTime, formatMoney } from '@/utils/formatter'
 import type { User, UserListParams } from '@/types/user'
+import type { ChannelPartner } from '@/types/channel'
 import UserFormDialog from './components/UserFormDialog.vue'
 import ResetPasswordDialog from './components/ResetPasswordDialog.vue'
 import UserPermissionDialog from './components/UserPermissionDialog.vue'
@@ -250,7 +267,8 @@ const router = useRouter()
 // 搜索表单
 const searchForm = reactive<UserListParams>({
   keyword: '',
-  status: undefined
+  status: undefined,
+  channel_id: undefined
 })
 
 // 分页
@@ -263,6 +281,8 @@ const pagination = reactive({
 // 用户列表
 const userList = ref<User[]>([])
 const loading = ref(false)
+const channels = ref<ChannelPartner[]>([])
+const showRecommendedChannel = computed(() => authStore.userInfo?.user_level === 1)
 
 // 弹窗控制
 const formDialogVisible = ref(false)
@@ -463,6 +483,7 @@ const handlePageSizeChange = () => {
 const handleReset = () => {
   searchForm.keyword = ''
   searchForm.status = undefined
+  searchForm.channel_id = undefined
   handleSearch()
 }
 
@@ -666,7 +687,14 @@ onMounted(async () => {
       console.error('获取当前用户信息失败:', error)
     }
   }
-  
+
+  if (showRecommendedChannel.value) {
+    try {
+      channels.value = (await channelAdminApi.getPartners()).items
+    } catch (error) {
+      console.error('获取渠道列表失败:', error)
+    }
+  }
   fetchUserList()
 })
 </script>

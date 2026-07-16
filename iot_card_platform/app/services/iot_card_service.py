@@ -1589,16 +1589,6 @@ class IotCardService:
             raise BusinessException(code=400, msg="卡片缺少销售价格，暂不可续费")
 
         total_price = self._normalize_price(sale_price * Decimal(str(renew_months)))
-        balance_result = await account_balance_service.consume_balance(
-            db=db,
-            user_id=current_user_id,
-            amount=total_price,
-            detail=f"单卡续费 {renew_months} 个月",
-            target_type="card",
-            target_id=card.id,
-            target_name=card.iccid
-        )
-
         package = await sale_package_crud.get_by_id(db, card.sale_package_id) if card.sale_package_id else None
         if package:
             base_date = await self._resolve_renew_base_date(db, card)
@@ -1618,6 +1608,28 @@ class IotCardService:
                 card.expired_at = date.today() + timedelta(days=renew_months * 30)
 
         await db.flush()
+
+        from app.services.channel_service import channel_service
+        renewal_order = await channel_service.create_renewal_order_and_points(
+            db=db,
+            user_id=current_user_id,
+            card_id=card.id,
+            iccid=card.iccid,
+            renew_months=renew_months,
+            unit_price=sale_price,
+            total_amount=total_price,
+            operator_id=current_user_id,
+        )
+
+        balance_result = await account_balance_service.consume_balance(
+            db=db,
+            user_id=current_user_id,
+            amount=total_price,
+            detail=f"单卡续费 {renew_months} 个月",
+            target_type="card",
+            target_id=card.id,
+            target_name=card.iccid
+        )
 
         auto_resume_result = await SuspendActionService.auto_resume_cards_after_flow_adjustment(
             db=db,
@@ -1644,6 +1656,7 @@ class IotCardService:
 
         return {
             "card_id": card.id,
+            "order_no": renewal_order.order_no,
             "iccid": card.iccid,
             "renew_months": renew_months,
             "price": float(total_price),

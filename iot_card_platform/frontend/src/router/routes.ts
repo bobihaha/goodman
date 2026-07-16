@@ -26,6 +26,24 @@ export const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/channel/register/:slug',
+    name: 'ChannelRegister',
+    component: () => import('@/views/channels/register.vue'),
+    meta: { title: '客户信息登记', requiresAuth: false }
+  },
+  {
+    path: '/channel/login',
+    name: 'ChannelLogin',
+    component: () => import('@/views/channels/login.vue'),
+    meta: { title: '渠道积分登录', requiresAuth: false }
+  },
+  {
+    path: '/channel/points',
+    name: 'ChannelPoints',
+    component: () => import('@/views/channels/points.vue'),
+    meta: { title: '渠道积分中心', requiresAuth: false }
+  },
+  {
     path: '/',
     component: MainLayout,
     redirect: '/dashboard',
@@ -72,6 +90,15 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/users/index.vue'),
         meta: {
           title: '客户管理',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'channels',
+        name: 'ChannelAdmin',
+        component: () => import('@/views/channels/admin.vue'),
+        meta: {
+          title: '渠道积分管理',
           requiresAuth: true
         }
       },
