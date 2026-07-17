@@ -571,7 +571,6 @@ class SuspendActionService:
                 SuspendActionService.normalize_card_suspend_state(
                     card,
                     lifecycle_status,
-                    suspend_type=SuspendType.manual if operation.action == SuspendActionType.suspend else None,
                     reason="供应商生命周期自动对账收敛"
                 )
                 await SupplierSuspendOperationCRUD.update_callback_result(
@@ -1414,9 +1413,6 @@ class SuspendActionService:
         suspended_count = 0
         alerts_created = 0
         notify_user_ids = set()
-        warning_threshold = 80
-        critical_threshold = 90
-        stop_threshold = 100
 
         # 获取所有启用的单卡超量策略
         policies, _ = await SuspendPolicyCRUD.get_list(
@@ -1443,68 +1439,20 @@ class SuspendActionService:
         for card in cards:
             usage_percent = card.get_data_usage_percent()
             
-            # 找到适用的策略
-            policy = None
-            for p in policies:
-                if p.user_id is None or p.user_id == card.user_id:
-                    policy = p
-                    break
+            # 客户专属策略优先于全局策略；同一范围内使用最新策略。
+            policy = next((p for p in policies if p.user_id == card.user_id), None)
+            if policy is None:
+                policy = next((p for p in policies if p.user_id is None), None)
             
             if not policy:
                 continue
 
+            warning_threshold = policy.warning_threshold or 80
+            critical_threshold = policy.critical_threshold or 90
+            stop_threshold = policy.stop_threshold or 100
+
             # 检查告警阈值
-            if usage_percent >= warning_threshold and usage_percent < critical_threshold:
-                # 警告级别
-                exists = await AlertLogCRUD.check_exists(
-                    db, AlertTargetType.card, card.id, AlertLevel.warning
-                )
-                if not exists:
-                    await SuspendActionService._create_alert_and_notify(
-                        db=db,
-                        target_type=AlertTargetType.card,
-                        target_id=card.id,
-                        target_name=card.iccid,
-                        alert_level=AlertLevel.warning,
-                        usage_percent=int(usage_percent),
-                        threshold=warning_threshold,
-                        policy_id=policy.id,
-                        user_id=card.user_id,
-                        extra_context={
-                            "reason": "单卡流量达到预警阈值"
-                        },
-                        notify=False
-                    )
-                    alerts_created += 1
-                    if card.user_id:
-                        notify_user_ids.add(card.user_id)
-
-            elif usage_percent >= critical_threshold and usage_percent < stop_threshold:
-                # 紧急级别
-                exists = await AlertLogCRUD.check_exists(
-                    db, AlertTargetType.card, card.id, AlertLevel.critical
-                )
-                if not exists:
-                    await SuspendActionService._create_alert_and_notify(
-                        db=db,
-                        target_type=AlertTargetType.card,
-                        target_id=card.id,
-                        target_name=card.iccid,
-                        alert_level=AlertLevel.critical,
-                        usage_percent=int(usage_percent),
-                        threshold=critical_threshold,
-                        policy_id=policy.id,
-                        user_id=card.user_id,
-                        extra_context={
-                            "reason": "单卡流量达到紧急阈值"
-                        },
-                        notify=False
-                    )
-                    alerts_created += 1
-                    if card.user_id:
-                        notify_user_ids.add(card.user_id)
-
-            elif usage_percent >= stop_threshold:
+            if usage_percent >= stop_threshold:
                 # 超限 - 执行停卡
                 if policy.auto_suspend == 1:
                     supplier_map = await SuspendActionService._load_supplier_map(db, [card])
@@ -1552,6 +1500,56 @@ class SuspendActionService:
                         user_id=card.user_id,
                         extra_context={
                             "reason": f"单卡流量超限({usage_percent}%)"
+                        },
+                        notify=False
+                    )
+                    alerts_created += 1
+                    if card.user_id:
+                        notify_user_ids.add(card.user_id)
+
+            elif usage_percent >= critical_threshold:
+                # 紧急级别
+                exists = await AlertLogCRUD.check_exists(
+                    db, AlertTargetType.card, card.id, AlertLevel.critical
+                )
+                if not exists:
+                    await SuspendActionService._create_alert_and_notify(
+                        db=db,
+                        target_type=AlertTargetType.card,
+                        target_id=card.id,
+                        target_name=card.iccid,
+                        alert_level=AlertLevel.critical,
+                        usage_percent=int(usage_percent),
+                        threshold=critical_threshold,
+                        policy_id=policy.id,
+                        user_id=card.user_id,
+                        extra_context={
+                            "reason": "单卡流量达到紧急阈值"
+                        },
+                        notify=False
+                    )
+                    alerts_created += 1
+                    if card.user_id:
+                        notify_user_ids.add(card.user_id)
+
+            elif usage_percent >= warning_threshold:
+                # 警告级别
+                exists = await AlertLogCRUD.check_exists(
+                    db, AlertTargetType.card, card.id, AlertLevel.warning
+                )
+                if not exists:
+                    await SuspendActionService._create_alert_and_notify(
+                        db=db,
+                        target_type=AlertTargetType.card,
+                        target_id=card.id,
+                        target_name=card.iccid,
+                        alert_level=AlertLevel.warning,
+                        usage_percent=int(usage_percent),
+                        threshold=warning_threshold,
+                        policy_id=policy.id,
+                        user_id=card.user_id,
+                        extra_context={
+                            "reason": "单卡流量达到预警阈值"
                         },
                         notify=False
                     )

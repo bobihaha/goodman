@@ -229,25 +229,14 @@ VALUES ('suspend', '停卡管理', '/suspend', NULL, 8, 'warning', 'enable', NOW
 
 ### 3. 自动停卡逻辑
 
-后端需要实现定时任务，根据策略配置自动执行停卡操作：
+应用启动时必须注册单卡超量检查任务，每 5 分钟扫描一次已激活、未入流量池且套餐总量大于 0 的卡片：
 
-```python
-# 示例：定时检查到期卡片
-@scheduler.scheduled_job('cron', hour=0, minute=0)
-def check_expired_cards():
-    # 查询启用的到期停卡策略
-    policies = get_enabled_policies(type='expire')
-    
-    for policy in policies:
-        # 查询即将到期的卡片
-        cards = get_expiring_cards(
-            days_before=policy.config.days_before
-        )
-        
-        if policy.config.auto_suspend:
-            # 自动停卡
-            batch_suspend_cards(cards, reason='到期自动停卡')
-```
+- 客户专属策略优先于全局策略，并使用策略配置的预警、紧急和停卡阈值。
+- 达到停卡阈值且策略开启自动停卡时，先调用供应商停机接口；供应商受理成功后再更新本地状态并写入停卡记录。
+- 供应商异步回调或生命周期对账只能确认状态，不得把 `card_exceed` 等业务停机类型覆盖为 `manual`。
+- 无论是否开启自动停卡，达到对应阈值都要生成告警；同一卡片同一告警级别不重复生成。
+- 调度任务启用合并执行并限制单实例，避免服务繁忙或任务耗时造成重叠停卡。
+- 任务异常必须回滚当前会话并记录错误日志，不能影响后续调度。
 
 ### 4. 告警生成逻辑
 
@@ -386,5 +375,3 @@ def create_alert(alert_type, title, content, card_count, level):
 ## 📞 联系方式
 
 如有问题，请联系开发团队。
-
-

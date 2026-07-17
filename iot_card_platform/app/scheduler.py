@@ -6,11 +6,13 @@ from apscheduler.triggers.cron import CronTrigger
 from app.db.database import AsyncSessionLocal
 from app.services.sync_service import sync_service
 from app.services.card_expiry_reminder_service import card_expiry_reminder_service
+from app.services.suspend_service import SuspendActionService
 from app.crud.supplier_crud import supplier_crud
 from app.utils.timezone import CHINA_TZ
 from app.utils.logger import logger
 
 scheduler = AsyncIOScheduler()
+CARD_EXCEED_CHECK_MINUTES = 5
 
 
 async def sync_supplier_usage(supplier_id: int = None):
@@ -43,6 +45,21 @@ async def send_card_expiry_reminders():
             )
         except Exception as e:
             logger.error(f"到期卡邮件提醒失败 - 错误: {str(e)}")
+
+
+async def check_card_exceed():
+    """检查单卡流量超限并按策略自动停卡。"""
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await SuspendActionService.auto_suspend_card_exceed(db)
+            logger.info(
+                "单卡超量检查完成 - 停卡: %s, 新增告警: %s",
+                result["suspended_count"],
+                result["alerts_created"],
+            )
+        except Exception:
+            await db.rollback()
+            logger.exception("单卡超量检查失败")
 
 
 async def load_sync_tasks():
@@ -82,6 +99,15 @@ def start_scheduler():
         CronTrigger(day="10,15", hour=9, minute=0, timezone=CHINA_TZ),
         id="card_expiry_reminders",
         replace_existing=True
+    )
+    scheduler.add_job(
+        check_card_exceed,
+        CronTrigger(minute=f"*/{CARD_EXCEED_CHECK_MINUTES}", timezone=CHINA_TZ),
+        id="card_exceed_auto_suspend",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=CARD_EXCEED_CHECK_MINUTES * 60,
     )
     scheduler.start()
     logger.info("✅ 定时任务调度器已启动")
