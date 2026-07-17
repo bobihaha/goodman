@@ -16,6 +16,9 @@
           <el-option label="套餐" value="package" />
           <el-option label="库存" value="stock" />
           <el-option label="停卡" value="suspend" />
+          <el-option label="订单" value="orders" />
+          <el-option label="余额" value="balance" />
+          <el-option label="套餐周期" value="package_period" />
           <el-option label="系统" value="system" />
         </el-select>
       </el-form-item>
@@ -29,6 +32,21 @@
         >
           <el-option label="成功" :value="true" />
           <el-option label="失败" :value="false" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="操作类型">
+        <el-select
+          v-model="searchForm.action"
+          placeholder="全部"
+          clearable
+          style="width: 140px"
+          @change="handleSearch"
+        >
+          <el-option label="修改备注" value="update_remark" />
+          <el-option label="停机" value="suspend" />
+          <el-option label="复机" value="resume" />
+          <el-option label="重启" value="restart" />
+          <el-option label="划拨子账户" value="transfer" />
         </el-select>
       </el-form-item>
       <el-form-item label="时间范围">
@@ -58,20 +76,34 @@
       style="width: 100%"
     >
       <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="user_name" label="操作人" width="120" />
-      <el-table-column prop="module" label="模块" width="100" />
-      <el-table-column prop="action" label="操作" width="120" />
+      <el-table-column label="操作人" width="180">
+        <template #default="{ row }">
+          <span>{{ row.user_name || row.user_id || '-' }}</span>
+          <el-tag v-if="row.original_user_id" size="small" type="warning" class="operator-tag">
+            超级登录 #{{ row.original_user_id }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="模块" width="100">
+        <template #default="{ row }">{{ formatModule(row.module) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="120">
+        <template #default="{ row }">{{ formatAction(row.action) }}</template>
+      </el-table-column>
       <el-table-column label="目标" min-width="180">
         <template #default="{ row }">
-          <span v-if="row.target_name">{{ row.target_type }}: {{ row.target_name }}</span>
-          <span v-else-if="row.target_id">{{ row.target_type }} #{{ row.target_id }}</span>
+          <span v-if="row.target_name">{{ formatTargetType(row.target_type) }}: {{ row.target_name }}</span>
+          <span v-else-if="row.target_id">{{ formatTargetType(row.target_type) }} #{{ row.target_id }}</span>
           <span v-else>-</span>
         </template>
       </el-table-column>
+      <el-table-column label="操作详情" min-width="300" show-overflow-tooltip>
+        <template #default="{ row }">{{ formatDetail(row) }}</template>
+      </el-table-column>
       <el-table-column label="结果" width="80" align="center">
         <template #default="{ row }">
-          <el-tag :type="row.is_success ? 'success' : 'danger'" size="small">
-            {{ row.is_success ? '成功' : '失败' }}
+          <el-tag :type="formatResult(row).type" size="small">
+            {{ formatResult(row).label }}
           </el-tag>
         </template>
       </el-table-column>
@@ -112,8 +144,79 @@ const dateRange = ref<string[] | null>(null)
 
 const searchForm = reactive({
   module: '',
+  action: '',
   is_success: undefined as boolean | undefined
 })
+
+const moduleNames: Record<string, string> = {
+  card: '卡片',
+  cards: '卡片',
+  suspend: '停复机',
+  user: '用户',
+  pool: '流量池',
+  stock: '库存',
+  orders: '订单',
+  balance: '余额'
+}
+
+const actionNames: Record<string, string> = {
+  update_remark: '修改备注',
+  suspend: '停机',
+  resume: '复机',
+  restart: '重启',
+  transfer: '划拨子账户'
+}
+
+const formatModule = (module: string) => moduleNames[module] || module || '-'
+const formatAction = (action: string) => actionNames[action] || action || '-'
+const formatTargetType = (targetType?: string | null) => targetType === 'card' ? '卡片' : (targetType || '目标')
+
+const formatResult = (row: OperationLog): { label: string; type: 'success' | 'warning' | 'danger' } => {
+  if (row.detail) {
+    try {
+      const detail = JSON.parse(row.detail)
+      if (detail.source === 'h5' && detail.status === 'processing') {
+        return { label: '处理中', type: 'warning' }
+      }
+    } catch {
+      // 兼容历史纯文本详情。
+    }
+  }
+  return row.is_success
+    ? { label: '成功', type: 'success' }
+    : { label: '失败', type: 'danger' }
+}
+
+const formatDetail = (row: OperationLog) => {
+  if (!row.detail) return '-'
+  try {
+    const detail = JSON.parse(row.detail)
+    if (row.action === 'update_remark') {
+      return `备注：${detail.old_remark || '无'} → ${detail.new_remark || '无'}`
+    }
+    if (detail.source === 'h5' && ['suspend', 'resume', 'restart'].includes(row.action)) {
+      const statusName: Record<string, string> = {
+        processing: '处理中',
+        success: '成功',
+        failed: '失败'
+      }
+      const phaseName: Record<string, string> = {
+        suspend: '停机阶段',
+        resume: '复机阶段',
+        resume_pending: '等待复机'
+      }
+      const actionName = actionNames[row.action] || row.action
+      const phase = detail.current_phase ? `，${phaseName[detail.current_phase] || detail.current_phase}` : ''
+      return `H5${actionName}：${statusName[detail.status] || detail.status || '处理中'}${phase}`
+    }
+    if (row.action === 'suspend' || row.action === 'resume') {
+      return `${row.action === 'suspend' ? '停机' : '复机'}原因：${detail.reason || '未填写'}`
+    }
+  } catch {
+    return row.detail
+  }
+  return row.detail
+}
 
 const pagination = reactive({
   page: 1,
@@ -129,6 +232,7 @@ const fetchLogs = async () => {
       page_size: pagination.page_size
     }
     if (searchForm.module) params.module = searchForm.module
+    if (searchForm.action) params.action = searchForm.action
     if (searchForm.is_success !== undefined) params.is_success = searchForm.is_success
     if (dateRange.value && dateRange.value.length === 2) {
       params.start_time = dateRange.value[0]
@@ -152,6 +256,7 @@ const handleSearch = () => {
 
 const handleReset = () => {
   searchForm.module = ''
+  searchForm.action = ''
   searchForm.is_success = undefined
   dateRange.value = null
   handleSearch()
@@ -172,6 +277,10 @@ onMounted(() => {
     margin-top: 16px;
     display: flex;
     justify-content: flex-end;
+  }
+
+  .operator-tag {
+    margin-left: 6px;
   }
 }
 </style>

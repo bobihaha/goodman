@@ -4,28 +4,22 @@
 import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from app.crud.system_crud import SysConfigCRUD, SysLoginLogCRUD, SysOperationLogCRUD, SysNotifyTemplateCRUD
 from app.db.models.sys_log import SysConfigModel, SysNotifyTemplateModel
 from app.db.models.sys_user import UserLevel
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.schemas.system import ConfigCreate, ConfigUpdate, NotifyTemplateCreate, NotifyTemplateUpdate, AlertRules
-
-
-CHINA_TIME_OFFSET = timedelta(hours=8)
+from app.utils.timezone import format_china_datetime, normalize_china_datetime
 
 
 def _storage_time_to_china_string(value: Optional[datetime]) -> Optional[str]:
-    if not value:
-        return None
-    return (value + CHINA_TIME_OFFSET).strftime("%Y-%m-%d %H:%M:%S")
+    return format_china_datetime(value)
 
 
 def _china_time_to_storage(value: Optional[datetime]) -> Optional[datetime]:
-    if not value:
-        return None
-    return value - CHINA_TIME_OFFSET
+    return normalize_china_datetime(value)
 
 
 def _format_log_china_time(log: dict) -> dict:
@@ -314,6 +308,23 @@ class OperationLogService:
 
     CARD_RENEW_ACTIONS = ["card_renew_purchase", "renew"]
     CARD_TOPUP_ACTIONS = ["card_topup_purchase", "add_flow"]
+    MODULE_ALIASES = {
+        "user": ["user", "users"],
+        "card": ["card", "cards", "orders"],
+        "pool": ["pool", "pools", "orders"],
+        "package": ["package", "packages"],
+        "stock": ["stock", "stocks"],
+        "suspend": ["suspend", "card"],
+        "system": ["system"],
+        "orders": ["orders"],
+        "balance": ["balance"],
+        "package_period": ["package_period"],
+    }
+    MODULE_ACTION_ALIASES = {
+        "card": ["transfer", "update_remark", "suspend", "resume", "restart", "renew", "add_flow", "card_renew_purchase", "card_topup_purchase"],
+        "suspend": ["suspend", "resume", "restart"],
+        "pool": ["add_flow", "pool_topup_purchase"],
+    }
 
     @staticmethod
     async def log_operation(
@@ -375,12 +386,17 @@ class OperationLogService:
             if user_id is not None and user_id not in scoped_user_ids:
                 return [], 0
 
+        module_values = OperationLogService.MODULE_ALIASES.get(module, [module]) if module else None
+        action_values = None if action else OperationLogService.MODULE_ACTION_ALIASES.get(module)
+
         logs, total = await SysOperationLogCRUD.get_list(
             db=db,
             user_id=user_id,
             user_ids=scoped_user_ids,
-            module=module,
+            module=None,
+            modules=module_values,
             action=action,
+            actions=action_values,
             target_type=target_type,
             target_id=target_id,
             is_success=is_success,

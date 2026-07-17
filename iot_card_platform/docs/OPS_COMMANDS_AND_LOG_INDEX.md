@@ -437,6 +437,16 @@ LIMIT 20;
 - `批量续费`
 - `后台补量`
 
+卡片备注变更使用 `action = 'update_remark'`，`detail` 为包含 `source`、`old_remark`、`new_remark` 的 JSON；可按卡号追溯：
+
+```sql
+SELECT id, user_id, user_name, original_user_id, target_name, detail, created_at
+FROM sys_operation_logs
+WHERE action = 'update_remark'
+  AND target_name = '目标ICCID'
+ORDER BY id DESC;
+```
+
 ### 11.3 查看出入库记录里的套餐和周期
 
 ```sql

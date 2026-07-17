@@ -138,7 +138,9 @@ async def manual_suspend(
         operator_id=user_id,
         user_id=user_id,
         user_ids=user_ids,
-        is_admin=is_admin
+        is_admin=is_admin,
+        operator_name=current_user.name,
+        original_user_id=current_user.original_user_id
     )
     
     return ResponseModel(
@@ -169,7 +171,9 @@ async def manual_resume(
         operator_id=user_id,
         user_id=user_id,
         user_ids=user_ids,
-        is_admin=is_admin
+        is_admin=is_admin,
+        operator_name=current_user.name,
+        original_user_id=current_user.original_user_id
     )
 
     return ResponseModel(
@@ -196,7 +200,9 @@ async def force_activate(
         operator_id=current_user.id,
         user_id=current_user.id,
         is_admin=True,
-        force=True
+        force=True,
+        operator_name=current_user.name,
+        original_user_id=current_user.original_user_id
     )
 
     return ResponseModel(

@@ -2,6 +2,7 @@
 物联网卡服务层
 """
 import asyncio
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Tuple
@@ -11,6 +12,7 @@ from app.crud.iot_card_crud import iot_card_crud, card_transfer_crud
 from app.crud.package_crud import sale_package_crud
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.package import PeriodType
+from app.db.models.sys_log import SysOperationLogModel
 from app.db.models.sys_user import UserLevel, SysUserModel
 from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.crud.system_crud import SysOperationLogCRUD
@@ -45,6 +47,45 @@ class IotCardService:
         SuspendType.pool_exceed,
         SuspendType.device_separation,
     }
+
+    @staticmethod
+    async def _get_user_name(db: AsyncSession, user_id: Optional[int]) -> Optional[str]:
+        if not user_id:
+            return None
+        result = await db.execute(select(SysUserModel.name).where(SysUserModel.id == user_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def _add_remark_audit_logs(
+        db: AsyncSession,
+        cards: List[IotCardModel],
+        current_user_id: int,
+        user_name: Optional[str],
+        old_remark_map: dict[int, str],
+        new_remark: str,
+        source: str = "system",
+        original_user_id: Optional[int] = None
+    ) -> None:
+        """将卡片备注变更与业务更新放入同一事务。"""
+        db.add_all([
+            SysOperationLogModel(
+                user_id=current_user_id,
+                user_name=user_name,
+                original_user_id=original_user_id,
+                module="card",
+                action="update_remark",
+                target_type="card",
+                target_id=card.id,
+                target_name=card.iccid,
+                detail=json.dumps({
+                    "source": source,
+                    "old_remark": old_remark_map.get(card.id),
+                    "new_remark": new_remark,
+                }, ensure_ascii=False),
+                is_success=1
+            )
+            for card in cards
+        ])
 
     async def _get_stock_out_no_map(
         self,
@@ -648,7 +689,9 @@ class IotCardService:
         card_id: int,
         remark: str,
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        audit_source: str = "system",
+        original_user_id: Optional[int] = None
     ) -> dict:
         """更新卡片备注"""
         from app.utils.const import sanitize_text
@@ -657,7 +700,19 @@ class IotCardService:
         card = await iot_card_crud.get_by_id_in_scope(db, card_id, user_ids)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在或无权操作")
+        old_remark_map = await iot_card_crud.get_user_remark_map(db, [card.id], current_user_id)
+        user_name = await self._get_user_name(db, original_user_id or current_user_id)
         await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
+        self._add_remark_audit_logs(
+            db,
+            [card],
+            current_user_id,
+            user_name,
+            old_remark_map,
+            remark,
+            audit_source,
+            original_user_id
+        )
         await db.commit()
         card_dict = card.to_dict()
         await self._hydrate_card_dicts(db, [card_dict], current_user_id)
@@ -669,7 +724,8 @@ class IotCardService:
         card_ids: List[int],
         remark: str,
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        original_user_id: Optional[int] = None
     ) -> dict:
         """批量更新备注"""
         if len(card_ids) > settings.max_batch_operation_size:
@@ -679,8 +735,21 @@ class IotCardService:
         remark = sanitize_text(remark)
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
         cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
+        old_remark_map = await iot_card_crud.get_user_remark_map(
+            db, [card.id for card in cards], current_user_id
+        )
+        user_name = await self._get_user_name(db, original_user_id or current_user_id)
         for card in cards:
             await iot_card_crud.upsert_user_remark(db, card.id, current_user_id, remark)
+        self._add_remark_audit_logs(
+            db,
+            cards,
+            current_user_id,
+            user_name,
+            old_remark_map,
+            remark,
+            original_user_id=original_user_id
+        )
         await db.commit()
         count = len(cards)
         return {
@@ -696,7 +765,8 @@ class IotCardService:
         to_user_id: int,
         current_user_id: int,
         user_level: int,
-        remark: Optional[str] = None
+        remark: Optional[str] = None,
+        original_user_id: Optional[int] = None
     ) -> dict:
         """划拨卡片给子用户"""
         from sqlalchemy import select
@@ -741,6 +811,20 @@ class IotCardService:
         if not card:
             raise BusinessException(code=404, msg="卡片不存在或无权操作")
 
+        operator_name = await self._get_user_name(db, original_user_id or current_user_id)
+        await SysOperationLogCRUD.create(
+            db=db,
+            module="card",
+            action="transfer",
+            user_id=current_user_id,
+            user_name=operator_name,
+            original_user_id=original_user_id,
+            target_type="card",
+            target_id=card.id,
+            target_name=card.iccid,
+            detail=f"划拨卡片给用户 {target_user.name}（ID：{to_user_id}）。备注：{remark or ''}"
+        )
+
         return card.to_dict()
 
     async def batch_transfer(
@@ -750,7 +834,8 @@ class IotCardService:
         to_user_id: int,
         current_user_id: int,
         user_level: int,
-        remark: Optional[str] = None
+        remark: Optional[str] = None,
+        original_user_id: Optional[int] = None
     ) -> dict:
         """批量划拨"""
         if len(card_ids) > settings.max_batch_operation_size:
@@ -786,6 +871,22 @@ class IotCardService:
             to_user_id=to_user_id,
             operator_id=current_user_id,
             remark=remark
+        )
+
+        operator_name = await self._get_user_name(db, original_user_id or current_user_id)
+        await SysOperationLogCRUD.create(
+            db=db,
+            module="card",
+            action="transfer",
+            user_id=current_user_id,
+            user_name=operator_name,
+            original_user_id=original_user_id,
+            target_type="user",
+            target_id=to_user_id,
+            target_name=target_user.name,
+            detail=f"批量划拨卡片 {len(card_ids)} 张，成功 {success} 张，失败 {failed} 张。备注：{remark or ''}",
+            is_success=failed == 0,
+            error_msg=None if failed == 0 else f"{failed} 张划拨失败"
         )
 
         return {
@@ -1037,10 +1138,11 @@ class IotCardService:
         to_user_id: int,
         current_user_id: int,
         user_level: int,
-        remark: Optional[str] = None
+        remark: Optional[str] = None,
+        original_user_id: Optional[int] = None
     ) -> dict:
         """通过ICCID批量划拨"""
-        from sqlalchemy import select, update
+        from sqlalchemy import select
         from app.db.models.sys_user import SysUserModel
         
         if user_level == UserLevel.SUB_USER.value:
@@ -1048,7 +1150,8 @@ class IotCardService:
         
         # 验证目标用户存在
         target_user = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-        if not target_user.scalar_one_or_none():
+        target_user_obj = target_user.scalar_one_or_none()
+        if not target_user_obj:
             raise BusinessException(code=404, msg="目标用户不存在")
         
         user_filter = None if user_level == UserLevel.SUPER_ADMIN.value else current_user_id
@@ -1093,20 +1196,34 @@ class IotCardService:
                 )
                 db.add(transfer_log)
                 
-                # 获取目标用户名称
-                target_user_obj = await db.execute(select(SysUserModel).where(SysUserModel.id == to_user_id))
-                target_user_name = target_user_obj.scalar_one().name
-                
                 success_list.append({
                     "iccid": card.iccid,
                     "msisdn": card.msisdn,
-                    "to_user_name": target_user_name,
+                    "to_user_name": target_user_obj.name,
                     "message": "划拨成功"
                 })
             except Exception as e:
                 failed_list.append({"iccid": iccid, "error": str(e)})
         
         await db.commit()
+
+        operator_name = await self._get_user_name(db, original_user_id or current_user_id)
+        for item in success_list:
+            card = card_map.get(item["iccid"])
+            if not card:
+                continue
+            await SysOperationLogCRUD.create(
+                db=db,
+                module="card",
+                action="transfer",
+                user_id=current_user_id,
+                user_name=operator_name,
+                original_user_id=original_user_id,
+                target_type="card",
+                target_id=card.id,
+                target_name=card.iccid,
+                detail=f"按 ICCID 批量划拨卡片给用户 {target_user_obj.name}（ID：{to_user_id}）。备注：{remark or ''}"
+            )
         
         return {
             "success": len(success_list),
@@ -1121,13 +1238,21 @@ class IotCardService:
         iccids: List[str],
         remark: str,
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        original_user_id: Optional[int] = None
     ) -> dict:
         """通过ICCID批量备注"""
+        from app.utils.const import sanitize_text
+        remark = sanitize_text(remark)
         cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
         card_map = {card.iccid: card for card in cards}
+        old_remark_map = await iot_card_crud.get_user_remark_map(
+            db, [card.id for card in cards], current_user_id
+        )
+        user_name = await self._get_user_name(db, original_user_id or current_user_id)
         success_list = []
         failed_list = []
+        success_cards = {}
 
         for iccid in iccids:
             card = card_map.get(iccid)
@@ -1142,9 +1267,19 @@ class IotCardService:
                     "msisdn": card.msisdn,
                     "remark": remark
                 })
+                success_cards[card.id] = card
             except Exception as e:
                 failed_list.append({"iccid": iccid, "error": str(e)})
-        
+
+        self._add_remark_audit_logs(
+            db,
+            list(success_cards.values()),
+            current_user_id,
+            user_name,
+            old_remark_map,
+            remark,
+            original_user_id=original_user_id
+        )
         await db.commit()
 
         return {
@@ -1263,12 +1398,14 @@ class IotCardService:
         iccids: List[str],
         reason: Optional[str],
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        original_user_id: Optional[int] = None,
     ) -> dict:
         """通过ICCID批量停机"""
         cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
         card_map = {card.iccid: card for card in cards}
         found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
+        operator_name = await self._get_user_name(db, original_user_id or current_user_id)
 
         result = await SuspendActionService.manual_suspend(
             db=db,
@@ -1276,7 +1413,9 @@ class IotCardService:
             operator_id=current_user_id,
             user_id=current_user_id,
             user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
-            is_admin=user_level == UserLevel.SUPER_ADMIN.value
+            is_admin=user_level == UserLevel.SUPER_ADMIN.value,
+            operator_name=operator_name,
+            original_user_id=original_user_id,
         )
 
         success_list = []
@@ -1308,12 +1447,14 @@ class IotCardService:
         db: AsyncSession,
         iccids: List[str],
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        original_user_id: Optional[int] = None,
     ) -> dict:
         """通过ICCID批量复机"""
         cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
         card_map = {card.iccid: card for card in cards}
         found_card_ids = [card_map[iccid].id for iccid in iccids if iccid in card_map]
+        operator_name = await self._get_user_name(db, original_user_id or current_user_id)
 
         result = await SuspendActionService.manual_resume(
             db=db,
@@ -1321,7 +1462,9 @@ class IotCardService:
             operator_id=current_user_id,
             user_id=current_user_id,
             user_ids=await self._get_accessible_user_ids(db, current_user_id, user_level),
-            is_admin=user_level == UserLevel.SUPER_ADMIN.value
+            is_admin=user_level == UserLevel.SUPER_ADMIN.value,
+            operator_name=operator_name,
+            original_user_id=original_user_id,
         )
 
         success_list = []

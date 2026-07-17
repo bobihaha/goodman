@@ -168,6 +168,7 @@ POST   /api/v1/stock/inventory/export     # 导出库存数据
 
 # 卡片回收
 POST   /api/v1/stock/recycle              # 卡片回收
+POST   /api/v1/stock/recycle/by-iccids    # 通过 ICCID 批量回收（支持页面粘贴和 Excel）
 GET    /api/v1/stock/recycle/records      # 回收记录列表
 
 # 数据同步
@@ -289,7 +290,7 @@ GET    /api/v1/dashboard/cards/over-usage?carrier=cucc # 超量卡明细
 
 ### 模块 9: 系统设置 ✅
 
-**功能**：系统配置、操作日志、登录日志、告警规则、通知模板
+**功能**：系统配置、操作日志、登录日志、告警规则、通知模板。用户侧操作日志可查看卡片备注变更、后台及 H5 停机/复机、H5 重启和划拨子账户记录；H5 操作记录供应商处理状态并阻止重复提交。父账户可查看自己及直属子账户日志，子账户仅查看自己的日志。
 
 **API 端点**：
 ```

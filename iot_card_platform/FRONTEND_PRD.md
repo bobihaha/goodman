@@ -256,8 +256,15 @@ POST /api/v1/stock/in
 POST /api/v1/stock/out
 GET  /api/v1/stock/inventory
 POST /api/v1/stock/recycle
+POST /api/v1/stock/recycle/by-iccids
 GET  /api/v1/stock/records/card
 ```
+
+**卡片回收补充要求**：
+- `/stock/recycle` 增加“批量粘贴回收”，支持一次粘贴多条 ICCID，以换行、空格或中英文逗号分隔。
+- 输入内容自动去重并实时统计；非纯数字或长度不足 10 位的内容必须在提交前提示，单次最多 10000 条。
+- 提交前必须填写回收原因并二次确认，继续复用 `POST /api/v1/stock/recycle/by-iccids` 的既有回收规则和超级管理员权限。
+- 部分失败时显示成功数、失败数和未找到的 ICCID，并保留失败项便于再次核对。
 
 **列表展示要求**：
 - 出库选卡列表新增 `material_name`

@@ -18,6 +18,7 @@ from app.db.models.suspend import (
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, CardType, SuspendType
 from app.db.models.supplier import SupplierModel
+from app.db.models.sys_log import SysOperationLogModel
 from app.db.models.sys_user import SysUserModel, UserLevel
 from app.schemas.suspend import (
     PolicyCreate, PolicyUpdate, ManualSuspend, ManualResume, SuspendResult
@@ -318,6 +319,128 @@ class SuspendActionService:
         )
 
     @staticmethod
+    def _next_audit_context(request_meta: Dict[str, Any], phase: str) -> Optional[Dict[str, Any]]:
+        if request_meta.get("audit_source") != "h5" or not request_meta.get("audit_log_id"):
+            return None
+        return {
+            "audit_source": "h5",
+            "audit_log_id": request_meta.get("audit_log_id"),
+            "audit_action": request_meta.get("audit_action"),
+            "audit_phase": phase,
+            "audit_reason": request_meta.get("audit_reason"),
+        }
+
+    @staticmethod
+    async def _update_supplier_action_audit(
+        db: AsyncSession,
+        request_meta: Dict[str, Any],
+        status: str,
+        callback_no: Optional[str] = None,
+        supplier_status: Optional[str] = None,
+        error: Optional[str] = None,
+        operation: Optional[SupplierSuspendOperationModel] = None,
+    ) -> None:
+        if request_meta.get("audit_source") != "h5" or not request_meta.get("audit_log_id"):
+            return
+
+        log = await db.get(SysOperationLogModel, int(request_meta["audit_log_id"]))
+        if not log:
+            return
+
+        try:
+            detail = json.loads(log.detail or "{}")
+        except Exception:
+            detail = {"source": "h5"}
+
+        action = request_meta.get("audit_action") or log.action
+        phase = request_meta.get("audit_phase") or (
+            operation.action.value if operation and operation.action else action
+        )
+        phases = detail.setdefault("phases", {})
+        phase_already_successful = phases.get(phase, {}).get("status") == "success"
+        phase_status = {
+            "status": status,
+            "callback_no": callback_no,
+            "supplier_status": supplier_status,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if error:
+            phase_status["error"] = error
+
+        detail["source"] = "h5"
+        detail["reason"] = detail.get("reason") or request_meta.get("audit_reason")
+
+        is_restart_suspend_success = action == "restart" and phase == "suspend" and status == "success"
+        if not phase_already_successful:
+            phases[phase] = phase_status
+            detail["current_phase"] = phase
+            if is_restart_suspend_success:
+                detail["status"] = "processing"
+                detail["current_phase"] = "resume_pending"
+            else:
+                detail["status"] = status
+
+            if status == "failed":
+                log.is_success = 0
+                log.error_msg = error or "供应商操作失败"
+            elif status == "success" and not is_restart_suspend_success:
+                log.is_success = 1
+                log.error_msg = None
+
+        log.detail = json.dumps(detail, ensure_ascii=False)
+        db.add(log)
+
+        if operation and status in {"success", "failed"}:
+            finalized_key = f"audit_{phase}_finalized"
+            if not request_meta.get(finalized_key):
+                request_meta[finalized_key] = True
+                request_meta[f"{finalized_key}_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                operation.request_result = json.dumps(request_meta, ensure_ascii=False)
+                db.add(operation)
+
+                if status == "success" and not phase_already_successful:
+                    db.add(SuspendLogModel(
+                        card_id=operation.card_id,
+                        iccid=operation.iccid,
+                        action=operation.action,
+                        suspend_type="manual",
+                        reason=request_meta.get("audit_reason") or f"H5{phase}",
+                        api_called=1,
+                        api_result=json.dumps({"callback_no": operation.callback_no}, ensure_ascii=False),
+                        operator_id=operation.operator_id,
+                    ))
+
+        await db.commit()
+
+    @staticmethod
+    async def _safe_update_supplier_action_audit(
+        db: AsyncSession,
+        request_meta: Dict[str, Any],
+        status: str,
+        callback_no: Optional[str] = None,
+        supplier_status: Optional[str] = None,
+        error: Optional[str] = None,
+        operation: Optional[SupplierSuspendOperationModel] = None,
+    ) -> None:
+        """Keep auxiliary H5 audit failures from changing the supplier action result."""
+        try:
+            await SuspendActionService._update_supplier_action_audit(
+                db=db,
+                request_meta=request_meta,
+                status=status,
+                callback_no=callback_no,
+                supplier_status=supplier_status,
+                error=error,
+                operation=operation,
+            )
+        except Exception as exc:
+            try:
+                await db.rollback()
+            except Exception:
+                logger.exception("H5供应商操作审计回滚失败")
+            logger.error("H5供应商操作审计写入失败: %s", exc, exc_info=True)
+
+    @staticmethod
     async def _load_supplier_map(
         db: AsyncSession,
         cards: List[IotCardModel]
@@ -414,11 +537,35 @@ class SuspendActionService:
                             resume_callback_no=callback_no,
                             observed_attempts=request_meta["auto_reconcile_attempts"]
                         )
-                        if request_meta["auto_reconcile_attempts"] < 5:
-                            SuspendActionService.schedule_pending_operation_reconcile(
-                                callback_no=callback_no,
-                                delay_seconds=settings.supplier_callback_reconcile_seconds
-                            )
+                    if request_meta["auto_reconcile_attempts"] < 5:
+                        SuspendActionService.schedule_pending_operation_reconcile(
+                            callback_no=callback_no,
+                            delay_seconds=settings.supplier_callback_reconcile_seconds
+                        )
+                    else:
+                        error = f"供应商状态在对账窗口内未收敛，当前状态：{lifecycle_status or '-'}"
+                        await SupplierSuspendOperationCRUD.update_callback_result(
+                            db=db,
+                            operation=operation,
+                            callback_payload=json.dumps({
+                                "source": "auto_reconcile_timeout",
+                                "callback_no": callback_no,
+                                "status": lifecycle_status,
+                            }, ensure_ascii=False),
+                            callback_code="AUTO_RECONCILE_TIMEOUT",
+                            callback_msg=error,
+                            account_status=lifecycle_status,
+                            callback_status="failed"
+                        )
+                        await SuspendActionService._safe_update_supplier_action_audit(
+                            db=db,
+                            request_meta=request_meta,
+                            status="failed",
+                            callback_no=callback_no,
+                            supplier_status=lifecycle_status,
+                            error=error,
+                            operation=operation,
+                        )
                     return
 
                 SuspendActionService.normalize_card_suspend_state(
@@ -443,6 +590,14 @@ class SuspendActionService:
                     callback_msg="Supplier lifecycle status matched expected state",
                     account_status=lifecycle_status,
                     callback_status="success"
+                )
+                await SuspendActionService._safe_update_supplier_action_audit(
+                    db=db,
+                    request_meta=request_meta,
+                    status="success",
+                    callback_no=callback_no,
+                    supplier_status=lifecycle_status,
+                    operation=operation,
                 )
                 if operation.action == SuspendActionType.suspend:
                     if request_meta.get("refresh_resume_pending") and not request_meta.get("refresh_resume_submitted"):
@@ -546,7 +701,8 @@ class SuspendActionService:
                 db=db,
                 card=card,
                 supplier=supplier,
-                operator_id=operation.operator_id
+                operator_id=operation.operator_id,
+                request_context=SuspendActionService._next_audit_context(request_meta, "resume")
             )
             request_meta["refresh_resume_submitted"] = resume_success
             request_meta["refresh_resume_callback_no"] = new_resume_callback_no
@@ -570,7 +726,8 @@ class SuspendActionService:
         card: IotCardModel,
         supplier: Optional[SupplierModel],
         reason: Optional[str],
-        operator_id: Optional[int] = None
+        operator_id: Optional[int] = None,
+        request_context: Optional[Dict[str, Any]] = None,
     ) -> tuple[bool, Optional[str], Optional[str]]:
         if not SuspendActionService._supplier_supports_network_switch(card, supplier):
             logger.warning(
@@ -578,6 +735,9 @@ class SuspendActionService:
                 getattr(supplier, "code", None),
                 card.iccid,
                 card.card_type,
+            )
+            await SuspendActionService._safe_update_supplier_action_audit(
+                db, request_context or {}, "failed", error="供应商不支持当前卡片网络关停"
             )
             return False, None, None
         callback_no = SuspendActionService._generate_callback_no(SuspendActionType.suspend, card.iccid)
@@ -600,20 +760,35 @@ class SuspendActionService:
                 api_config=supplier.api_config,
             )
             result = await supplier_client.suspend_card(card.iccid, reason, callback_no=callback_no)
-            request_meta = getattr(supplier_client, "last_sor_result", None) or {"submitted": result}
+            request_meta = {
+                **(getattr(supplier_client, "last_sor_result", None) or {"submitted": result}),
+                **(request_context or {}),
+            }
             await SupplierSuspendOperationCRUD.update_request_result(
                 db=db,
                 operation_id=operation.id,
                 request_result=json.dumps(request_meta, ensure_ascii=False)
             )
+            await SuspendActionService._safe_update_supplier_action_audit(
+                db=db,
+                request_meta=request_meta,
+                status="processing" if request_meta.get("submitted") else "failed",
+                callback_no=callback_no,
+                error=None if request_meta.get("submitted") else "供应商停机请求提交失败",
+                operation=operation,
+            )
             if request_meta.get("submitted"):
                 SuspendActionService.schedule_pending_operation_reconcile(callback_no)
             return result, callback_no, request_meta.get("reconciled_status")
         except Exception as exc:
+            request_meta = {"submitted": False, "error": str(exc), **(request_context or {})}
             await SupplierSuspendOperationCRUD.update_request_result(
                 db=db,
                 operation_id=operation.id,
-                request_result=json.dumps({"submitted": False, "error": str(exc)}, ensure_ascii=False)
+                request_result=json.dumps(request_meta, ensure_ascii=False)
+            )
+            await SuspendActionService._safe_update_supplier_action_audit(
+                db, request_meta, "failed", callback_no=callback_no, error=str(exc), operation=operation
             )
             logger.error(f"供应商API停机失败: iccid={card.iccid}, error={exc}")
             return False, callback_no, None
@@ -623,7 +798,8 @@ class SuspendActionService:
         db: AsyncSession,
         card: IotCardModel,
         supplier: Optional[SupplierModel],
-        operator_id: Optional[int] = None
+        operator_id: Optional[int] = None,
+        request_context: Optional[Dict[str, Any]] = None,
     ) -> tuple[bool, Optional[str], Optional[str]]:
         if not SuspendActionService._supplier_supports_network_switch(card, supplier):
             logger.warning(
@@ -631,6 +807,9 @@ class SuspendActionService:
                 getattr(supplier, "code", None),
                 card.iccid,
                 card.card_type,
+            )
+            await SuspendActionService._safe_update_supplier_action_audit(
+                db, request_context or {}, "failed", error="供应商不支持当前卡片网络恢复"
             )
             return False, None, None
         callback_no = SuspendActionService._generate_callback_no(SuspendActionType.resume, card.iccid)
@@ -653,20 +832,35 @@ class SuspendActionService:
                 api_config=supplier.api_config,
             )
             result = await supplier_client.resume_card(card.iccid, callback_no=callback_no)
-            request_meta = getattr(supplier_client, "last_sor_result", None) or {"submitted": result}
+            request_meta = {
+                **(getattr(supplier_client, "last_sor_result", None) or {"submitted": result}),
+                **(request_context or {}),
+            }
             await SupplierSuspendOperationCRUD.update_request_result(
                 db=db,
                 operation_id=operation.id,
                 request_result=json.dumps(request_meta, ensure_ascii=False)
             )
+            await SuspendActionService._safe_update_supplier_action_audit(
+                db=db,
+                request_meta=request_meta,
+                status="processing" if request_meta.get("submitted") else "failed",
+                callback_no=callback_no,
+                error=None if request_meta.get("submitted") else "供应商复机请求提交失败",
+                operation=operation,
+            )
             if request_meta.get("submitted"):
                 SuspendActionService.schedule_pending_operation_reconcile(callback_no)
             return result, callback_no, request_meta.get("reconciled_status")
         except Exception as exc:
+            request_meta = {"submitted": False, "error": str(exc), **(request_context or {})}
             await SupplierSuspendOperationCRUD.update_request_result(
                 db=db,
                 operation_id=operation.id,
-                request_result=json.dumps({"submitted": False, "error": str(exc)}, ensure_ascii=False)
+                request_result=json.dumps(request_meta, ensure_ascii=False)
+            )
+            await SuspendActionService._safe_update_supplier_action_audit(
+                db, request_meta, "failed", callback_no=callback_no, error=str(exc), operation=operation
             )
             logger.error(f"供应商API复机失败: iccid={card.iccid}, error={exc}")
             return False, callback_no, None
@@ -856,7 +1050,8 @@ class SuspendActionService:
                     db=db,
                     card=card,
                     supplier=supplier,
-                    operator_id=operation.operator_id
+                    operator_id=operation.operator_id,
+                    request_context=SuspendActionService._next_audit_context(request_meta, "resume")
                 )
 
                 request_meta["refresh_resume_fallback_delay_seconds"] = delay_seconds
@@ -924,11 +1119,32 @@ class SuspendActionService:
         operator_id: Optional[int] = None,
         reason: Optional[str] = None,
         api_called: bool = False,
-        api_result: Optional[str] = None
+        api_result: Optional[str] = None,
+        audit_user_id: Optional[int] = None,
+        audit_user_name: Optional[str] = None,
+        original_user_id: Optional[int] = None
     ) -> None:
         """执行复机并记录日志"""
         old_suspend_type = card.suspend_type.value if card.suspend_type else "manual"
         await CardSuspendCRUD.resume_card(db=db, card_id=card.id)
+
+        if audit_user_id is not None:
+            db.add(SysOperationLogModel(
+                user_id=audit_user_id,
+                user_name=audit_user_name,
+                original_user_id=original_user_id,
+                module="card",
+                action="resume",
+                target_type="card",
+                target_id=card.id,
+                target_name=card.iccid,
+                detail=json.dumps({
+                    "reason": reason,
+                    "suspend_type": old_suspend_type,
+                    "source": "manual"
+                }, ensure_ascii=False),
+                is_success=1
+            ))
 
         await SuspendLogCRUD.create(
             db=db,
@@ -949,7 +1165,9 @@ class SuspendActionService:
         operator_id: int,
         user_id: Optional[int] = None,
         user_ids: Optional[List[int]] = None,
-        is_admin: bool = False
+        is_admin: bool = False,
+        operator_name: Optional[str] = None,
+        original_user_id: Optional[int] = None
     ) -> SuspendResult:
         """手动停卡"""
         success_cards = []
@@ -1014,6 +1232,22 @@ class SuspendActionService:
                 )
 
             # 记录日志
+            db.add(SysOperationLogModel(
+                user_id=user_id or operator_id,
+                user_name=operator_name,
+                original_user_id=original_user_id,
+                module="card",
+                action="suspend",
+                target_type="card",
+                target_id=card.id,
+                target_name=card.iccid,
+                detail=json.dumps({
+                    "reason": data.reason,
+                    "suspend_type": "manual",
+                    "source": "manual"
+                }, ensure_ascii=False),
+                is_success=1
+            ))
             await SuspendLogCRUD.create(
                 db=db,
                 card_id=card_id,
@@ -1043,7 +1277,9 @@ class SuspendActionService:
         user_id: Optional[int] = None,
         user_ids: Optional[List[int]] = None,
         is_admin: bool = False,
-        force: bool = False
+        force: bool = False,
+        operator_name: Optional[str] = None,
+        original_user_id: Optional[int] = None
     ) -> SuspendResult:
         """手动复机"""
         success_cards = []
@@ -1106,7 +1342,10 @@ class SuspendActionService:
                     operator_id=operator_id,
                     reason=data.reason or "供应商返回已在使用，已自动纠正本地状态",
                     api_called=bool(callback_no),
-                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None
+                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None,
+                    audit_user_id=user_id or operator_id,
+                    audit_user_name=operator_name,
+                    original_user_id=original_user_id
                 )
             else:
                 await SuspendActionService._resume_card_with_logging(
@@ -1115,7 +1354,10 @@ class SuspendActionService:
                     operator_id=operator_id,
                     reason=data.reason,
                     api_called=bool(callback_no),
-                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None
+                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None,
+                    audit_user_id=user_id or operator_id,
+                    audit_user_name=operator_name,
+                    original_user_id=original_user_id
                 )
 
             success_cards.append(card.iccid)
@@ -1400,15 +1642,26 @@ class SupplierCallbackService:
             callback_status="success" if callback_success else "failed"
         )
 
-        if not callback_success or operation.action != SuspendActionType.suspend:
-            return
-
         request_meta: Dict[str, Any] = {}
         if operation.request_result:
             try:
                 request_meta = json.loads(operation.request_result)
             except Exception:
                 request_meta = {"raw_request_result": operation.request_result}
+
+        audit_success = callback_success and bool(mapped_status)
+        await SuspendActionService._safe_update_supplier_action_audit(
+            db=db,
+            request_meta=request_meta,
+            status="success" if audit_success else "failed",
+            callback_no=callback_no,
+            supplier_status=mapped_status or account_status,
+            error=None if audit_success else (callback_msg or "供应商回调失败或状态无法识别"),
+            operation=operation,
+        )
+
+        if not audit_success or operation.action != SuspendActionType.suspend:
+            return
 
         if not request_meta.get("refresh_resume_pending") or request_meta.get("refresh_resume_submitted"):
             return

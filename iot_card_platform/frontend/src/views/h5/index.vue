@@ -380,7 +380,7 @@ const remarkForm = reactive({
   operatorName: '',
   operatorPhone: ''
 })
-const refreshDialogState = ref<'processing' | 'success' | 'failed'>('processing')
+const refreshDialogState = ref<'processing' | 'pending' | 'success' | 'failed'>('processing')
 const refreshDialogMessage = ref('正在重启')
 const touchStartY = ref(0)
 const pullDistance = ref(0)
@@ -429,7 +429,10 @@ const pullRefreshText = computed(() => {
   return pullDistance.value > 0 ? '下拉刷新页面' : ''
 })
 const refreshDialogProcessing = computed(() => refreshDialogState.value === 'processing')
-const refreshDialogTitle = computed(() => refreshDialogProcessing.value ? '正在重启' : '重启结果')
+const refreshDialogTitle = computed(() => {
+  if (refreshDialogProcessing.value) return '正在重启'
+  return refreshDialogState.value === 'pending' ? '重启状态' : '重启结果'
+})
 const getCarrierLimitNotice = (carrier?: string) => carrier === 'cmcc' ? '移动卡单日不可超2次停复机操作' : ''
 
 const getActionButtonText = (action: 'suspend' | 'resume' | 'refresh' | 'deviceSeparation') => {
@@ -817,7 +820,8 @@ const handleResumeAction = async () => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const refreshPollIntervalMs = 5000
-const refreshMaxPollAttempts = 72
+const actionMaxPollAttempts = 120
+const refreshMaxPollAttempts = 120
 
 const waitForRefreshCompletion = async () => {
   const initialStatus = detail.value?.card?.status
@@ -845,8 +849,8 @@ const refreshDetailUntilRecovered = async (action: H5CardActionResult) => {
   const expectRecovered = action.action === 'refresh' || action.action === 'resume'
   const expectSuspended = action.action === 'suspend'
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    await sleep(5000)
+  for (let attempt = 0; attempt < actionMaxPollAttempts; attempt += 1) {
+    await sleep(refreshPollIntervalMs)
     await refreshDetail()
 
     const currentStatus = detail.value?.card?.status
@@ -872,8 +876,8 @@ const handleRefreshSubmitted = async (result: H5CardActionResult) => {
   }
 
   const success = await waitForRefreshCompletion()
-  refreshDialogState.value = success ? 'success' : 'failed'
-  refreshDialogMessage.value = success ? '重启成功' : '重启失败，请手动复机'
+  refreshDialogState.value = success ? 'success' : 'pending'
+  refreshDialogMessage.value = success ? '重启成功' : '重启仍在处理中，请稍后刷新页面查看状态，请勿重复提交'
 }
 
 const handleActionSubmitted = async (result: H5CardActionResult) => {

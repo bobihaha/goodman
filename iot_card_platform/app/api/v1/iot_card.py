@@ -259,7 +259,8 @@ async def batch_update_remark(
     """批量更新卡片备注"""
     result = await iot_card_service.batch_update_remark(
         db=db, card_ids=request.card_ids, remark=request.remark,
-        current_user_id=current_user.id, user_level=current_user.user_level
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        original_user_id=current_user.original_user_id
     )
     return ResponseModel(data=result, msg=f"成功更新 {result['success']} 张卡片备注")
 
@@ -274,7 +275,8 @@ async def batch_transfer_cards(
     result = await iot_card_service.batch_transfer(
         db=db, card_ids=request.card_ids, to_user_id=request.to_user_id,
         current_user_id=current_user.id, user_level=current_user.user_level,
-        remark=request.remark
+        remark=request.remark,
+        original_user_id=current_user.original_user_id
     )
     return ResponseModel(data=result, msg=f"成功划拨 {result['success']} 张卡片")
 
@@ -294,7 +296,8 @@ async def batch_transfer_by_iccids(
     result = await iot_card_service.batch_transfer_by_iccids(
         db=db, iccids=iccids, to_user_id=to_user_id,
         current_user_id=current_user.id, user_level=current_user.user_level,
-        remark=remark
+        remark=remark,
+        original_user_id=current_user.original_user_id
     )
     return ResponseModel(data=result, msg=f"成功划拨 {result['success']} 张卡片")
 
@@ -312,7 +315,8 @@ async def batch_remark_by_iccids(
     
     result = await iot_card_service.batch_remark_by_iccids(
         db=db, iccids=iccids, remark=remark,
-        current_user_id=current_user.id, user_level=current_user.user_level
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        original_user_id=current_user.original_user_id
     )
     return ResponseModel(data=result, msg=f"成功备注 {result['success']} 张卡片")
 
@@ -365,7 +369,8 @@ async def batch_suspend_by_iccids(
     
     result = await iot_card_service.batch_suspend_by_iccids(
         db=db, iccids=iccids, reason=reason,
-        current_user_id=current_user.id, user_level=current_user.user_level
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        original_user_id=current_user.original_user_id,
     )
     return ResponseModel(data=result, msg=f"成功停机 {result['success']} 张卡片")
 
@@ -382,7 +387,8 @@ async def batch_resume_by_iccids(
     
     result = await iot_card_service.batch_resume_by_iccids(
         db=db, iccids=iccids,
-        current_user_id=current_user.id, user_level=current_user.user_level
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        original_user_id=current_user.original_user_id,
     )
     return ResponseModel(data=result, msg=f"成功复机 {result['success']} 张卡片")
 
@@ -594,7 +600,8 @@ async def update_card_remark(
     """更新单卡备注"""
     card = await iot_card_service.update_remark(
         db=db, card_id=card_id, remark=request.remark,
-        current_user_id=current_user.id, user_level=current_user.user_level
+        current_user_id=current_user.id, user_level=current_user.user_level,
+        original_user_id=current_user.original_user_id
     )
     return ResponseModel(data=card, msg="备注更新成功")
 
@@ -610,7 +617,8 @@ async def transfer_card(
     card = await iot_card_service.transfer_card(
         db=db, card_id=card_id, to_user_id=request.to_user_id,
         current_user_id=current_user.id, user_level=current_user.user_level,
-        remark=request.remark
+        remark=request.remark,
+        original_user_id=current_user.original_user_id
     )
     return ResponseModel(data=card, msg="卡片划拨成功")
 

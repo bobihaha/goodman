@@ -114,6 +114,45 @@
           </div>
         </el-tab-pane>
 
+        <!-- 批量粘贴回收 -->
+        <el-tab-pane label="批量粘贴回收" name="paste">
+          <div class="paste-section">
+            <el-alert
+              title="支持批量粘贴 ICCID，每行一个，也可使用空格或中英文逗号分隔。系统会自动去重。"
+              type="info"
+              :closable="false"
+              style="margin-bottom: 16px"
+            />
+
+            <el-input
+              v-model="pasteIccidText"
+              type="textarea"
+              :rows="12"
+              placeholder="请输入 ICCID，每行一个&#10;例如：&#10;89860123456789012345&#10;89860123456789012346"
+            />
+
+            <div class="batch-input-info">
+              <span>有效 ICCID：<strong>{{ pasteIccids.length }}</strong> 条</span>
+              <span v-if="invalidPasteIccids.length" class="error-text">
+                无效内容 {{ invalidPasteIccids.length }} 条，请检查纯数字且不少于 10 位
+              </span>
+              <span v-else-if="pasteEntries.length > BATCH_RECYCLE_MAX_COUNT" class="error-text">
+                超出限制，单次最多 {{ BATCH_RECYCLE_MAX_COUNT }} 条
+              </span>
+            </div>
+
+            <div class="action-bar">
+              <el-button
+                type="danger"
+                :disabled="pasteIccids.length === 0 || invalidPasteIccids.length > 0 || pasteEntries.length > BATCH_RECYCLE_MAX_COUNT"
+                @click="openPasteRecycleDialog"
+              >
+                批量回收（{{ pasteIccids.length }}）
+              </el-button>
+            </div>
+          </div>
+        </el-tab-pane>
+
         <!-- Excel批量回收 -->
         <el-tab-pane label="Excel批量回收" name="excel">
           <div class="excel-section">
@@ -265,6 +304,46 @@
       </template>
     </el-dialog>
 
+    <!-- 批量粘贴回收确认对话框 -->
+    <el-dialog
+      v-model="showPasteRecycleDialog"
+      title="批量粘贴回收确认"
+      width="600px"
+    >
+      <el-alert
+        :title="'即将通过 ICCID 批量回收 ' + pasteIccids.length + ' 张卡片，回收后卡片状态将恢复为【库存】'"
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 20px"
+      />
+
+      <el-form :model="pasteRecycleForm" :rules="recycleRules" ref="pasteRecycleFormRef" label-width="100px">
+        <el-form-item label="回收原因" prop="recycle_reason">
+          <el-input
+            v-model="pasteRecycleForm.recycle_reason"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入回收原因（必填）"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="pasteRecycleForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入备注（可选）"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="showPasteRecycleDialog = false">取消</el-button>
+        <el-button type="danger" @click="handlePasteRecycle" :loading="recycling">
+          确认回收
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- Excel批量回收确认对话框 -->
     <el-dialog
       v-model="showExcelRecycleDialog"
@@ -308,7 +387,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import * as XLSX from 'xlsx'
@@ -346,6 +425,27 @@ const recycleRules = {
 }
 const recycleFormRef = ref()
 const recycling = ref(false)
+
+// 批量粘贴回收
+const BATCH_RECYCLE_MAX_COUNT = 10000
+const pasteIccidText = ref('')
+const showPasteRecycleDialog = ref(false)
+const pasteRecycleForm = reactive({
+  recycle_reason: '',
+  remark: ''
+})
+const pasteRecycleFormRef = ref()
+const pasteEntries = computed(() => {
+  if (!pasteIccidText.value.trim()) return []
+  return [...new Set(
+    pasteIccidText.value
+      .split(/[\n,，\s]+/)
+      .map(item => item.trim())
+      .filter(Boolean)
+  )]
+})
+const pasteIccids = computed(() => pasteEntries.value.filter(item => /^\d{10,}$/.test(item)))
+const invalidPasteIccids = computed(() => pasteEntries.value.filter(item => !/^\d{10,}$/.test(item)))
 
 // Excel批量回收
 const uploadRef = ref()
@@ -500,6 +600,60 @@ const handleViewRecordDetail = (row: any) => {
   )
 }
 
+const openPasteRecycleDialog = () => {
+  if (!pasteIccids.value.length) {
+    ElMessage.warning('请粘贴需要回收的 ICCID')
+    return
+  }
+  if (invalidPasteIccids.value.length) {
+    ElMessage.warning('输入中包含无效 ICCID，请检查后再提交')
+    return
+  }
+  if (pasteEntries.value.length > BATCH_RECYCLE_MAX_COUNT) {
+    ElMessage.warning(`单次最多回收 ${BATCH_RECYCLE_MAX_COUNT} 张卡片`)
+    return
+  }
+  showPasteRecycleDialog.value = true
+}
+
+const handlePasteRecycle = async () => {
+  if (!pasteRecycleFormRef.value) return
+  const valid = await pasteRecycleFormRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  recycling.value = true
+  try {
+    const res = await stockApi.recycleByIccids({
+      iccids: pasteIccids.value,
+      recycle_reason: pasteRecycleForm.recycle_reason,
+      remark: pasteRecycleForm.remark
+    })
+    const notFound = res.not_found || []
+    const message = `回收完成！成功 ${res.success} 张，失败 ${res.failed} 张${
+      notFound.length ? `；未找到：${notFound.slice(0, 5).join('、')}${notFound.length > 5 ? '…' : ''}` : ''
+    }`
+
+    ElMessage({
+      message,
+      type: res.failed > 0 ? 'warning' : 'success',
+      duration: res.failed > 0 ? 8000 : 3000,
+      showClose: res.failed > 0
+    })
+
+    showPasteRecycleDialog.value = false
+    pasteRecycleForm.recycle_reason = ''
+    pasteRecycleForm.remark = ''
+    pasteIccidText.value = notFound.join('\n')
+
+    if (res.success > 0) handleQueryRecords()
+    if (res.failed === 0) activeTab.value = 'records'
+  } catch (error: any) {
+    ElMessage.error(error.message || '回收失败')
+  } finally {
+    recycling.value = false
+  }
+}
+
 // 格式化流量
 const formatFlow = (mb: number) => {
   if (!mb) return '-'
@@ -641,6 +795,19 @@ onMounted(() => {
   .action-bar {
     margin-top: 20px;
     text-align: center;
+  }
+
+  .batch-input-info {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    color: #606266;
+    font-size: 13px;
+
+    .error-text {
+      color: #f56c6c;
+    }
   }
 }
 </style>

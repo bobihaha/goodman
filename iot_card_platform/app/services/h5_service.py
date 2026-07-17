@@ -2,6 +2,7 @@
 H5 自助服务
 """
 import asyncio
+import json
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,6 +13,7 @@ from app.crud.sys_user_crud_enhanced import SysUserCRUDEnhanced
 from app.db.models.suspend import SupplierSuspendOperationModel, SuspendActionType
 from app.db.models.iot_card import CardStatus, SuspendType
 from app.db.models.iot_card import CardH5RemarkLogModel, IotCardModel
+from app.db.models.sys_log import SysOperationLogModel
 from app.db.models.sys_user import UserLevel
 from app.schemas.h5 import H5PortalConfig, H5CardActionFlags, H5CardActionResult
 from app.config import settings
@@ -75,6 +77,109 @@ class H5Service:
             ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+    @staticmethod
+    def _operation_meta(operation: SupplierSuspendOperationModel) -> dict:
+        try:
+            return json.loads(operation.request_result or "{}")
+        except Exception:
+            return {}
+
+    async def _get_pending_action(
+        self,
+        db: AsyncSession,
+        card_id: int,
+        action: str
+    ) -> Optional[SupplierSuspendOperationModel]:
+        result = await db.execute(
+            select(SupplierSuspendOperationModel).where(
+                SupplierSuspendOperationModel.card_id == card_id,
+                SupplierSuspendOperationModel.is_deleted == 0
+            ).order_by(SupplierSuspendOperationModel.id.desc()).limit(20)
+        )
+        for operation in result.scalars().all():
+            metadata = self._operation_meta(operation)
+            if metadata.get("audit_source") != "h5":
+                continue
+            operation_action = operation.action.value if operation.action else None
+            if action == "restart" and metadata.get("audit_action") == "restart":
+                if operation.callback_status == "pending":
+                    return operation
+                if (
+                    metadata.get("audit_phase") == "suspend"
+                    and metadata.get("refresh_resume_pending")
+                    and not metadata.get("refresh_resume_submitted")
+                ):
+                    return operation
+            if (
+                action == "resume"
+                and metadata.get("audit_action") == "restart"
+                and metadata.get("audit_phase") == "suspend"
+                and metadata.get("refresh_resume_pending")
+                and not metadata.get("refresh_resume_submitted")
+            ):
+                return operation
+            if (
+                action in {"suspend", "resume"}
+                and operation_action == action
+                and operation.callback_status == "pending"
+            ):
+                return operation
+        return None
+
+    @staticmethod
+    def _pending_action_result(card: IotCardModel, action: str, operation) -> dict:
+        phase = H5Service._operation_meta(operation).get("audit_phase")
+        action_name = {"suspend": "停机", "resume": "复机", "restart": "重启"}[action]
+        return H5CardActionResult(
+            card_id=card.id,
+            iccid=card.iccid,
+            action="refresh" if action == "restart" else action,
+            status="processing",
+            callback_no=operation.callback_no,
+            suspend_callback_no=operation.callback_no if phase == "suspend" else None,
+            resume_callback_no=operation.callback_no if phase == "resume" else None,
+            message=f"{action_name}请求正在处理中，请勿重复提交"
+        ).model_dump()
+
+    @staticmethod
+    async def _create_action_audit_log(
+        db: AsyncSession,
+        user,
+        card: IotCardModel,
+        action: str,
+        reason: Optional[str] = None
+    ) -> SysOperationLogModel:
+        log = SysOperationLogModel(
+            user_id=user.id,
+            user_name=user.name,
+            module="card",
+            action=action,
+            target_type="card",
+            target_id=card.id,
+            target_name=card.iccid,
+            detail=json.dumps({
+                "source": "h5",
+                "status": "processing",
+                "reason": reason,
+                "phases": {}
+            }, ensure_ascii=False),
+            is_success=1
+        )
+        db.add(log)
+        await db.commit()
+        await db.refresh(log)
+        return log
+
+    @staticmethod
+    def _audit_context(log: SysOperationLogModel, action: str, phase: str, reason: Optional[str]) -> dict:
+        return {
+            "audit_source": "h5",
+            "audit_log_id": log.id,
+            "audit_action": action,
+            "audit_phase": phase,
+            "audit_reason": reason,
+        }
 
     async def _get_supplier_lifecycle_status(
         self,
@@ -222,6 +327,9 @@ class H5Service:
         card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+        pending_operation = await self._get_pending_action(db, card.id, "suspend")
+        if pending_operation:
+            return self._pending_action_result(card, "suspend", pending_operation)
         if card.status == CardStatus.suspended:
             raise BusinessException(code=400, msg="卡片已停机")
         if card.status not in [CardStatus.activated, CardStatus.testing, CardStatus.silent]:
@@ -229,12 +337,14 @@ class H5Service:
 
         supplier_map = await SuspendActionService._load_supplier_map(db, [card])
         supplier = supplier_map.get(card.supplier_id)
+        audit_log = await self._create_action_audit_log(db, user, card, "suspend", reason)
         api_success, callback_no, _ = await SuspendActionService._call_supplier_suspend(
             db=db,
             card=card,
             supplier=supplier,
             reason=reason,
-            operator_id=user.id
+            operator_id=user.id,
+            request_context=self._audit_context(audit_log, "suspend", "suspend", reason)
         )
         if not api_success:
             raise BusinessException(code=502, msg="供应商停机请求提交失败")
@@ -256,6 +366,9 @@ class H5Service:
         card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+        pending_operation = await self._get_pending_action(db, card.id, "resume")
+        if pending_operation:
+            return self._pending_action_result(card, "resume", pending_operation)
         if card.status != CardStatus.suspended:
             raise BusinessException(code=400, msg="卡片未处于停机状态")
 
@@ -269,11 +382,13 @@ class H5Service:
 
         supplier_map = await SuspendActionService._load_supplier_map(db, [card])
         supplier = supplier_map.get(card.supplier_id)
+        audit_log = await self._create_action_audit_log(db, user, card, "resume", "H5手动复机")
         api_success, callback_no, _ = await SuspendActionService._call_supplier_resume(
             db=db,
             card=card,
             supplier=supplier,
-            operator_id=user.id
+            operator_id=user.id,
+            request_context=self._audit_context(audit_log, "resume", "resume", "H5手动复机")
         )
         if not api_success:
             raise BusinessException(code=502, msg="供应商复机请求提交失败")
@@ -295,6 +410,9 @@ class H5Service:
         card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+        pending_operation = await self._get_pending_action(db, card.id, "restart")
+        if pending_operation:
+            return self._pending_action_result(card, "restart", pending_operation)
 
         supplier_map = await SuspendActionService._load_supplier_map(db, [card])
         supplier = supplier_map.get(card.supplier_id)
@@ -310,13 +428,15 @@ class H5Service:
             raise BusinessException(code=400, msg="当前卡片处于人工停卡状态，不支持刷新重启")
 
         if current_supplier_status in self.REFRESH_ACTIVE_STATUSES:
+            audit_log = await self._create_action_audit_log(db, user, card, "restart", "H5重启")
             suspend_callback_no = None
             suspend_success, suspend_callback_no, _ = await SuspendActionService._call_supplier_suspend(
                 db=db,
                 card=card,
                 supplier=supplier,
                 reason="H5刷新操作-停机",
-                operator_id=user.id
+                operator_id=user.id,
+                request_context=self._audit_context(audit_log, "restart", "suspend", "H5重启")
             )
             if not suspend_success:
                 raise BusinessException(code=502, msg="供应商停机请求提交失败")
@@ -334,11 +454,13 @@ class H5Service:
         if current_supplier_status != CardStatus.suspended.value:
             raise BusinessException(code=400, msg=f"当前卡片状态不支持刷新: {current_supplier_status or card.status.value}")
 
+        audit_log = await self._create_action_audit_log(db, user, card, "restart", "H5重启")
         resume_success, resume_callback_no, _ = await SuspendActionService._call_supplier_resume(
             db=db,
             card=card,
             supplier=supplier,
-            operator_id=user.id
+            operator_id=user.id,
+            request_context=self._audit_context(audit_log, "restart", "resume", "H5重启")
         )
         if not resume_success:
             raise BusinessException(code=502, msg="供应商复机请求提交失败")
@@ -446,7 +568,8 @@ class H5Service:
             card_id=card_id,
             remark=sanitized_remark,
             current_user_id=user.id,
-            user_level=user.user_level
+            user_level=user.user_level,
+            audit_source="h5"
         )
 
         db.add(

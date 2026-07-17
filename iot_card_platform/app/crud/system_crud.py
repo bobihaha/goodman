@@ -219,6 +219,7 @@ class SysOperationLogCRUD:
         action: str,
         user_id: Optional[int] = None,
         user_name: Optional[str] = None,
+        original_user_id: Optional[int] = None,
         target_type: Optional[str] = None,
         target_id: Optional[int] = None,
         target_name: Optional[str] = None,
@@ -231,6 +232,7 @@ class SysOperationLogCRUD:
         log = SysOperationLogModel(
             user_id=user_id,
             user_name=user_name,
+            original_user_id=original_user_id,
             module=module,
             action=action,
             target_type=target_type,

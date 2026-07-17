@@ -61,6 +61,7 @@ export interface OperationLog {
   id: number
   user_id: number | null
   user_name: string | null
+  original_user_id: number | null
   module: string
   action: string
   target_type: string | null
