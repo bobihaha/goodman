@@ -118,7 +118,7 @@
         <el-tab-pane label="批量粘贴回收" name="paste">
           <div class="paste-section">
             <el-alert
-              title="支持批量粘贴 ICCID，每行一个，也可使用空格或中英文逗号分隔。系统会自动去重。"
+              title="支持批量粘贴 ICCID（10-30 位字母或数字），每行一个，也可使用空格或中英文逗号分隔。系统会自动去重。"
               type="info"
               :closable="false"
               style="margin-bottom: 16px"
@@ -134,7 +134,7 @@
             <div class="batch-input-info">
               <span>有效 ICCID：<strong>{{ pasteIccids.length }}</strong> 条</span>
               <span v-if="invalidPasteIccids.length" class="error-text">
-                无效内容 {{ invalidPasteIccids.length }} 条，请检查纯数字且不少于 10 位
+                无效内容 {{ invalidPasteIccids.length }} 条，请检查是否为 10-30 位字母或数字
               </span>
               <span v-else-if="pasteEntries.length > BATCH_RECYCLE_MAX_COUNT" class="error-text">
                 超出限制，单次最多 {{ BATCH_RECYCLE_MAX_COUNT }} 条
@@ -428,6 +428,8 @@ const recycling = ref(false)
 
 // 批量粘贴回收
 const BATCH_RECYCLE_MAX_COUNT = 10000
+const ICCID_PATTERN = /^[A-Za-z0-9]{10,30}$/
+const isValidRecycleIccid = (value: string) => ICCID_PATTERN.test(value)
 const pasteIccidText = ref('')
 const showPasteRecycleDialog = ref(false)
 const pasteRecycleForm = reactive({
@@ -444,8 +446,8 @@ const pasteEntries = computed(() => {
       .filter(Boolean)
   )]
 })
-const pasteIccids = computed(() => pasteEntries.value.filter(item => /^\d{10,}$/.test(item)))
-const invalidPasteIccids = computed(() => pasteEntries.value.filter(item => !/^\d{10,}$/.test(item)))
+const pasteIccids = computed(() => pasteEntries.value.filter(isValidRecycleIccid))
+const invalidPasteIccids = computed(() => pasteEntries.value.filter(item => !isValidRecycleIccid(item)))
 
 // Excel批量回收
 const uploadRef = ref()
@@ -706,7 +708,7 @@ const handleFileChange = (file: any) => {
       const iccids: { iccid: string }[] = []
       for (let i = 0; i < rows.length; i++) {
         const val = String(rows[i]?.[0] || '').trim()
-        if (val && val.length >= 10 && /^\d+$/.test(val)) {
+        if (isValidRecycleIccid(val)) {
           iccids.push({ iccid: val })
         }
       }
