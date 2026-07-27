@@ -1,0 +1,10 @@
+# 超级管理员批量修改本地套餐并重新组池
+app/api/v1/package_period.py
+app/crud/pool_crud.py
+app/schemas/package_period.py
+app/services/package_period_service.py
+app/db/migrations/20260727_add_package_change_menu.sql
+frontend/src/api/modules/packagePeriod.ts
+frontend/src/components/layout/MainLayout.vue
+frontend/src/router/routes.ts
+frontend/src/views/package-period/change-package/index.vue

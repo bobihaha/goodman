@@ -195,7 +195,8 @@ const iconMap: Record<string, any> = {
   'channel_points': Money,
   'channels': Money,
   'package_period': Calendar,
-  'package_period_force_activate': Calendar
+  'package_period_force_activate': Calendar,
+  'package_period_change_package': Calendar
 }
 
 // 从后端菜单数据转换为前端菜单格式

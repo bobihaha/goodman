@@ -10,12 +10,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.supplier_api import get_supplier_client
+from app.crud.pool_crud import AUTO_POOL_REMARK, pool_crud
 from app.crud.system_crud import SysOperationLogCRUD
-from app.db.models.iot_card import CardStatus, IotCardModel, SuspendType
+from app.db.models.iot_card import CardStatus, CardType, IotCardModel, SuspendType
+from app.db.models.package import CARRIER_NAMES, PERIOD_CONFIG, PackageStatus, PeriodType, SalePackageModel
+from app.db.models.pool import PoolCardLogModel, PoolStatus, TrafficPoolModel
 from app.db.models.supplier import SupplierModel
 from app.db.models.sys_log import SysOperationLogModel
+from app.flow_packages import is_flow_cycle_active
 from app.schemas.package_period import (
     BatchCancelPackagePeriodRequest,
+    BatchChangePackageRequest,
     BatchForceActivateRequest,
 )
 from app.services.sync_service import sync_service
@@ -92,6 +97,24 @@ class PackagePeriodService:
         return base
 
     @staticmethod
+    def _build_change_package_detail(
+        old_package: SalePackageModel,
+        new_package: SalePackageModel,
+        old_pool_name: Optional[str],
+        new_pool_name: Optional[str],
+        reason: Optional[str],
+    ) -> str:
+        detail = (
+            f"本地修改套餐，原套餐 {old_package.name}({old_package.id})，"
+            f"新套餐 {new_package.name}({new_package.id})，"
+            f"原流量池 {old_pool_name or '-'}，新流量池 {new_pool_name or '-'}，"
+            "未调用供应商改套餐接口"
+        )
+        if reason:
+            detail += f"，原因：{reason}"
+        return detail
+
+    @staticmethod
     async def _load_cards_by_iccids(
         db: AsyncSession,
         iccids: List[str]
@@ -119,6 +142,49 @@ class PackagePeriodService:
             )
         )
         return {item.id: item for item in result.scalars().all()}
+
+    @staticmethod
+    async def _find_or_create_change_pool(
+        db: AsyncSession,
+        card: IotCardModel,
+        target_package: SalePackageModel,
+        operator_id: int,
+    ) -> TrafficPoolModel:
+        result = await db.execute(
+            select(TrafficPoolModel).where(
+                TrafficPoolModel.user_id == card.user_id,
+                TrafficPoolModel.sale_package_id == target_package.id,
+                TrafficPoolModel.carrier == target_package.carrier,
+                TrafficPoolModel.flow_size == target_package.flow_size,
+                TrafficPoolModel.period_type == target_package.period_type,
+                TrafficPoolModel.status == PoolStatus.enable,
+                TrafficPoolModel.is_deleted == 0,
+            ).order_by(TrafficPoolModel.id).limit(1)
+        )
+        pool = result.scalar_one_or_none()
+        if pool:
+            return pool
+
+        carrier = target_package.carrier.value
+        period_type = target_package.period_type.value
+        flow_size = int(target_package.flow_size)
+        flow_display = f"{flow_size}MB" if flow_size < 1024 else f"{flow_size / 1024:g}GB"
+        pool = TrafficPoolModel(
+            name=f"{CARRIER_NAMES.get(carrier, carrier)}-{flow_display}-{PERIOD_CONFIG[period_type]['name']}-自动池",
+            carrier=target_package.carrier,
+            flow_size=flow_size,
+            period_type=target_package.period_type,
+            user_id=card.user_id,
+            sale_package_id=target_package.id,
+            alert_threshold_1=80,
+            alert_threshold_2=90,
+            alert_threshold_3=95,
+            created_by=operator_id,
+            remark=AUTO_POOL_REMARK,
+        )
+        db.add(pool)
+        await db.flush()
+        return pool
 
     @staticmethod
     async def _fetch_supplier_lifecycle(
@@ -399,6 +465,207 @@ class PackagePeriodService:
         }
 
     @staticmethod
+    async def get_package_options(db: AsyncSession) -> List[Dict[str, Any]]:
+        result = await db.execute(
+            select(SalePackageModel).where(
+                SalePackageModel.period_type == PeriodType.monthly,
+                SalePackageModel.status == PackageStatus.enable,
+                SalePackageModel.is_deleted == 0,
+            ).order_by(
+                SalePackageModel.user_id,
+                SalePackageModel.sort_order,
+                SalePackageModel.name,
+            )
+        )
+        return [package.to_dict() for package in result.scalars().all()]
+
+    @staticmethod
+    async def batch_change_package(
+        db: AsyncSession,
+        data: BatchChangePackageRequest,
+        operator_id: int,
+        operator_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        iccids = PackagePeriodService._normalize_iccids(data.iccids)
+        target_result = await db.execute(
+            select(SalePackageModel).where(
+                SalePackageModel.id == data.target_sale_package_id,
+                SalePackageModel.status == PackageStatus.enable,
+                SalePackageModel.is_deleted == 0,
+            )
+        )
+        target_package = target_result.scalar_one_or_none()
+        if not target_package:
+            raise BusinessException(code=400, msg="目标销售套餐不存在或已停用")
+        if target_package.period_type != PeriodType.monthly:
+            raise BusinessException(code=400, msg="修改套餐当前仅支持月包")
+
+        cards = await PackagePeriodService._load_cards_by_iccids(db, iccids)
+        card_map = {card.iccid: card for card in cards}
+        package_ids = {card.sale_package_id for card in cards if card.sale_package_id}
+        package_result = await db.execute(
+            select(SalePackageModel).where(SalePackageModel.id.in_(package_ids))
+        ) if package_ids else None
+        package_map = {
+            package.id: package
+            for package in (package_result.scalars().all() if package_result else [])
+        }
+
+        success_list: List[Dict[str, Any]] = []
+        failed_list: List[Dict[str, Any]] = []
+        affected_pool_ids = set()
+        allowed_statuses = {
+            CardStatus.testing,
+            CardStatus.silent,
+            CardStatus.activated,
+            CardStatus.suspended,
+        }
+
+        for iccid in iccids:
+            card = card_map.get(iccid)
+            if not card:
+                failed_list.append({"iccid": iccid, "error": "卡片不存在"})
+                continue
+            old_package = package_map.get(card.sale_package_id or 0)
+            if not old_package:
+                failed_list.append({"iccid": iccid, "error": "卡片缺少有效的原销售套餐"})
+                continue
+            if card.sale_package_id == target_package.id:
+                failed_list.append({"iccid": iccid, "error": "卡片已使用目标套餐"})
+                continue
+            if card.user_id is None:
+                failed_list.append({"iccid": iccid, "error": "仅支持已出库卡片修改套餐"})
+                continue
+            if card.status not in allowed_statuses:
+                failed_list.append({"iccid": iccid, "error": f"当前卡片状态不支持修改套餐: {card.status.value}"})
+                continue
+            if card.period_type != PeriodType.monthly:
+                failed_list.append({"iccid": iccid, "error": "仅支持原月包卡片修改套餐"})
+                continue
+            if card.carrier != target_package.carrier:
+                failed_list.append({"iccid": iccid, "error": "目标套餐运营商与卡片不一致"})
+                continue
+            if target_package.user_id is not None and target_package.user_id != card.user_id:
+                failed_list.append({"iccid": iccid, "error": "目标套餐不属于该卡片客户"})
+                continue
+
+            old_pool_id = card.pool_id
+            old_pool_name = None
+            new_pool = None
+            was_pool_member = bool(card.pool_id and card.is_pool_member == 1)
+
+            try:
+                async with db.begin_nested():
+                    if old_pool_id:
+                        old_pool = await pool_crud.get_by_id(db, old_pool_id)
+                        old_pool_name = old_pool.name if old_pool else None
+                        card.pool_id = None
+                        card.is_pool_member = 0
+                        if was_pool_member:
+                            db.add(PoolCardLogModel(
+                                pool_id=old_pool_id,
+                                card_id=card.id,
+                                iccid=card.iccid,
+                                action="remove",
+                                operator_id=operator_id,
+                                remark="修改套餐自动退出原流量池",
+                            ))
+                        affected_pool_ids.add(old_pool_id)
+
+                    effective_addon = int(card.addon_flow or 0)
+                    if card.addon_flow_month and not is_flow_cycle_active(card.addon_flow_month):
+                        effective_addon = 0
+                        card.addon_flow = 0
+                        card.addon_flow_month = None
+
+                    card.sale_package_id = target_package.id
+                    card.sale_price = target_package.price_sale
+                    card.flow_size = target_package.flow_size
+                    card.period_type = target_package.period_type
+                    card.data_total = int(target_package.flow_size) + effective_addon
+
+                    should_join_pool = (
+                        card.card_type == CardType.pool
+                        and (was_pool_member or card.status == CardStatus.activated)
+                    )
+                    if should_join_pool:
+                        new_pool = await PackagePeriodService._find_or_create_change_pool(
+                            db=db,
+                            card=card,
+                            target_package=target_package,
+                            operator_id=operator_id,
+                        )
+                        card.pool_id = new_pool.id
+                        card.is_pool_member = 1
+                        db.add(PoolCardLogModel(
+                            pool_id=new_pool.id,
+                            card_id=card.id,
+                            iccid=card.iccid,
+                            action="add",
+                            operator_id=operator_id,
+                            remark="修改套餐自动加入目标流量池",
+                        ))
+                        affected_pool_ids.add(new_pool.id)
+
+                    PackagePeriodService._add_operation_log(
+                        db=db,
+                        action="change_package",
+                        operator_id=operator_id,
+                        operator_name=operator_name,
+                        card=card,
+                        detail=PackagePeriodService._build_change_package_detail(
+                            old_package=old_package,
+                            new_package=target_package,
+                            old_pool_name=old_pool_name,
+                            new_pool_name=new_pool.name if new_pool else None,
+                            reason=data.reason,
+                        ),
+                    )
+
+                success_list.append({
+                    "iccid": card.iccid,
+                    "old_package_id": old_package.id,
+                    "old_package_name": old_package.name,
+                    "new_package_id": target_package.id,
+                    "new_package_name": target_package.name,
+                    "old_pool_id": old_pool_id,
+                    "old_pool_name": old_pool_name,
+                    "new_pool_id": new_pool.id if new_pool else None,
+                    "new_pool_name": new_pool.name if new_pool else None,
+                })
+            except Exception:
+                logger.exception("修改本地套餐失败: iccid=%s", iccid)
+                failed_list.append({"iccid": iccid, "error": "处理失败，请查看后台日志"})
+
+        for pool_id in sorted(affected_pool_ids):
+            await pool_crud.update_stats(
+                db,
+                pool_id,
+                commit=False,
+                run_checks=False,
+            )
+
+        await db.commit()
+
+        pool_check_warnings = []
+        for pool_id in sorted(affected_pool_ids):
+            try:
+                await pool_crud.update_stats(db, pool_id)
+            except Exception as exc:
+                await db.rollback()
+                logger.exception("套餐修改后流量池检查失败: pool_id=%s", pool_id)
+                pool_check_warnings.append({"pool_id": pool_id, "error": str(exc)})
+
+        return {
+            "success": len(success_list),
+            "failed": len(failed_list),
+            "success_list": success_list,
+            "failed_list": failed_list,
+            "pool_check_warnings": pool_check_warnings,
+            "supplier_synced": False,
+        }
+
+    @staticmethod
     async def get_operation_logs(
         db: AsyncSession,
         action: str,
@@ -407,7 +674,7 @@ class PackagePeriodService:
         page: int,
         page_size: int
     ) -> Dict[str, Any]:
-        if action not in {"force_activate", "cancel_period"}:
+        if action not in {"force_activate", "cancel_period", "change_package"}:
             raise BusinessException(code=400, msg="不支持的操作类型")
 
         logs, total = await SysOperationLogCRUD.get_list(

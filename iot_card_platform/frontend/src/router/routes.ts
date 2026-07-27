@@ -223,6 +223,15 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'package-period/change-package',
+        name: 'PackagePeriodChangePackage',
+        component: () => import('@/views/package-period/change-package/index.vue'),
+        meta: {
+          title: '修改套餐',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'records/purchases',
         name: 'PurchaseRecords',
         component: () => import('@/views/records/purchases/index.vue'),

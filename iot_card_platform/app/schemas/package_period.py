@@ -20,6 +20,13 @@ class BatchCancelPackagePeriodRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=500, description="取消原因")
 
 
+class BatchChangePackageRequest(BaseModel):
+    """批量修改本地销售套餐请求"""
+    iccids: List[str] = Field(..., min_length=1, max_length=10000, description="ICCID 列表")
+    target_sale_package_id: int = Field(..., gt=0, description="目标销售套餐ID")
+    reason: Optional[str] = Field(None, max_length=500, description="修改原因")
+
+
 class PackagePeriodOperationRecord(BaseModel):
     id: int
     action: str
@@ -30,7 +37,7 @@ class PackagePeriodOperationRecord(BaseModel):
 
 
 class PackagePeriodOperationQuery(BaseModel):
-    action: str = Field(..., pattern="^(force_activate|cancel_period)$")
+    action: str = Field(..., pattern="^(force_activate|cancel_period|change_package)$")
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     page: int = Field(1, ge=1)

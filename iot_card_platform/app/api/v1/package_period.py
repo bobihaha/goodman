@@ -12,6 +12,7 @@ from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.schemas.package_period import (
     BatchCancelPackagePeriodRequest,
+    BatchChangePackageRequest,
     BatchForceActivateRequest,
 )
 from app.services.package_period_service import package_period_service
@@ -56,9 +57,36 @@ async def batch_cancel_period(
     )
 
 
+@router.get("/package-options", summary="获取可修改的本地销售套餐")
+async def get_package_options(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    result = await package_period_service.get_package_options(db)
+    return ResponseModel(data=result)
+
+
+@router.post("/change-package", summary="批量修改本地销售套餐并重新组池")
+async def batch_change_package(
+    data: BatchChangePackageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin)
+):
+    result = await package_period_service.batch_change_package(
+        db=db,
+        data=data,
+        operator_id=current_user.id,
+        operator_name=current_user.name
+    )
+    return ResponseModel(
+        data=result,
+        msg=f"修改套餐完成，成功{result['success']}张，失败{result['failed']}张"
+    )
+
+
 @router.get("/logs", summary="套餐周期操作记录")
 async def get_operation_logs(
-    action: str = Query(..., description="操作类型: force_activate/cancel_period"),
+    action: str = Query(..., description="操作类型: force_activate/cancel_period/change_package"),
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
     page: int = Query(1, ge=1),

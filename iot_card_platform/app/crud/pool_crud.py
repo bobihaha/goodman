@@ -236,7 +236,13 @@ class TrafficPoolCRUD:
         await db.commit()
         return True
 
-    async def update_stats(self, db: AsyncSession, pool_id: int) -> Optional[TrafficPoolModel]:
+    async def update_stats(
+        self,
+        db: AsyncSession,
+        pool_id: int,
+        commit: bool = True,
+        run_checks: bool = True,
+    ) -> Optional[TrafficPoolModel]:
         """更新流量池统计数据，并检查是否需要停卡"""
         pool = await self.get_by_id(db, pool_id)
         if not pool:
@@ -265,12 +271,16 @@ class TrafficPoolCRUD:
         pool.data_total = package_flow + effective_addon
         pool.data_used = int(row.data_used or 0)
 
-        await db.commit()
-        await db.refresh(pool)
+        if commit:
+            await db.commit()
+            await db.refresh(pool)
+        else:
+            await db.flush()
 
-        await self._check_pool_alert_thresholds(db, pool)
-        # 检查是否需要根据用户设置的停卡阈值进行停卡
-        await self._check_pool_stop_threshold(db, pool)
+        if run_checks:
+            await self._check_pool_alert_thresholds(db, pool)
+            # 检查是否需要根据用户设置的停卡阈值进行停卡
+            await self._check_pool_stop_threshold(db, pool)
 
         return pool
 
