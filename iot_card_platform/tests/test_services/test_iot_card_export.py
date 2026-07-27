@@ -39,6 +39,7 @@ async def test_export_cards_contains_full_card_and_related_account_fields(monkey
 
     async def hydrate(_db, rows, _current_user_id):
         rows[0].update({
+            "related_user_id": 8,
             "related_user_name": "客户A",
             "related_user_account": "customer_a",
             "stock_out_no": "OUT20260713001",

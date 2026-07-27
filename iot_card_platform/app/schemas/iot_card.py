@@ -57,6 +57,9 @@ class CardInfo(BaseModel):
     imsi: Optional[str] = None
     msisdn: Optional[str] = None
     user_id: Optional[int] = None
+    related_user_id: Optional[int] = None
+    related_user_name: Optional[str] = None
+    related_user_account: Optional[str] = None
     supplier_id: Optional[int] = None
     batch_id: Optional[str] = None
     sale_package_id: Optional[int] = None

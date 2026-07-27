@@ -139,6 +139,18 @@ class IotCardService:
             for user in user_result.scalars().all()
         }
         current_user = user_map.get(current_user_id)
+        if current_user and current_user.user_level == UserLevel.SUPER_ADMIN.value:
+            parent_ids = {
+                user.parent_id
+                for user in user_map.values()
+                if user.user_level == UserLevel.SUB_USER.value and user.parent_id
+            } - user_map.keys()
+            if parent_ids:
+                parent_result = await db.execute(
+                    select(SysUserModel).where(SysUserModel.id.in_(parent_ids))
+                )
+                user_map.update({user.id: user for user in parent_result.scalars().all()})
+
         current_user_display_name = None
         if current_user:
             current_user_display_name = current_user.name or current_user.account
@@ -148,10 +160,23 @@ class IotCardService:
             item["remark"] = remark_map.get(card_id)
             item["stock_out_no"] = stock_out_no_map.get(card_id)
             related_user = user_map.get(item.get("user_id"))
-            if related_user:
-                item["related_user_name"] = related_user.name or related_user.account
-                item["related_user_account"] = related_user.account
+            display_user = related_user
+            if (
+                current_user
+                and current_user.user_level == UserLevel.SUPER_ADMIN.value
+                and related_user
+                and related_user.user_level == UserLevel.SUB_USER.value
+            ):
+                parent_user = user_map.get(related_user.parent_id)
+                if parent_user and parent_user.user_level == UserLevel.USER.value:
+                    display_user = parent_user
+
+            if display_user:
+                item["related_user_id"] = display_user.id
+                item["related_user_name"] = display_user.name or display_user.account
+                item["related_user_account"] = display_user.account
             else:
+                item["related_user_id"] = current_user.id if current_user else None
                 item["related_user_name"] = current_user_display_name
                 item["related_user_account"] = current_user.account if current_user else None
 
@@ -316,6 +341,19 @@ class IotCardService:
         child_ids = await sys_user_crud.get_children_ids(db, current_user_id)
         return [current_user_id, *child_ids]
 
+    async def _get_customer_filter_user_ids(
+        self,
+        db: AsyncSession,
+        customer_id: Optional[int],
+        user_level: int
+    ) -> Optional[List[int]]:
+        """超级管理员按二级客户筛选时包含该客户的全部下级持卡人。"""
+        if user_level != UserLevel.SUPER_ADMIN.value or customer_id is None:
+            return None
+
+        child_ids = await SysUserCRUDEnhanced().get_children_ids(db, customer_id)
+        return [customer_id, *child_ids]
+
     async def _get_cards_by_iccids_in_scope(
         self,
         db: AsyncSession,
@@ -430,6 +468,10 @@ class IotCardService:
     ) -> Tuple[List[dict], int]:
         """获取卡片列表 (根据用户权限过滤)"""
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
+        customer_user_ids = await self._get_customer_filter_user_ids(db, customer_id, user_level)
+        if customer_user_ids is not None:
+            user_ids = customer_user_ids
+            customer_id = None
 
         items, total = await iot_card_crud.get_list(
             db=db,
@@ -925,6 +967,10 @@ class IotCardService:
             items = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
         else:
             # 导出全部 (根据筛选条件)
+            customer_user_ids = await self._get_customer_filter_user_ids(db, customer_id, user_level)
+            if customer_user_ids is not None:
+                user_ids = customer_user_ids
+                customer_id = None
             items, _ = await iot_card_crud.get_list(
                 db=db,
                 user_ids=user_ids,
@@ -985,7 +1031,7 @@ class IotCardService:
                 "出库单号": d.get("stock_out_no") or "",
                 "是否加入流量池": "是" if d.get("is_pool_member") else "否",
                 "流量池ID": d.get("pool_id") or "",
-                "关联账户ID": d.get("user_id") or "",
+                "关联账户ID": d.get("related_user_id") or "",
                 "关联账户名称": d.get("related_user_name") or "",
                 "关联登录账号": d.get("related_user_account") or "",
                 "供应商ID": d.get("supplier_id") or "",
@@ -1947,6 +1993,10 @@ class IotCardService:
         if card_ids:
             cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
         else:
+            customer_user_ids = await self._get_customer_filter_user_ids(db, customer_id, user_level)
+            if customer_user_ids is not None:
+                user_ids = customer_user_ids
+                customer_id = None
             cards, _ = await iot_card_crud.get_list(
                 db=db,
                 user_ids=user_ids,

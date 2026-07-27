@@ -85,7 +85,9 @@ export interface Card {
   // 前端计算字段
   usage_percent?: number
   pool_name?: string
+  related_user_id?: number
   related_user_name?: string
+  related_user_account?: string
 }
 
 // 卡片列表查询参数
