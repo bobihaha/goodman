@@ -344,7 +344,8 @@ POST /api/v1/cards/export
 **页面**: `/pools/list`
 
 **功能**：
-- 流量池列表
+- 流量池列表支持稳定分页；切换页码只加载目标页，搜索或重置条件时才回到第一页
+- 支持按告警状态筛选“告警中/未告警”流量池；告警中以当前用量达到任一有效告警阈值为准
 - 创建/编辑流量池
 - 添加/移除卡片
 - 充值加油包
@@ -365,7 +366,7 @@ POST /api/v1/cards/export
 
 **API**：
 ```typescript
-GET    /api/v1/pools
+GET    /api/v1/pools?is_alert=true|false
 POST   /api/v1/pools
 POST   /api/v1/pools/{id}/cards
 DELETE /api/v1/pools/{id}/cards

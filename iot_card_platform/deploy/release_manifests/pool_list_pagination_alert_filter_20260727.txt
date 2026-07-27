@@ -1,0 +1,5 @@
+# 超级管理员流量池列表分页与告警状态筛选
+app/api/v1/pool.py
+app/services/pool_service.py
+app/crud/pool_crud.py
+frontend/src/views/pools/list/index.vue

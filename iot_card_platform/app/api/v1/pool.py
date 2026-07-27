@@ -24,6 +24,7 @@ async def get_pools(
     name: Optional[str] = Query(None, description="流量池名称(模糊搜索)"),
     carrier: Optional[str] = Query(None, description="运营商: cmcc/cucc/ctcc"),
     status: Optional[str] = Query(None, description="状态: enable/disable"),
+    is_alert: Optional[bool] = Query(None, description="告警状态: true=告警中, false=未告警"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_db),
@@ -41,6 +42,7 @@ async def get_pools(
         name=name,
         carrier=carrier,
         status=status,
+        is_alert=is_alert,
         page=page,
         page_size=page_size
     )

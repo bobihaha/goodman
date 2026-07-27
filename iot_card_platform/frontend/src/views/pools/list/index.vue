@@ -45,6 +45,18 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="告警状态">
+          <el-select
+            v-model="searchForm.is_alert"
+            placeholder="请选择告警状态"
+            clearable
+            style="width: 140px"
+            @change="handleSearch"
+          >
+            <el-option label="告警中" :value="true" />
+            <el-option label="未告警" :value="false" />
+          </el-select>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Search" @click="handleSearch">
             搜索
@@ -201,8 +213,8 @@
         :total="pagination.total"
         :page-sizes="[12, 24, 48, 96]"
         layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleSearch"
-        @current-change="handleSearch"
+        @size-change="handlePageSizeChange"
+        @current-change="handlePageChange"
       />
     </div>
 
@@ -241,7 +253,8 @@ const router = useRouter()
 const searchForm = reactive<PoolListParams>({
   name: '',
   carrier: undefined,
-  status: undefined
+  status: undefined,
+  is_alert: undefined
 })
 
 // 分页
@@ -315,6 +328,15 @@ const handleSearch = () => {
   fetchPoolList()
 }
 
+const handlePageChange = () => {
+  fetchPoolList()
+}
+
+const handlePageSizeChange = () => {
+  pagination.page = 1
+  fetchPoolList()
+}
+
 /**
  * 重置
  */
@@ -322,7 +344,8 @@ const handleReset = () => {
   Object.assign(searchForm, {
     name: '',
     carrier: undefined,
-    status: undefined
+    status: undefined,
+    is_alert: undefined
   })
   handleSearch()
 }

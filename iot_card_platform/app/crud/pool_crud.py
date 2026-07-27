@@ -4,7 +4,7 @@
 from typing import Optional, List, Tuple
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, or_
+from sqlalchemy import and_, select, update, func, or_
 from app.db.models.pool import TrafficPoolModel, PoolCardLogModel, PoolStatus
 from app.db.models.iot_card import IotCardModel, CardStatus
 from app.db.models.suspend import AlertLevel, AlertTargetType
@@ -20,6 +20,35 @@ def valid_pool_member_conditions(pool_id_expr):
         IotCardModel.is_pool_member == 1,
         IotCardModel.user_id.is_not(None),
         IotCardModel.is_deleted == 0,
+    )
+
+
+def pool_alert_condition():
+    """流量池当前用量达到任一有效告警阈值。"""
+    usage_percent = func.round(
+        TrafficPoolModel.data_used * 100.0
+        / func.nullif(TrafficPoolModel.data_total, 0),
+        2,
+    )
+    return and_(
+        TrafficPoolModel.data_total > 0,
+        or_(
+            and_(
+                TrafficPoolModel.alert_threshold_1.is_not(None),
+                TrafficPoolModel.alert_threshold_1 > 0,
+                usage_percent >= TrafficPoolModel.alert_threshold_1,
+            ),
+            and_(
+                TrafficPoolModel.alert_threshold_2.is_not(None),
+                TrafficPoolModel.alert_threshold_2 > 0,
+                usage_percent >= TrafficPoolModel.alert_threshold_2,
+            ),
+            and_(
+                TrafficPoolModel.alert_threshold_3.is_not(None),
+                TrafficPoolModel.alert_threshold_3 > 0,
+                usage_percent >= TrafficPoolModel.alert_threshold_3,
+            ),
+        ),
     )
 
 
@@ -134,6 +163,7 @@ class TrafficPoolCRUD:
         name: Optional[str] = None,
         carrier: Optional[str] = None,
         status: Optional[str] = None,
+        is_alert: Optional[bool] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[TrafficPoolModel], int]:
@@ -158,6 +188,12 @@ class TrafficPoolCRUD:
         if status:
             query = query.where(TrafficPoolModel.status == status)
             count_query = count_query.where(TrafficPoolModel.status == status)
+        if is_alert is not None:
+            alert_condition = pool_alert_condition()
+            if not is_alert:
+                alert_condition = ~alert_condition
+            query = query.where(alert_condition)
+            count_query = count_query.where(alert_condition)
 
         # 总数
         total_result = await db.execute(count_query)

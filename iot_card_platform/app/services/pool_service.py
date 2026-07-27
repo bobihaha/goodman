@@ -190,6 +190,7 @@ class PoolService:
         name: Optional[str] = None,
         carrier: Optional[str] = None,
         status: Optional[str] = None,
+        is_alert: Optional[bool] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[dict], int]:
@@ -201,6 +202,7 @@ class PoolService:
             name=name,
             carrier=carrier,
             status=status,
+            is_alert=is_alert,
             page=page,
             page_size=page_size
         )
