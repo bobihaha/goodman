@@ -252,6 +252,13 @@ H5 查询支持 3 种方式：
 - `frontend/src/views/h5/components/CardActionPanel.vue`
 - `frontend/src/views/h5/components/CardRemarkDialog.vue`
 
+### 8.1 H5 加载性能约束
+
+- H5 公开路由使用独立轻量启动链路，不预加载后台主布局、登录态恢复、完整 Element Plus 和全量图标。
+- H5 只注册首屏实际使用的组件与样式，后台完整依赖在非 H5 路由按需加载。
+- `index.html` 保持不缓存，带内容哈希的 `/assets/` 静态资源缓存一年并标记为 `immutable`。
+- 生产构建验收目标：公共入口不超过 60 KB gzip，H5 首屏本地静态资源总量不超过 180 KB gzip（不含接口数据和业务图片）。
+
 ## 9. H5 页面信息结构建议
 
 ### 9.1 顶部品牌区

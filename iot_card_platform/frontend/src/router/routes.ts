@@ -3,7 +3,6 @@
  */
 
 import type { RouteRecordRaw } from 'vue-router'
-import MainLayout from '@/components/layout/MainLayout.vue'
 
 // 路由配置
 export const routes: RouteRecordRaw[] = [
@@ -45,7 +44,7 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    component: MainLayout,
+    component: () => import('@/components/layout/MainLayout.vue'),
     redirect: '/dashboard',
     children: [
       {
