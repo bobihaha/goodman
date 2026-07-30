@@ -708,6 +708,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import dayjs from 'dayjs'
 import type { CheckboxValueType } from 'element-plus'
 import {
   CreditCard,
@@ -1766,12 +1767,9 @@ onMounted(() => {
   // 到期卡筛选
   const expiringParam = route.query.expiring as string
   if (expiringParam === 'true') {
-    const today = new Date()
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
     expiredRange.value = [
-      monthStart.toISOString().split('T')[0] || '',
-      monthEnd.toISOString().split('T')[0] || ''
+      dayjs().startOf('month').format('YYYY-MM-DD'),
+      dayjs().endOf('month').format('YYYY-MM-DD')
     ]
   }
 
