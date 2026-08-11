@@ -1124,6 +1124,9 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """批量查询续费价格"""
+        if user_level != UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=403, msg="仅超级管理员可续费")
+
         cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
 
         found_iccids = set()
@@ -1344,6 +1347,9 @@ class IotCardService:
         user_level: int
     ) -> dict:
         """通过ICCID批量续费"""
+        if user_level != UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=403, msg="仅超级管理员可续费")
+
         from app.crud.package_crud import sale_package_crud
         from app.utils.date_utils import calculate_expiry_date
 
@@ -1723,8 +1729,12 @@ class IotCardService:
         db: AsyncSession,
         card_id: int,
         renew_months: int,
-        current_user_id: int
+        current_user_id: int,
+        user_level: int
     ) -> dict:
+        if user_level != UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=403, msg="仅超级管理员可续费")
+
         card_result = await db.execute(
             select(IotCardModel).where(
                 IotCardModel.id == card_id,
@@ -1757,8 +1767,12 @@ class IotCardService:
         card_id: int,
         renew_months: int,
         current_user_id: int,
+        user_level: int,
         remark: Optional[str] = None
     ) -> dict:
+        if user_level != UserLevel.SUPER_ADMIN.value:
+            raise BusinessException(code=403, msg="仅超级管理员可续费")
+
         from datetime import timedelta
         from app.crud.package_crud import sale_package_crud
         from app.utils.date_utils import calculate_expiry_date

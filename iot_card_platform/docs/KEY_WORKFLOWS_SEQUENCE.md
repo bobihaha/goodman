@@ -173,7 +173,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant U as "运营人员/客户"
+    participant U as "超级管理员（1级账号）"
     participant FE as "卡片列表续费弹窗"
     participant API as "iot_card API"
     participant SVC as "IotCardService"
@@ -200,6 +200,8 @@ sequenceDiagram
 
 ### 关键节点
 
+- 单卡试算、单卡续费、批量价格查询和批量续费仅允许 1 级账号调用
+- 2/3 级账号必须在查询卡片、扣款或修改到期日前返回 403，前端同时不展示续费入口
 - 续费接口参数语义是“续费月数”，不是“续几个出库周期”
 - 到期日更新在 `app/services/iot_card_service.py`
 - 续费记录页当前基于 `sys_operation_logs` 聚合

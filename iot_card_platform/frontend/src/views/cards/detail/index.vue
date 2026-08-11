@@ -39,6 +39,7 @@
                 </span>
               </el-tooltip>
               <el-button
+                v-if="isSuperAdmin"
                 type="primary"
                 size="small"
                 :disabled="!card"
@@ -951,6 +952,7 @@ const handleAddFlow = () => {
 }
 
 const handleRenew = () => {
+  if (!isSuperAdmin.value) return
   singleRenewVisible.value = true
 }
 

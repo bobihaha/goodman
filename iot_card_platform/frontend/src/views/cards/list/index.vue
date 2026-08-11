@@ -246,6 +246,7 @@
             批量备注
           </el-button>
           <el-button
+            v-if="isSuperAdmin"
             type="primary"
             @click="showBatchRenewDialog"
           >
@@ -537,7 +538,7 @@
                     <el-dropdown-item command="detail">详情</el-dropdown-item>
                     <el-dropdown-item command="transfer">划拨</el-dropdown-item>
                     <el-dropdown-item command="remark">备注</el-dropdown-item>
-                    <el-dropdown-item command="renew">续费</el-dropdown-item>
+                    <el-dropdown-item v-if="isSuperAdmin" command="renew">续费</el-dropdown-item>
                     <el-dropdown-item
                       command="addFlow"
                       :disabled="row.card_type !== 'single'"
@@ -1413,6 +1414,7 @@ const showBatchRemarkDialog = () => {
 
 // 显示批量续费对话框
 const showBatchRenewDialog = () => {
+  if (!isSuperAdmin.value) return
   batchRenewVisible.value = true
 }
 
@@ -1477,6 +1479,7 @@ const handleRowAddFlow = (card: Card) => {
 }
 
 const handleRowRenew = (card: Card) => {
+  if (!isSuperAdmin.value) return
   currentCard.value = card
   singleRenewVisible.value = true
 }
