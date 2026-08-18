@@ -7,6 +7,14 @@
             <span>批量强制激活</span>
           </template>
 
+          <el-alert
+            title="SIMBOSS 卡请先联系供应商完成激活；平台仅同步沉默期卡的本地状态，并自动加入对应流量池"
+            type="warning"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 16px"
+          />
+
           <el-form label-width="120px">
             <el-form-item label="ICCID 列表">
               <el-input
@@ -268,7 +276,11 @@ const handleForceActivate = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确认强制激活这 ${iccids.length} 张卡吗？`, '确认操作', { type: 'warning' })
+    await ElMessageBox.confirm(
+      `确认强制激活这 ${iccids.length} 张卡吗？SIMBOSS 卡须已由供应商完成激活。`,
+      '确认操作',
+      { type: 'warning' }
+    )
     forceLoading.value = true
     forceResult.value = await packagePeriodApi.batchForceActivate({
       iccids,

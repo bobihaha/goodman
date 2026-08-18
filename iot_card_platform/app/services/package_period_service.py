@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 class PackagePeriodService:
     MODULE_NAME = "package_period"
+    MANUAL_FORCE_ACTIVATE_SUPPLIER_CODES = {"002"}
     FORCE_ACTIVATE_RETRY_DELAYS = (3, 8)
     RATE_LIMIT_KEYWORDS = (
         "访问频率",
@@ -187,6 +188,67 @@ class PackagePeriodService:
         return pool
 
     @staticmethod
+    async def _join_manual_force_activated_card_to_pool(
+        db: AsyncSession,
+        card: IotCardModel,
+        operator_id: int,
+    ) -> None:
+        if card.card_type != CardType.pool:
+            return
+        if card.user_id is None:
+            raise BusinessException(code=400, msg="SIMBOSS 流量池卡未关联客户，无法自动入池")
+        if card.pool_id is not None:
+            card.is_pool_member = 1
+            await db.flush()
+            updated_pool = await pool_crud.update_stats(
+                db,
+                card.pool_id,
+                commit=False,
+                run_checks=False,
+            )
+            if not updated_pool:
+                raise BusinessException(code=400, msg="SIMBOSS 卡本地激活后更新流量池失败")
+            return
+        if not card.sale_package_id:
+            raise BusinessException(code=400, msg="SIMBOSS 流量池卡缺少销售套餐，无法自动入池")
+
+        package_result = await db.execute(
+            select(SalePackageModel).where(
+                SalePackageModel.id == card.sale_package_id,
+                SalePackageModel.is_deleted == 0,
+            )
+        )
+        sale_package = package_result.scalar_one_or_none()
+        if not sale_package:
+            raise BusinessException(code=400, msg="SIMBOSS 流量池卡销售套餐不存在，无法自动入池")
+
+        pool = await PackagePeriodService._find_or_create_change_pool(
+            db=db,
+            card=card,
+            target_package=sale_package,
+            operator_id=operator_id,
+        )
+        card.pool_id = pool.id
+        card.is_pool_member = 1
+        db.add(PoolCardLogModel(
+            pool_id=pool.id,
+            card_id=card.id,
+            iccid=card.iccid,
+            action="add",
+            operator_id=operator_id,
+            remark="SIMBOSS 管理员确认激活后自动加入流量池",
+        ))
+        await db.flush()
+        updated_pool = await pool_crud.update_stats(
+            db,
+            pool.id,
+            commit=False,
+            run_checks=False,
+        )
+        if not updated_pool:
+            raise BusinessException(code=400, msg="SIMBOSS 卡本地激活后更新流量池失败")
+
+    @staticmethod
     async def _fetch_supplier_lifecycle(
         card: IotCardModel,
         supplier: SupplierModel
@@ -224,6 +286,11 @@ class PackagePeriodService:
     def _is_rate_limited_supplier_result(supplier_meta: Dict[str, Any]) -> bool:
         text = PackagePeriodService._supplier_error_text(supplier_meta).lower()
         return any(keyword.lower() in text for keyword in PackagePeriodService.RATE_LIMIT_KEYWORDS)
+
+    @staticmethod
+    def _uses_manual_force_activation(supplier: SupplierModel) -> bool:
+        supplier_code = str(supplier.code or "").strip().upper()
+        return supplier_code in PackagePeriodService.MANUAL_FORCE_ACTIVATE_SUPPLIER_CODES
 
     @staticmethod
     async def _call_force_activate_supplier(
@@ -312,27 +379,42 @@ class PackagePeriodService:
             if not supplier:
                 failed_list.append({"iccid": iccid, "error": "卡片未绑定供应商或供应商不存在"})
                 continue
+            manual_force_activation = PackagePeriodService._uses_manual_force_activation(supplier)
+            if manual_force_activation and card.status != CardStatus.silent:
+                failed_list.append({"iccid": iccid, "error": "SIMBOSS 手动激活仅支持沉默期卡"})
+                continue
 
             old_status = card.status.value if card.status else "unknown"
             old_activated_at = card.activated_at
             old_expired_at = card.expired_at
 
             try:
-                client = get_supplier_client(
-                    supplier_id=supplier.id,
-                    api_url=supplier.api_url or "",
-                    api_key=supplier.api_key or "",
-                    api_secret=supplier.api_secret or "",
-                    supplier_code=supplier.code,
-                    api_config=supplier.api_config,
-                )
-                supplier_success, supplier_meta = await PackagePeriodService._call_force_activate_supplier(client, card)
-                if not supplier_success:
-                    failed_list.append({
-                        "iccid": iccid,
-                        "error": PackagePeriodService._supplier_error_text(supplier_meta) or "供应商接口调用失败"
-                    })
-                    continue
+                lifecycle_source = "supplier_force_activate"
+                if manual_force_activation:
+                    supplier_meta = {
+                        "submitted": False,
+                        "skipped": True,
+                        "manual_supplier_activation": True,
+                        "supplier_code": supplier.code,
+                        "supplier_msg": "管理员已确认供应商侧完成激活，平台仅同步本地状态",
+                    }
+                    lifecycle_source = "manual_supplier_confirmed"
+                else:
+                    client = get_supplier_client(
+                        supplier_id=supplier.id,
+                        api_url=supplier.api_url or "",
+                        api_key=supplier.api_key or "",
+                        api_secret=supplier.api_secret or "",
+                        supplier_code=supplier.code,
+                        api_config=supplier.api_config,
+                    )
+                    supplier_success, supplier_meta = await PackagePeriodService._call_force_activate_supplier(client, card)
+                    if not supplier_success:
+                        failed_list.append({
+                            "iccid": iccid,
+                            "error": PackagePeriodService._supplier_error_text(supplier_meta) or "供应商接口调用失败"
+                        })
+                        continue
 
                 today = date.today()
                 activated_at = today
@@ -345,7 +427,13 @@ class PackagePeriodService:
                 card.suspend_at = None
                 card.suspend_reason = None
 
-                if card.card_type.value == "pool" and card.pool_id is None and card.user_id is not None:
+                if manual_force_activation:
+                    await PackagePeriodService._join_manual_force_activated_card_to_pool(
+                        db=db,
+                        card=card,
+                        operator_id=operator_id,
+                    )
+                elif card.card_type == CardType.pool and card.pool_id is None and card.user_id is not None:
                     await sync_service._auto_join_pool(db, card)
 
                 detail = PackagePeriodService._build_force_activate_detail(
@@ -354,7 +442,7 @@ class PackagePeriodService:
                     old_activated_at=old_activated_at,
                     old_expired_at=old_expired_at,
                     reason=data.reason,
-                    lifecycle_source="local_force_activate"
+                    lifecycle_source=lifecycle_source
                 )
                 PackagePeriodService._add_operation_log(
                     db=db,
@@ -371,6 +459,7 @@ class PackagePeriodService:
                     "iccid": card.iccid,
                     "activated_at": card.activated_at.isoformat() if card.activated_at else None,
                     "expired_at": card.expired_at.isoformat() if card.expired_at else None,
+                    "pool_id": card.pool_id,
                     "supplier_result": supplier_meta
                 })
             except Exception as exc:

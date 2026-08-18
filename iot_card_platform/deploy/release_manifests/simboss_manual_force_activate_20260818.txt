@@ -1,0 +1,3 @@
+# SIMBOSS 管理员确认激活：本地状态同步并自动入池
+app/services/package_period_service.py
+frontend/src/views/package-period/force-activate/index.vue

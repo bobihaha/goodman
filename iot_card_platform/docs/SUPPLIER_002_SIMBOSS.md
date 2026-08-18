@@ -28,7 +28,7 @@ SIMBOSS_TEST_ICCID=...
 | 单卡生命周期 | `/2.0/device/detail` | 映射测试期、激活日、到期日、状态 |
 | 批量生命周期 | `/2.0/device/detail/batch` | 与批量用量共用详情接口 |
 | 流量池卡开关网络 | `/2.0/device/modifyDeviceStatus` | 仅对系统 `card_type=pool` 的 SIMBOSS 卡调用；开：`ACTIVATED_NAME`，关：`DEACTIVATED_NAME` |
-| 强制激活 | `/2.0/device/activate` | 文档说明需要联系客服开放权限 |
+| 强制激活 | 管理员线下联系供应商 | 平台不调用 `/2.0/device/activate`；供应商侧激活完成后，平台仅将沉默期卡同步为已激活并加入对应流量池 |
 | IMEI 查询 | `/2.0/device/queryNum` | 配合详情中的 `imeiStatus` 判断机卡分离 |
 | 流量池列表/用量 | `/2.0/card/pool/list` | 返回供应商侧流量池总量、用量、剩余量、卡数 |
 | 流量池详情 | `/2.0/card/pool/detail` | 通过 `iccid`/`imsi`/`msisdn` 查询该卡所在流量池 |
@@ -46,6 +46,10 @@ SIMBOSS_TEST_ICCID=...
 ## 停复机说明
 
 SIMBOSS 文档中 `/2.0/device/modifyDeviceStatus` 标题为“流量池卡开关网络”。系统侧已限制：供应商编码为 `002` 时，只有流量池卡会向 SIMBOSS 发起网络关停/恢复请求；单卡不会调用该接口，避免把“流量池卡网络开关”误当成通用停复机能力。
+
+## 强制激活说明
+
+SIMBOSS 强制激活由管理员先线下联系供应商完成。平台“强制激活”操作不调用供应商接口，仅处理本地沉默期卡的状态、激活日和到期日；流量池卡必须在同一事务内加入对应流量池，已有流量池关系时也会刷新池卡数和流量统计，入池或统计刷新失败则本地变更回滚。
 
 ## 验证记录
 
