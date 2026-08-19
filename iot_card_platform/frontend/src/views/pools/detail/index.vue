@@ -109,8 +109,8 @@
         <el-table-column prop="imsi" label="IMSI" width="150" />
         <el-table-column prop="network_status" label="网络状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.network_status === 'open' ? 'success' : 'info'">
-              {{ row.network_status === 'open' ? '开启' : '关闭' }}
+            <el-tag :type="getNetworkStatusMeta(row).type">
+              {{ getNetworkStatusMeta(row).label }}
             </el-tag>
           </template>
         </el-table-column>
@@ -281,6 +281,12 @@ let compositionChart: ECharts | null = null
 const formDialogVisible = ref(false)
 const rechargeDialogVisible = ref(false)
 const getStatusMeta = (status: any) => CARD_STATUS_MAP[status as keyof typeof CARD_STATUS_MAP] || CARD_STATUS_MAP.stock
+const getNetworkStatusMeta = (row: any) => {
+  const status = row.network_status || (row.status === 'activated' ? 'open' : row.status === 'suspended' ? 'closed' : 'unknown')
+  if (status === 'open') return { label: '开启', type: 'success' }
+  if (status === 'closed') return { label: '关闭', type: 'info' }
+  return { label: '未知', type: 'warning' }
+}
 const isSuperAdmin = computed(() => authStore.userInfo?.user_level === 1)
 
 /**

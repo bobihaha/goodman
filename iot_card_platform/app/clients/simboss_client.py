@@ -266,27 +266,39 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "iccid": iccid,
                 "status": "DEACTIVATED_NAME",
             })
-            observed_payload = await self._get_status_payload(iccid)
-            if not self._is_network_suspended(observed_payload):
-                self.last_sor_result = {
-                    "submitted": False,
-                    "expected_device_status": "DEACTIVATED_NAME",
-                    "observed_status": observed_payload.get("status"),
-                    "observed_device_status": observed_payload.get("deviceStatus"),
-                    "supplier_msg": "SIMBOSS返回成功，但供应商侧网络状态未变为关停",
-                }
-                return False
-            self.last_sor_result = {
-                "submitted": True,
-                "observed_status": observed_payload.get("status"),
-                "observed_device_status": observed_payload.get("deviceStatus"),
-                "reconciled_status": "suspended",
-            }
-            return True
         except Exception as exc:
             self.last_sor_result = {"submitted": False, "error": str(exc)}
             logger.error("simboss suspend_card failed: iccid=%s error=%s", iccid, exc)
             return False
+
+        try:
+            observed_payload = await self._get_status_payload(iccid)
+        except Exception as exc:
+            self.last_sor_result = {
+                "submitted": True,
+                "verification_pending": True,
+                "expected_device_status": "DEACTIVATED_NAME",
+                "verification_error": str(exc),
+                "supplier_msg": "SIMBOSS已接受请求，供应商状态查询失败，等待自动对账",
+            }
+            return False
+        if not self._is_network_suspended(observed_payload):
+            self.last_sor_result = {
+                "submitted": True,
+                "verification_pending": True,
+                "expected_device_status": "DEACTIVATED_NAME",
+                "observed_status": observed_payload.get("status"),
+                "observed_device_status": observed_payload.get("deviceStatus"),
+                "supplier_msg": "SIMBOSS已接受请求，等待供应商侧网络状态变为关停",
+            }
+            return False
+        self.last_sor_result = {
+            "submitted": True,
+            "observed_status": observed_payload.get("status"),
+            "observed_device_status": observed_payload.get("deviceStatus"),
+            "reconciled_status": "suspended",
+        }
+        return True
 
     async def resume_card(self, iccid: str, callback_no: Optional[str] = None) -> bool:
         self.last_sor_result = None
@@ -295,27 +307,39 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "iccid": iccid,
                 "status": "ACTIVATED_NAME",
             })
-            observed_payload = await self._get_status_payload(iccid)
-            if not self._is_network_activated(observed_payload):
-                self.last_sor_result = {
-                    "submitted": False,
-                    "expected_device_status": "ACTIVATED_NAME",
-                    "observed_status": observed_payload.get("status"),
-                    "observed_device_status": observed_payload.get("deviceStatus"),
-                    "supplier_msg": "SIMBOSS返回成功，但供应商侧网络状态未恢复",
-                }
-                return False
-            self.last_sor_result = {
-                "submitted": True,
-                "observed_status": observed_payload.get("status"),
-                "observed_device_status": observed_payload.get("deviceStatus"),
-                "reconciled_status": "activated",
-            }
-            return True
         except Exception as exc:
             self.last_sor_result = {"submitted": False, "error": str(exc)}
             logger.error("simboss resume_card failed: iccid=%s error=%s", iccid, exc)
             return False
+
+        try:
+            observed_payload = await self._get_status_payload(iccid)
+        except Exception as exc:
+            self.last_sor_result = {
+                "submitted": True,
+                "verification_pending": True,
+                "expected_device_status": "ACTIVATED_NAME",
+                "verification_error": str(exc),
+                "supplier_msg": "SIMBOSS已接受请求，供应商状态查询失败，等待自动对账",
+            }
+            return False
+        if not self._is_network_activated(observed_payload):
+            self.last_sor_result = {
+                "submitted": True,
+                "verification_pending": True,
+                "expected_device_status": "ACTIVATED_NAME",
+                "observed_status": observed_payload.get("status"),
+                "observed_device_status": observed_payload.get("deviceStatus"),
+                "supplier_msg": "SIMBOSS已接受请求，等待供应商侧网络状态恢复",
+            }
+            return False
+        self.last_sor_result = {
+            "submitted": True,
+            "observed_status": observed_payload.get("status"),
+            "observed_device_status": observed_payload.get("deviceStatus"),
+            "reconciled_status": "activated",
+        }
+        return True
 
     async def force_activate_card(self, iccid: str, card_no: Optional[str] = None) -> bool:
         self.last_force_activate_result = None

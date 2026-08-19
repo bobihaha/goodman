@@ -373,9 +373,13 @@ class TrafficPoolCRUD:
         if usage_percent >= pool_stop_threshold:
             # 超过阈值，将池内所有已激活卡片停卡
             from app.db.models.iot_card import SuspendType
-            from app.db.models.suspend import SuspendActionType, SuspendLogModel
+            from app.db.models.suspend import (
+                SuspendActionType,
+                SuspendLogModel,
+                SupplierSuspendOperationModel,
+            )
             from app.db.models.supplier import SupplierModel
-            from app.clients.supplier_api import get_supplier_client
+            from app.services.suspend_service import SuspendActionService
             import logging
 
             reason = f"流量池用量超限停卡(用量{usage_percent}%，阈值{pool_stop_threshold}%)"
@@ -391,6 +395,18 @@ class TrafficPoolCRUD:
             )
             cards = list(cards_result.scalars().all())
 
+            pending_card_ids = set()
+            if cards:
+                pending_result = await db.execute(
+                    select(SupplierSuspendOperationModel.card_id).where(
+                        SupplierSuspendOperationModel.card_id.in_([card.id for card in cards]),
+                        SupplierSuspendOperationModel.action == SuspendActionType.suspend,
+                        SupplierSuspendOperationModel.callback_status == "pending",
+                        SupplierSuspendOperationModel.is_deleted == 0,
+                    )
+                )
+                pending_card_ids = set(pending_result.scalars().all())
+
             supplier_ids = {card.supplier_id for card in cards if card.supplier_id}
             supplier_map = {}
             if supplier_ids:
@@ -403,20 +419,28 @@ class TrafficPoolCRUD:
                 supplier_map = {item.id: item for item in supplier_result.scalars().all()}
 
             for card in cards:
+                if card.id in pending_card_ids:
+                    continue
                 supplier = supplier_map.get(card.supplier_id)
                 if not supplier:
                     continue
                 try:
-                    supplier_client = get_supplier_client(
-                        supplier_id=card.supplier_id,
-                        api_url=supplier.api_url or "",
-                        api_key=supplier.api_key or "",
-                        api_secret=supplier.api_secret or ""
+                    api_success, callback_no, _ = await SuspendActionService._call_supplier_suspend(
+                        db=db,
+                        card=card,
+                        supplier=supplier,
+                        reason=reason,
+                        request_context={
+                            "operation_source": "pool_exceed",
+                            "pool_id": pool.id,
+                            "suspend_type": SuspendType.pool_exceed.value,
+                            "reason": reason,
+                        },
                     )
-                    api_success = await supplier_client.suspend_card(card.iccid, reason)
                 except Exception as exc:
                     logger.error(f"流量池超限供应商停卡失败: iccid={card.iccid}, error={exc}")
                     api_success = False
+                    callback_no = None
 
                 if not api_success:
                     continue
@@ -431,7 +455,9 @@ class TrafficPoolCRUD:
                     action=SuspendActionType.suspend,
                     suspend_type="pool_exceed",
                     pool_id=pool.id,
-                    reason=reason
+                    reason=reason,
+                    api_called=1,
+                    api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False) if callback_no else None,
                 ))
 
             await db.commit()

@@ -191,6 +191,14 @@ class IotCardModel(BaseModel):
             return 0
         return round((self.data_used / self.data_total) * 100, 2)
 
+    def get_network_status(self) -> str:
+        """返回平台已同步的网络状态，未知状态不误报为关闭。"""
+        if self.status == CardStatus.activated:
+            return "open"
+        if self.status == CardStatus.suspended:
+            return "closed"
+        return "unknown"
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -239,6 +247,7 @@ class IotCardModel(BaseModel):
             # 状态
             "status": self.status.value if self.status else None,
             "status_name": CARD_STATUS_NAMES.get(self.status.value, "") if self.status else None,
+            "network_status": self.get_network_status(),
             # 停卡信息
             "suspend_type": self.suspend_type.value if self.suspend_type else None,
             "suspend_type_name": SUSPEND_TYPE_NAMES.get(self.suspend_type.value, "") if self.suspend_type else None,

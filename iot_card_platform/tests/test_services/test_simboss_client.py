@@ -290,7 +290,8 @@ async def test_resume_returns_false_when_device_status_remains_deactivated(clien
         result = await client.resume_card("8986")
 
     assert result is False
-    assert client.last_sor_result["submitted"] is False
+    assert client.last_sor_result["submitted"] is True
+    assert client.last_sor_result["verification_pending"] is True
     assert client.last_sor_result["observed_device_status"] == "DEACTIVATED_NAME"
 
 
@@ -304,8 +305,21 @@ async def test_resume_returns_false_when_status_remains_deactivation(client):
         result = await client.resume_card("8986")
 
     assert result is False
-    assert client.last_sor_result["submitted"] is False
+    assert client.last_sor_result["submitted"] is True
+    assert client.last_sor_result["verification_pending"] is True
     assert client.last_sor_result["observed_status"] == "deactivation"
+
+
+@pytest.mark.asyncio
+async def test_resume_status_query_failure_keeps_submission_for_reconcile(client):
+    with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": "success"})), \
+         patch.object(client, "_get_status_payload", AsyncMock(side_effect=TimeoutError("query timeout"))):
+        result = await client.resume_card("8986")
+
+    assert result is False
+    assert client.last_sor_result["submitted"] is True
+    assert client.last_sor_result["verification_pending"] is True
+    assert client.last_sor_result["verification_error"] == "query timeout"
 
 
 @pytest.mark.asyncio

@@ -232,6 +232,21 @@ class SuspendActionService:
         return True, None
 
     @staticmethod
+    async def _safe_refresh_pool_stats(db: AsyncSession, pool_ids) -> None:
+        """卡片状态变化后刷新流量池，且不让统计失败覆盖停复机主结果。"""
+        from app.crud.pool_crud import pool_crud
+
+        for pool_id in sorted({pool_id for pool_id in pool_ids if pool_id}):
+            try:
+                await pool_crud.update_stats(db, pool_id)
+            except Exception:
+                try:
+                    await db.rollback()
+                except Exception:
+                    logger.exception("流量池统计失败后回滚会话失败: pool_id=%s", pool_id)
+                logger.exception("卡片状态变化后刷新流量池失败: pool_id=%s", pool_id)
+
+    @staticmethod
     def normalize_card_suspend_state(
         card: IotCardModel,
         target_status: Optional[str],
@@ -568,10 +583,22 @@ class SuspendActionService:
                         )
                     return
 
+                previous_status = card.status
+                suspend_type = None
+                if request_meta.get("suspend_type"):
+                    try:
+                        suspend_type = SuspendType(request_meta["suspend_type"])
+                    except ValueError:
+                        logger.warning(
+                            "供应商操作对账包含未知停机类型: callback_no=%s suspend_type=%s",
+                            callback_no,
+                            request_meta["suspend_type"],
+                        )
                 SuspendActionService.normalize_card_suspend_state(
                     card,
                     lifecycle_status,
-                    reason="供应商生命周期自动对账收敛"
+                    suspend_type=suspend_type,
+                    reason=request_meta.get("reason") or "供应商生命周期自动对账收敛",
                 )
                 await SupplierSuspendOperationCRUD.update_callback_result(
                     db=db,
@@ -590,6 +617,29 @@ class SuspendActionService:
                     account_status=lifecycle_status,
                     callback_status="success"
                 )
+                if (
+                    operation.action == SuspendActionType.suspend
+                    and request_meta.get("operation_source") == "pool_exceed"
+                    and previous_status != card.status
+                ):
+                    db.add(SuspendLogModel(
+                        card_id=card.id,
+                        iccid=card.iccid,
+                        action=SuspendActionType.suspend,
+                        suspend_type=SuspendType.pool_exceed.value,
+                        pool_id=request_meta.get("pool_id") or getattr(card, "pool_id", None),
+                        reason=request_meta.get("reason") or "流量池用量超限停卡",
+                        api_called=1,
+                        api_result=json.dumps({"callback_no": callback_no}, ensure_ascii=False),
+                        operator_id=operation.operator_id,
+                    ))
+                    await db.commit()
+                if (
+                    getattr(card, "pool_id", None)
+                    and request_meta.get("audit_action") != "restart"
+                    and card.status != previous_status
+                ):
+                    await SuspendActionService._safe_refresh_pool_stats(db, {card.pool_id})
                 await SuspendActionService._safe_update_supplier_action_audit(
                     db=db,
                     request_meta=request_meta,

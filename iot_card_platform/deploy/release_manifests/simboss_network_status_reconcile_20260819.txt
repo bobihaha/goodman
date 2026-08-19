@@ -1,0 +1,6 @@
+# SIMBOSS 网络状态展示与停复机延迟对账修复
+app/clients/simboss_client.py
+app/crud/pool_crud.py
+app/db/models/iot_card.py
+app/services/suspend_service.py
+frontend/src/views/pools/detail/index.vue
