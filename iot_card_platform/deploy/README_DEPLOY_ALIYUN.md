@@ -280,6 +280,14 @@ bash deploy/scripts/restore_mysql.sh ./backups/mysql/xxx.sql.gz
 bash deploy/scripts/predeploy_check.sh
 ```
 
+脚本会自动识别当前生产的 `.env/docker-compose.yml` 与标准部署的
+`.env.production/docker-compose.prod.yml`，并在可用空间不足 10GB 时阻止构建。
+如确有不同容量要求，可显式设置 `MIN_DEPLOY_FREE_GB`；该检查只拦截发布，
+不会自动清理 Docker 镜像、数据卷或发布备份。
+
+文件清单发布脚本会在服务重建后等待容器进入 `healthy`，再运行系统检查和日志扫描，
+避免容器仍处于启动阶段时产生误报。
+
 ## 当前项目的特殊注意事项
 
 ### 1. 不要只配置 `DB_URL`

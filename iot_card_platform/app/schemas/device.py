@@ -3,7 +3,7 @@
 """
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum as PyEnum
 
 
@@ -39,6 +39,8 @@ class DeviceUpdate(BaseModel):
 
 class DeviceInfo(BaseModel):
     """设备信息"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     sn: str
@@ -51,6 +53,3 @@ class DeviceInfo(BaseModel):
     user_id: Optional[int] = None
     remark: Optional[str] = None
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

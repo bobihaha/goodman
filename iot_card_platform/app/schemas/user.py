@@ -3,7 +3,7 @@
 """
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from enum import Enum as PyEnum
 
 
@@ -37,6 +37,8 @@ class UserLogin(BaseModel):
 
 class UserInfo(BaseModel):
     """用户信息"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     phone: str
@@ -45,6 +47,3 @@ class UserInfo(BaseModel):
     role: str
     company: Optional[str] = None
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

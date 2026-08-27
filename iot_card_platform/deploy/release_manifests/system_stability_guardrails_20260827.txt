@@ -1,0 +1,9 @@
+# 系统稳定性告警与发布磁盘门禁
+.dockerignore
+app/db/database.py
+app/schemas/device.py
+app/schemas/permission.py
+app/schemas/user.py
+requirements.txt
+frontend/src/assets/styles/global.scss
+deploy/scripts/predeploy_check.sh

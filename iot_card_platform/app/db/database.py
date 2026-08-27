@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
+from app.utils.exceptions import BusinessException
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
+        except BusinessException:
+            await session.rollback()
+            raise
         except Exception as e:
-            logger.error(f"Database transaction failed: {str(e)}", exc_info=True)
+            logger.exception("Database transaction failed: %s", e)
             await session.rollback()
             raise

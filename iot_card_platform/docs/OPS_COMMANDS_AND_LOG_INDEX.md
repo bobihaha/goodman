@@ -42,9 +42,13 @@ bash deploy/scripts/predeploy_check.sh
 
 - 检查生产 `.env`
 - 检查当前生产使用的 Compose 文件
-- 检查 Docker / Docker Compose
+- 检查 Docker / Docker Compose 命令及守护进程连通性
 - 检查编排配置是否可解析
-- 查看磁盘空间
+- 自动识别当前生产或标准部署的 Compose 与环境文件
+- 检查磁盘空间；可用空间不足 10GB 时阻止发布
+
+说明：预检查不会自动删除 Docker 镜像、数据卷或发布备份。不同容量门槛可通过
+`MIN_DEPLOY_FREE_GB` 显式调整。
 
 ### 2.2 本地后端测试
 

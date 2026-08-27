@@ -2,7 +2,7 @@
 权限管理数据模型
 """
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PermissionBase(BaseModel):
@@ -28,12 +28,11 @@ class PermissionUpdate(BaseModel):
 
 class PermissionInfo(PermissionBase):
     """权限信息"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class PermissionQuery(BaseModel):
@@ -54,7 +53,6 @@ class PermissionModule(BaseModel):
     module: str = Field(..., description="模块名称")
     module_name: str = Field(..., description="模块显示名称")
     permissions: List[PermissionInfo] = Field(default_factory=list, description="权限列表")
-
 
 
 

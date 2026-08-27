@@ -209,8 +209,30 @@ echo "[6/7] Build and restart services"
 
 echo "[7/7] Health checks and log scan"
 "${SSH[@]}" "cd '${REMOTE_DIR}' && set -euo pipefail
+for service in ${SERVICES}; do
+  container_id=\$(docker compose ps -q \"\${service}\")
+  if [[ -z \"\${container_id}\" ]]; then
+    echo \"Service has no container: \${service}\" >&2
+    exit 1
+  fi
+  for attempt in \$(seq 1 30); do
+    service_status=\$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \"\${container_id}\")
+    if [[ \"\${service_status}\" == \"healthy\" || \"\${service_status}\" == \"running\" ]]; then
+      echo \"Service ready: \${service} (\${service_status})\"
+      break
+    fi
+    if [[ \"\${service_status}\" == \"unhealthy\" || \"\${service_status}\" == \"exited\" || \"\${service_status}\" == \"dead\" ]]; then
+      echo \"Service failed before health check: \${service} (\${service_status})\" >&2
+      exit 1
+    fi
+    if [[ \"\${attempt}\" == \"30\" ]]; then
+      echo \"Timed out waiting for service: \${service} (\${service_status})\" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+done
 bash ./check_system.sh
-sleep 30
 docker compose ps --format 'table {{.Name}}\t{{.Service}}\t{{.Status}}'
 echo '[internal backend health]'
 docker compose exec -T app python - <<'PY'
