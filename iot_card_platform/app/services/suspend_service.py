@@ -485,6 +485,13 @@ class SuspendActionService:
         )
 
     @staticmethod
+    def _operation_reconcile_delay(request_meta: Dict[str, Any]) -> int:
+        attempts = int(request_meta.get("auto_reconcile_attempts") or 0)
+        if request_meta.get("audit_source") == "h5" and attempts < 3:
+            return settings.refresh_status_poll_interval_seconds
+        return settings.supplier_callback_reconcile_seconds
+
+    @staticmethod
     async def _run_pending_operation_reconcile(
         callback_no: str,
         delay_seconds: int
@@ -555,7 +562,7 @@ class SuspendActionService:
                     if request_meta["auto_reconcile_attempts"] < 5:
                         SuspendActionService.schedule_pending_operation_reconcile(
                             callback_no=callback_no,
-                            delay_seconds=settings.supplier_callback_reconcile_seconds
+                            delay_seconds=SuspendActionService._operation_reconcile_delay(request_meta)
                         )
                     else:
                         error = f"供应商状态在对账窗口内未收敛，当前状态：{lifecycle_status or '-'}"
@@ -827,7 +834,10 @@ class SuspendActionService:
                 operation=operation,
             )
             if request_meta.get("submitted"):
-                SuspendActionService.schedule_pending_operation_reconcile(callback_no)
+                SuspendActionService.schedule_pending_operation_reconcile(
+                    callback_no,
+                    delay_seconds=SuspendActionService._operation_reconcile_delay(request_meta),
+                )
             return result, callback_no, request_meta.get("reconciled_status")
         except Exception as exc:
             request_meta = {"submitted": False, "error": str(exc), **(request_context or {})}
@@ -899,7 +909,10 @@ class SuspendActionService:
                 operation=operation,
             )
             if request_meta.get("submitted"):
-                SuspendActionService.schedule_pending_operation_reconcile(callback_no)
+                SuspendActionService.schedule_pending_operation_reconcile(
+                    callback_no,
+                    delay_seconds=SuspendActionService._operation_reconcile_delay(request_meta),
+                )
             return result, callback_no, request_meta.get("reconciled_status")
         except Exception as exc:
             request_meta = {"submitted": False, "error": str(exc), **(request_context or {})}

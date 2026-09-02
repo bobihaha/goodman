@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+from app.config import settings
 from app.crud.pool_crud import pool_crud
 from app.db.models.iot_card import CardStatus, CardType, IotCardModel, SuspendType
 from app.db.models.suspend import SuspendActionType, SuspendLogModel
@@ -78,7 +79,95 @@ async def test_delayed_simboss_resume_is_scheduled_for_reconcile():
     assert success is False
     assert callback_no
     assert reconciled_status is None
-    schedule_reconcile.assert_called_once_with(callback_no)
+    schedule_reconcile.assert_called_once_with(
+        callback_no,
+        delay_seconds=settings.supplier_callback_reconcile_seconds,
+    )
+
+
+@pytest.mark.asyncio
+async def test_h5_supplier_request_uses_fast_reconcile_interval():
+    card = SimpleNamespace(
+        id=11,
+        iccid="8986000000000000011",
+        msisdn=None,
+        supplier_id=1,
+        card_type=CardType.pool,
+    )
+    supplier = SimpleNamespace(
+        id=1,
+        code="001",
+        api_url="https://api.example.com",
+        api_key="key",
+        api_secret="secret",
+        api_config={},
+    )
+    operation = SimpleNamespace(id=21)
+    client = SimpleNamespace(
+        suspend_card=AsyncMock(return_value=True),
+        last_sor_result={"submitted": True},
+    )
+
+    with patch.object(
+        SuspendActionService,
+        "_create_supplier_operation",
+        new=AsyncMock(return_value=operation),
+    ), patch(
+        "app.services.suspend_service.get_supplier_client",
+        return_value=client,
+    ), patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.update_request_result",
+        new=AsyncMock(),
+    ), patch.object(
+        SuspendActionService,
+        "_safe_update_supplier_action_audit",
+        new=AsyncMock(),
+    ), patch.object(
+        SuspendActionService,
+        "schedule_pending_operation_reconcile",
+        new=Mock(),
+    ) as schedule_reconcile:
+        success, callback_no, reconciled_status = await SuspendActionService._call_supplier_suspend(
+            db=SimpleNamespace(),
+            card=card,
+            supplier=supplier,
+            reason="H5停机",
+            operator_id=1,
+            request_context={"audit_source": "h5"},
+        )
+
+    assert success is True
+    assert callback_no
+    assert reconciled_status is None
+    schedule_reconcile.assert_called_once_with(
+        callback_no,
+        delay_seconds=settings.refresh_status_poll_interval_seconds,
+    )
+
+
+def test_h5_reconcile_retries_remain_fast():
+    assert (
+        SuspendActionService._operation_reconcile_delay({"audit_source": "h5"})
+        == settings.refresh_status_poll_interval_seconds
+    )
+    assert (
+        SuspendActionService._operation_reconcile_delay({
+            "audit_source": "h5",
+            "auto_reconcile_attempts": 2,
+        })
+        == settings.refresh_status_poll_interval_seconds
+    )
+    assert (
+        SuspendActionService._operation_reconcile_delay({
+            "audit_source": "h5",
+            "auto_reconcile_attempts": 3,
+        })
+        == settings.supplier_callback_reconcile_seconds
+    )
+    assert (
+        SuspendActionService._operation_reconcile_delay({})
+        == settings.supplier_callback_reconcile_seconds
+    )
 
 
 class _ScalarResult:

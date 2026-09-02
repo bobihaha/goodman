@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.db.models.iot_card import CardStatus
+from app.db.models.iot_card import CardStatus, SuspendType
 from app.db.models.suspend import SuspendActionType, SuspendLogModel
 from app.services.h5_service import H5Service
 from app.services.suspend_service import SuspendActionService
@@ -48,6 +48,95 @@ async def test_h5_suspend_links_operation_log_to_supplier_request():
         "audit_phase": "suspend",
         "audit_reason": "客户申请",
     }
+
+
+@pytest.mark.asyncio
+async def test_h5_suspend_applies_immediately_reconciled_status():
+    service = H5Service()
+    user = SimpleNamespace(id=2, name="客户", h5_allow_suspend=1)
+    card = SimpleNamespace(
+        id=24,
+        iccid="898604F21023C0012037",
+        status=CardStatus.activated,
+        suspend_type=SuspendType.none,
+        suspend_at=None,
+        suspend_reason=None,
+        supplier_id=1,
+        pool_id=88,
+    )
+    db = MagicMock(commit=AsyncMock(), refresh=AsyncMock())
+
+    service._get_h5_user = AsyncMock(return_value=user)
+    service._get_card_in_scope = AsyncMock(return_value=card)
+    service._get_pending_action = AsyncMock(return_value=None)
+    service._create_action_audit_log = AsyncMock(return_value=SimpleNamespace(id=88))
+
+    with patch.object(
+        SuspendActionService,
+        "_load_supplier_map",
+        AsyncMock(return_value={1: SimpleNamespace(id=1)}),
+    ), patch.object(
+        SuspendActionService,
+        "_call_supplier_suspend",
+        AsyncMock(return_value=(True, "sus-callback", CardStatus.suspended.value)),
+    ), patch.object(
+        SuspendActionService,
+        "_safe_refresh_pool_stats",
+        AsyncMock(),
+    ) as refresh_pool_stats:
+        result = await service.suspend_card(db, "slug", card.id, "客户申请")
+
+    assert result["status"] == "success"
+    assert result["message"] == "停机成功"
+    assert card.status == CardStatus.suspended
+    assert card.suspend_type == SuspendType.manual
+    assert card.suspend_reason == "客户申请"
+    db.commit.assert_awaited_once()
+    refresh_pool_stats.assert_awaited_once_with(db, {88})
+
+
+@pytest.mark.asyncio
+async def test_h5_resume_applies_immediately_reconciled_status():
+    service = H5Service()
+    user = SimpleNamespace(id=2, name="客户", h5_allow_resume=1)
+    card = SimpleNamespace(
+        id=24,
+        iccid="898604F21023C0012037",
+        status=CardStatus.suspended,
+        suspend_type=SuspendType.manual,
+        suspend_at=None,
+        suspend_reason="客户申请",
+        supplier_id=1,
+        pool_id=None,
+    )
+    db = MagicMock(commit=AsyncMock(), refresh=AsyncMock())
+
+    service._get_h5_user = AsyncMock(return_value=user)
+    service._get_card_in_scope = AsyncMock(return_value=card)
+    service._get_pending_action = AsyncMock(return_value=None)
+    service._create_action_audit_log = AsyncMock(return_value=SimpleNamespace(id=89))
+
+    with patch.object(
+        SuspendActionService,
+        "_check_resume_eligibility",
+        AsyncMock(return_value=(True, None)),
+    ), patch.object(
+        SuspendActionService,
+        "_load_supplier_map",
+        AsyncMock(return_value={1: SimpleNamespace(id=1)}),
+    ), patch.object(
+        SuspendActionService,
+        "_call_supplier_resume",
+        AsyncMock(return_value=(True, "res-callback", CardStatus.activated.value)),
+    ):
+        result = await service.resume_card(db, "slug", card.id)
+
+    assert result["status"] == "success"
+    assert result["message"] == "复机成功"
+    assert card.status == CardStatus.activated
+    assert card.suspend_type == SuspendType.none
+    assert card.suspend_reason is None
+    db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

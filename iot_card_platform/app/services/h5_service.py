@@ -224,6 +224,26 @@ class H5Service:
             await asyncio.sleep(settings.refresh_status_poll_interval_seconds)
 
     @staticmethod
+    async def _apply_reconciled_status(
+        db: AsyncSession,
+        card: IotCardModel,
+        status: str,
+        suspend_type: Optional[SuspendType] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        previous_status = card.status
+        SuspendActionService.normalize_card_suspend_state(
+            card,
+            status,
+            suspend_type=suspend_type,
+            reason=reason,
+        )
+        await db.commit()
+        await db.refresh(card)
+        if getattr(card, "pool_id", None) and card.status != previous_status:
+            await SuspendActionService._safe_refresh_pool_stats(db, {card.pool_id})
+
+    @staticmethod
     def _build_portal_config(user) -> H5PortalConfig:
         return H5PortalConfig(
             user_id=user.id,
@@ -338,7 +358,7 @@ class H5Service:
         supplier_map = await SuspendActionService._load_supplier_map(db, [card])
         supplier = supplier_map.get(card.supplier_id)
         audit_log = await self._create_action_audit_log(db, user, card, "suspend", reason)
-        api_success, callback_no, _ = await SuspendActionService._call_supplier_suspend(
+        api_success, callback_no, reconciled_status = await SuspendActionService._call_supplier_suspend(
             db=db,
             card=card,
             supplier=supplier,
@@ -349,13 +369,23 @@ class H5Service:
         if not api_success:
             raise BusinessException(code=502, msg="供应商停机请求提交失败")
 
+        completed = reconciled_status == CardStatus.suspended.value
+        if completed:
+            await self._apply_reconciled_status(
+                db,
+                card,
+                reconciled_status,
+                suspend_type=SuspendType.manual,
+                reason=reason or "H5手动停机",
+            )
+
         return H5CardActionResult(
             card_id=card.id,
             iccid=card.iccid,
             action="suspend",
-            status="processing",
+            status="success" if completed else "processing",
             callback_no=callback_no,
-            message="停机请求已提交，处理中"
+            message="停机成功" if completed else "停机请求已提交，处理中"
         ).model_dump()
 
     async def resume_card(self, db: AsyncSession, slug: str, card_id: int) -> dict:
@@ -383,7 +413,7 @@ class H5Service:
         supplier_map = await SuspendActionService._load_supplier_map(db, [card])
         supplier = supplier_map.get(card.supplier_id)
         audit_log = await self._create_action_audit_log(db, user, card, "resume", "H5手动复机")
-        api_success, callback_no, _ = await SuspendActionService._call_supplier_resume(
+        api_success, callback_no, reconciled_status = await SuspendActionService._call_supplier_resume(
             db=db,
             card=card,
             supplier=supplier,
@@ -393,13 +423,17 @@ class H5Service:
         if not api_success:
             raise BusinessException(code=502, msg="供应商复机请求提交失败")
 
+        completed = reconciled_status in self.REFRESH_ACTIVE_STATUSES
+        if completed:
+            await self._apply_reconciled_status(db, card, reconciled_status)
+
         return H5CardActionResult(
             card_id=card.id,
             iccid=card.iccid,
             action="resume",
-            status="processing",
+            status="success" if completed else "processing",
             callback_no=callback_no,
-            message="复机请求已提交，处理中"
+            message="复机成功" if completed else "复机请求已提交，处理中"
         ).model_dump()
 
     async def refresh_card(self, db: AsyncSession, slug: str, card_id: int) -> dict:
