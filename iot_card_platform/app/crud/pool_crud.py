@@ -4,9 +4,9 @@
 from typing import Optional, List, Tuple
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, select, update, func, or_
+from sqlalchemy import and_, case, select, update, func, or_
 from app.db.models.pool import TrafficPoolModel, PoolCardLogModel, PoolStatus
-from app.db.models.iot_card import IotCardModel, CardStatus
+from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.suspend import AlertLevel, AlertTargetType
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 
@@ -20,6 +20,20 @@ def valid_pool_member_conditions(pool_id_expr):
         IotCardModel.is_pool_member == 1,
         IotCardModel.user_id.is_not(None),
         IotCardModel.is_deleted == 0,
+    )
+
+
+def pool_flow_contributor_condition():
+    """池额度贡献卡：已激活卡，以及仍在计费的非到期停机卡。"""
+    return or_(
+        IotCardModel.status == CardStatus.activated,
+        and_(
+            IotCardModel.status == CardStatus.suspended,
+            or_(
+                IotCardModel.suspend_type.is_(None),
+                IotCardModel.suspend_type != SuspendType.expired,
+            ),
+        ),
     )
 
 
@@ -249,10 +263,28 @@ class TrafficPoolCRUD:
             return None
 
         # 查询池内卡片统计
+        contributes_flow = pool_flow_contributor_condition()
+        contributes_usage = contributes_flow
+        period_type = pool.period_type.value if hasattr(pool.period_type, "value") else pool.period_type
+        if period_type == "monthly":
+            current_month_start = datetime.strptime(
+                f"{get_current_flow_cycle_month()}-01",
+                "%Y-%m-%d",
+            )
+            contributes_usage = and_(
+                contributes_flow,
+                IotCardModel.data_sync_at >= current_month_start,
+            )
         query = select(
             func.count(IotCardModel.id).label("card_count"),
-            func.coalesce(func.sum(IotCardModel.data_total), 0).label("data_total"),
-            func.coalesce(func.sum(IotCardModel.data_used), 0).label("data_used")
+            func.coalesce(
+                func.sum(case((contributes_flow, IotCardModel.data_total), else_=0)),
+                0,
+            ).label("data_total"),
+            func.coalesce(
+                func.sum(case((contributes_usage, IotCardModel.data_used), else_=0)),
+                0,
+            ).label("data_used"),
         ).where(
             *valid_pool_member_conditions(pool_id)
         )
