@@ -259,9 +259,19 @@ class SimbossSupplierClient(SupplierAPIClient):
     async def get_traffic_pool_usage(self) -> List[Dict[str, Any]]:
         return await self.get_traffic_pool_list()
 
+    async def _get_supplier_pool_id(self, iccid: str) -> str:
+        """确认卡片属于 SIMBOSS 供应商流量池，并返回供应商池 ID。"""
+        result = await self._post("card/pool/detail", {"iccid": iccid})
+        payload = result.get("data") or {}
+        pool_id = payload.get("id") if isinstance(payload, dict) else None
+        if pool_id in (None, ""):
+            raise ValueError("SIMBOSS未返回该卡的供应商流量池归属")
+        return str(pool_id)
+
     async def suspend_card(self, iccid: str, reason: Optional[str] = None, callback_no: Optional[str] = None) -> bool:
         self.last_sor_result = None
         try:
+            supplier_pool_id = await self._get_supplier_pool_id(iccid)
             await self._post("device/modifyDeviceStatus", {
                 "iccid": iccid,
                 "status": "DEACTIVATED_NAME",
@@ -280,6 +290,7 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "expected_device_status": "DEACTIVATED_NAME",
                 "verification_error": str(exc),
                 "supplier_msg": "SIMBOSS已接受请求，供应商状态查询失败，等待自动对账",
+                "supplier_pool_id": supplier_pool_id,
             }
             return False
         if not self._is_network_suspended(observed_payload):
@@ -290,6 +301,7 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "observed_status": observed_payload.get("status"),
                 "observed_device_status": observed_payload.get("deviceStatus"),
                 "supplier_msg": "SIMBOSS已接受请求，等待供应商侧网络状态变为关停",
+                "supplier_pool_id": supplier_pool_id,
             }
             return False
         self.last_sor_result = {
@@ -297,12 +309,14 @@ class SimbossSupplierClient(SupplierAPIClient):
             "observed_status": observed_payload.get("status"),
             "observed_device_status": observed_payload.get("deviceStatus"),
             "reconciled_status": "suspended",
+            "supplier_pool_id": supplier_pool_id,
         }
         return True
 
     async def resume_card(self, iccid: str, callback_no: Optional[str] = None) -> bool:
         self.last_sor_result = None
         try:
+            supplier_pool_id = await self._get_supplier_pool_id(iccid)
             await self._post("device/modifyDeviceStatus", {
                 "iccid": iccid,
                 "status": "ACTIVATED_NAME",
@@ -321,6 +335,7 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "expected_device_status": "ACTIVATED_NAME",
                 "verification_error": str(exc),
                 "supplier_msg": "SIMBOSS已接受请求，供应商状态查询失败，等待自动对账",
+                "supplier_pool_id": supplier_pool_id,
             }
             return False
         if not self._is_network_activated(observed_payload):
@@ -331,6 +346,7 @@ class SimbossSupplierClient(SupplierAPIClient):
                 "observed_status": observed_payload.get("status"),
                 "observed_device_status": observed_payload.get("deviceStatus"),
                 "supplier_msg": "SIMBOSS已接受请求，等待供应商侧网络状态恢复",
+                "supplier_pool_id": supplier_pool_id,
             }
             return False
         self.last_sor_result = {
@@ -338,6 +354,7 @@ class SimbossSupplierClient(SupplierAPIClient):
             "observed_status": observed_payload.get("status"),
             "observed_device_status": observed_payload.get("deviceStatus"),
             "reconciled_status": "activated",
+            "supplier_pool_id": supplier_pool_id,
         }
         return True
 

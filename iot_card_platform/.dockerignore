@@ -6,6 +6,7 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .DS_Store
+**/._*
 node_modules
 frontend/node_modules
 frontend/dist
@@ -16,5 +17,13 @@ logs
 *.pyd
 *.log
 test.db
-.env
-.env.production
+.env*
+backups
+release_backups
+certs
+frontend
+docs
+tests
+artifacts
+outputs
+.playwright-mcp

@@ -21,7 +21,7 @@ from app.db.models.iot_card import IotCardModel
 from app.db.models.package import CARRIER_NAMES
 from app.db.models.pool import TrafficPoolModel
 from app.db.models.suspend import AlertLevel, AlertLogModel, AlertTargetType
-from app.db.models.sys_user import SysUserModel
+from app.db.models.sys_user import SysUserModel, UserLevel, UserStatus
 from app.utils.timezone import beijing_now
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,8 @@ class NotificationService:
         subject: str,
         content: str,
         html_content: Optional[str] = None,
-        attachments: Optional[List[Dict[str, Any]]] = None
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        copy_super_admins: bool = False
     ) -> bool:
         """发送邮件"""
         email_settings = await cls.get_email_settings(db)
@@ -131,6 +132,10 @@ class NotificationService:
         message["Subject"] = subject
         message["From"] = formataddr((email_settings["from_name"], email_settings["from_email"]))
         message["To"] = to_email
+        if copy_super_admins:
+            admin_emails = await cls.get_super_admin_emails(db, exclude_emails=[to_email])
+            if admin_emails:
+                message["Bcc"] = ", ".join(admin_emails)
         message.set_content(content)
         if html_content:
             message.add_alternative(html_content, subtype="html")
@@ -150,6 +155,35 @@ class NotificationService:
 
         await asyncio.to_thread(cls._deliver_email, email_settings, message)
         return True
+
+    @staticmethod
+    async def get_super_admin_emails(
+        db: AsyncSession,
+        exclude_emails: Optional[List[str]] = None
+    ) -> List[str]:
+        """获取启用中的超级管理员邮箱，并按邮箱地址去重。"""
+        result = await db.execute(
+            select(SysUserModel.email)
+            .where(
+                SysUserModel.is_deleted == 0,
+                SysUserModel.status == UserStatus.enable,
+                SysUserModel.user_level == UserLevel.SUPER_ADMIN.value,
+                SysUserModel.email.is_not(None),
+                SysUserModel.email != "",
+            )
+            .order_by(SysUserModel.id.asc())
+        )
+        excluded = {item.strip().lower() for item in exclude_emails or [] if item and item.strip()}
+        emails = []
+        seen = set(excluded)
+        for raw_email in result.scalars().all():
+            email = raw_email.strip()
+            normalized = email.lower()
+            if not email or normalized in seen:
+                continue
+            seen.add(normalized)
+            emails.append(email)
+        return emails
 
     @staticmethod
     def _deliver_email(email_settings: Dict[str, Any], message: EmailMessage) -> None:
@@ -195,7 +229,7 @@ class NotificationService:
             return False
 
         if alert.target_type and alert.target_type.value in {"card", "pool"}:
-            return await cls.send_pending_usage_alerts_for_user(db, alert.user_id)
+            return await cls.send_pending_usage_alerts_for_user(db, alert.user_id, [alert.id])
 
         context = await cls._build_alert_context(db, alert, extra_context or {})
         subject, content = await cls._render_alert_message(db, alert, context)
@@ -204,7 +238,14 @@ class NotificationService:
             return False
 
         try:
-            sent = await cls.send_email(db, user.email, subject, content, html_content=html_content)
+            sent = await cls.send_email(
+                db,
+                user.email,
+                subject,
+                content,
+                html_content=html_content,
+                copy_super_admins=True
+            )
         except Exception as exc:
             logger.exception("发送告警邮件失败 alert_id=%s error=%s", alert.id, exc)
             return False
@@ -214,31 +255,53 @@ class NotificationService:
         return sent
 
     @classmethod
-    async def send_pending_usage_alerts_for_user(cls, db: AsyncSession, user_id: int) -> bool:
-        """按用户聚合发送未通知的流量池和非池单卡用量提醒。"""
+    async def send_pending_usage_alerts_for_user(
+        cls,
+        db: AsyncSession,
+        user_id: int,
+        alert_ids: List[int],
+    ) -> bool:
+        """由本轮新告警触发，按用户发送当月流量池和非池单卡告警轨迹。"""
         user = await db.get(SysUserModel, user_id)
         if not user or not user.email:
             return False
         if not cls._is_user_email_notify_enabled(user.alert_notify):
             return False
 
-        result = await db.execute(
-            select(AlertLogModel)
-            .where(
-                AlertLogModel.is_deleted == 0,
-                AlertLogModel.user_id == user_id,
-                AlertLogModel.notified == 0,
-                AlertLogModel.target_type.in_([AlertTargetType.card, AlertTargetType.pool]),
-            )
-            .order_by(AlertLogModel.created_at.asc(), AlertLogModel.id.asc())
-        )
-        alerts = list(result.scalars().all())
-        if not alerts:
+        if not alert_ids:
             return False
+        now = beijing_now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if month_start.month == 12:
+            next_month_start = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            next_month_start = month_start.replace(month=month_start.month + 1)
+
+        query = select(AlertLogModel).where(
+            AlertLogModel.is_deleted == 0,
+            AlertLogModel.user_id == user_id,
+            AlertLogModel.target_type.in_([AlertTargetType.card, AlertTargetType.pool]),
+            AlertLogModel.created_at >= month_start,
+            AlertLogModel.created_at < next_month_start,
+        )
+        result = await db.execute(query.order_by(AlertLogModel.created_at.asc(), AlertLogModel.id.asc()))
+        alerts = list(result.scalars().all())
+        trigger_ids = set(alert_ids)
+        trigger_alerts = [item for item in alerts if item.id in trigger_ids and item.notified == 0]
+        if not trigger_alerts:
+            return False
+
+        summary_alerts: Dict[tuple[str, int, Any], AlertLogModel] = {}
+        for item in alerts:
+            target_type = item.target_type.value if item.target_type else ""
+            key = (target_type, item.target_id, item.created_at)
+            previous = summary_alerts.get(key)
+            if previous is None or (item.threshold, item.id) > (previous.threshold, previous.id):
+                summary_alerts[key] = item
 
         pool_alerts = []
         card_alerts = []
-        for item in alerts:
+        for item in summary_alerts.values():
             context = await cls._build_alert_context(db, item, {})
             if item.target_type and item.target_type.value == "pool":
                 pool_alerts.append(context)
@@ -251,13 +314,20 @@ class NotificationService:
             card_alerts=card_alerts
         )
         try:
-            sent = await cls.send_email(db, user.email, subject, content, html_content=html_content)
+            sent = await cls.send_email(
+                db,
+                user.email,
+                subject,
+                content,
+                html_content=html_content,
+                copy_super_admins=True
+            )
         except Exception as exc:
             logger.exception("发送用量汇总邮件失败 user_id=%s error=%s", user_id, exc)
             return False
 
         if sent:
-            for item in alerts:
+            for item in trigger_alerts:
                 await AlertLogCRUD.mark_notified(db, item.id)
         return sent
 
@@ -297,20 +367,23 @@ class NotificationService:
             "usage_percent": alert.usage_percent,
             "threshold": alert.threshold,
             "iccid": alert.target_name or "",
+            "alert_time": alert.created_at.strftime("%Y-%m-%d %H:%M:%S") if alert.created_at else "",
         }
 
         if alert.target_type and alert.target_type.value == "card":
             card = await db.get(IotCardModel, alert.target_id)
             if card:
                 carrier_value = card.carrier.value if card.carrier else ""
+                data_used = alert.data_used_snapshot
+                data_total = alert.data_total_snapshot
                 context.update({
                     "iccid": card.iccid,
                     "msisdn": card.msisdn or "",
                     "carrier": CARRIER_NAMES.get(carrier_value, carrier_value),
                     "package_name": card.get_spec_name(),
-                    "data_used": card.data_used,
-                    "data_total": card.data_total,
-                    "data_remaining": max(0, (card.data_total or 0) - (card.data_used or 0)),
+                    "data_used": data_used,
+                    "data_total": data_total,
+                    "data_remaining": alert.remaining_flow_snapshot,
                     "expire_date": card.expired_at.isoformat() if card.expired_at else "",
                     "suspend_time": card.suspend_at.strftime("%Y-%m-%d %H:%M:%S") if card.suspend_at else "",
                     "status_text": cls._resolve_card_alert_status_text(alert, card),
@@ -319,6 +392,8 @@ class NotificationService:
             pool = await db.get(TrafficPoolModel, alert.target_id)
             if pool:
                 carrier_value = pool.carrier.value if pool.carrier else ""
+                data_used = alert.data_used_snapshot
+                data_total = alert.data_total_snapshot
                 thresholds = [
                     item for item in [
                         pool.alert_threshold_1,
@@ -332,11 +407,11 @@ class NotificationService:
                     "carrier": CARRIER_NAMES.get(carrier_value, carrier_value),
                     "pool_specification": pool._format_flow_size(),
                     "card_count": pool.card_count,
-                    "data_used": pool.data_used,
-                    "data_total": pool.data_total,
-                    "remaining_flow": pool.get_data_remain(),
+                    "data_used": data_used,
+                    "data_total": data_total,
+                    "remaining_flow": alert.remaining_flow_snapshot,
                     "thresholds": " / ".join(f"{item}%" for item in thresholds),
-                    "sync_time": pool.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if pool.last_sync_at else "",
+                    "sync_time": alert.sync_at_snapshot.strftime("%Y-%m-%d %H:%M:%S") if alert.sync_at_snapshot else "",
                 })
 
         context.update(extra_context)
@@ -349,7 +424,8 @@ class NotificationService:
         to_email: str,
         customer_name: str,
         pool_alerts: Optional[List[Dict[str, Any]]] = None,
-        card_alerts: Optional[List[Dict[str, Any]]] = None
+        card_alerts: Optional[List[Dict[str, Any]]] = None,
+        copy_super_admins: bool = False
     ) -> bool:
         """发送流量池和非池单卡合并的用量提醒邮件"""
         subject, content, html_content = cls._render_usage_summary_message(
@@ -357,7 +433,14 @@ class NotificationService:
             pool_alerts=pool_alerts or [],
             card_alerts=card_alerts or []
         )
-        return await cls.send_email(db, to_email, subject, content, html_content=html_content)
+        return await cls.send_email(
+            db,
+            to_email,
+            subject,
+            content,
+            html_content=html_content,
+            copy_super_admins=copy_super_admins
+        )
 
     @classmethod
     def _render_usage_summary_message(
@@ -394,9 +477,9 @@ class NotificationService:
 
     @classmethod
     def _render_pool_alert_table(cls, alerts: List[Dict[str, Any]]) -> str:
-        headers = ["流量池", "运营商", "流量池规格", "已用流量", "总流量", "剩余流量", "当前使用率", "触发阈值", "全部阈值", "同步时间"]
+        headers = ["流量池", "运营商", "流量池规格", "已用流量", "总流量", "剩余流量", "告警时使用率", "触发阈值", "全部阈值", "告警时间", "同步时间"]
         if not alerts:
-            rows = '<tr><td colspan="10" style="text-align:center;color:#999;">暂无流量池用量提醒</td></tr>'
+            rows = '<tr><td colspan="11" style="text-align:center;color:#999;">暂无流量池用量提醒</td></tr>'
         else:
             rows = "".join(
                 "<tr>"
@@ -409,6 +492,7 @@ class NotificationService:
                 f"<td>{cls._html_value(cls._format_percent(item.get('usage_percent')))}</td>"
                 f"<td>{cls._html_value(cls._format_percent(item.get('threshold')))}</td>"
                 f"<td>{cls._html_value(item.get('thresholds'))}</td>"
+                f"<td>{cls._html_value(item.get('alert_time'))}</td>"
                 f"<td>{cls._html_value(item.get('sync_time'))}</td>"
                 "</tr>"
                 for item in alerts
@@ -417,9 +501,9 @@ class NotificationService:
 
     @classmethod
     def _render_card_alert_table(cls, alerts: List[Dict[str, Any]]) -> str:
-        headers = ["ICCID", "电话号码", "运营商", "当前套餐", "已用流量", "总流量", "当前使用率", "触发阈值", "提醒级别", "处理状态"]
+        headers = ["ICCID", "电话号码", "运营商", "当前套餐", "已用流量", "总流量", "告警时使用率", "触发阈值", "提醒级别", "处理状态", "告警时间"]
         if not alerts:
-            rows = '<tr><td colspan="10" style="text-align:center;color:#999;">暂无非流量池单卡用量提醒</td></tr>'
+            rows = '<tr><td colspan="11" style="text-align:center;color:#999;">暂无非流量池单卡用量提醒</td></tr>'
         else:
             rows = "".join(
                 "<tr>"
@@ -433,6 +517,7 @@ class NotificationService:
                 f"<td>{cls._html_value(cls._format_percent(item.get('threshold')))}</td>"
                 f"<td>{cls._html_value(cls._alert_level_name(item.get('alert_level')))}</td>"
                 f"<td>{cls._html_value(item.get('status_text') or cls._alert_status_text(item.get('alert_level'), item.get('threshold')))}</td>"
+                f"<td>{cls._html_value(item.get('alert_time'))}</td>"
                 "</tr>"
                 for item in alerts
             )

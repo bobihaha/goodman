@@ -706,6 +706,47 @@ class CardUsageHistoryCRUD:
         result = await db.execute(query)
         return list(result.scalars().all())
 
+    async def get_cards_monthly_history(
+        self,
+        db: AsyncSession,
+        card_ids: List[int],
+        start_date,
+        end_date,
+    ):
+        """每张卡每月只读取日期最新的一条快照，避免导出加载全部日记录。"""
+        from app.db.models.iot_card import CardUsageHistoryModel
+
+        ranked = (
+            select(
+                CardUsageHistoryModel.id.label("history_id"),
+                func.row_number().over(
+                    partition_by=(
+                        CardUsageHistoryModel.card_id,
+                        func.extract("year", CardUsageHistoryModel.snapshot_date),
+                        func.extract("month", CardUsageHistoryModel.snapshot_date),
+                    ),
+                    order_by=(
+                        CardUsageHistoryModel.snapshot_date.desc(),
+                        CardUsageHistoryModel.id.desc(),
+                    ),
+                ).label("row_number"),
+            )
+            .where(
+                CardUsageHistoryModel.card_id.in_(card_ids),
+                CardUsageHistoryModel.snapshot_date >= start_date,
+                CardUsageHistoryModel.snapshot_date <= end_date,
+            )
+            .subquery()
+        )
+        query = (
+            select(CardUsageHistoryModel)
+            .join(ranked, ranked.c.history_id == CardUsageHistoryModel.id)
+            .where(ranked.c.row_number == 1)
+            .order_by(CardUsageHistoryModel.card_id, CardUsageHistoryModel.snapshot_date)
+        )
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
     async def prune_old_snapshots(
         self,
         db: AsyncSession,

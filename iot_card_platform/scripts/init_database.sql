@@ -18,6 +18,7 @@ CREATE TABLE `sys_users` (
     `name` VARCHAR(50) NOT NULL COMMENT '用户名称',
     `account` VARCHAR(50) NOT NULL COMMENT '用户账户',
     `password` VARCHAR(128) NOT NULL COMMENT '用户密码(加密)',
+    `token_version` INT NOT NULL DEFAULT 0 COMMENT '令牌版本，改密或退出时递增',
     `phone` VARCHAR(20) DEFAULT NULL COMMENT '手机号',
     `email` VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
     `avatar` VARCHAR(255) DEFAULT NULL COMMENT '头像URL',
@@ -315,7 +316,9 @@ CREATE TABLE `iot_cards` (
     `data_used` BIGINT NOT NULL DEFAULT 0 COMMENT '已用流量(MB)',
     `data_total` BIGINT NOT NULL COMMENT '总流量(MB)',
     `data_used_month` BIGINT NOT NULL DEFAULT 0 COMMENT '本月已用流量(MB)',
-    `data_sync_at` DATETIME DEFAULT NULL COMMENT '流量同步时间',
+    `data_sync_at` DATETIME DEFAULT NULL COMMENT '平台抓取流量时间',
+    `data_source_at` DATETIME DEFAULT NULL COMMENT '供应商用量快照时间',
+    `data_usage_month` VARCHAR(7) DEFAULT NULL COMMENT '当前用量所属月份(YYYY-MM)',
     `latest_imei` VARCHAR(32) DEFAULT NULL COMMENT '最近一次获取的IMEI',
     `previous_imei` VARCHAR(32) DEFAULT NULL COMMENT '上一次获取的IMEI',
     `imei_device_name` VARCHAR(100) DEFAULT NULL COMMENT '最近一次IMEI对应设备名称',
@@ -350,6 +353,7 @@ CREATE TABLE `iot_cards` (
     KEY `idx_batch_id` (`batch_id`),
     KEY `idx_carrier` (`carrier`),
     KEY `idx_status` (`status`),
+    KEY `idx_iot_cards_data_usage_month` (`data_usage_month`),
     KEY `idx_pool_id` (`pool_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='物联网卡表';
 
@@ -575,6 +579,10 @@ CREATE TABLE `alert_logs` (
     `alert_level` ENUM('warning', 'critical', 'exceed') NOT NULL COMMENT '告警级别',
     `usage_percent` INT NOT NULL COMMENT '当前用量百分比',
     `threshold` INT NOT NULL COMMENT '触发阈值',
+    `data_used_snapshot` BIGINT DEFAULT NULL COMMENT '告警时已用流量快照(MB)',
+    `data_total_snapshot` BIGINT DEFAULT NULL COMMENT '告警时总流量快照(MB)',
+    `remaining_flow_snapshot` BIGINT DEFAULT NULL COMMENT '告警时剩余流量快照(MB)',
+    `sync_at_snapshot` DATETIME DEFAULT NULL COMMENT '告警时流量同步时间快照',
     `policy_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '触发策略ID',
     `user_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '所属用户ID',
     `notified` TINYINT NOT NULL DEFAULT 0 COMMENT '是否已通知',

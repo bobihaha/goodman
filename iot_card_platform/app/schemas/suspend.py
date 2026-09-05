@@ -119,6 +119,10 @@ class AlertLogInfo(BaseModel):
     alert_level_name: str
     usage_percent: int
     threshold: int
+    data_used_snapshot: Optional[int]
+    data_total_snapshot: Optional[int]
+    remaining_flow_snapshot: Optional[int]
+    sync_at_snapshot: Optional[str]
     policy_id: Optional[int]
     user_id: Optional[int]
     notified: bool

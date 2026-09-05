@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
 from app.db.models.iot_card import CardStatus, SuspendType
+from app.flow_packages import get_current_flow_cycle_month
 from app.services.sync_service import SyncService
 
 
@@ -22,7 +23,9 @@ class DummyCard:
         data_used_month=0,
         period_count=1,
         carrier="cmcc",
-        sale_package_id=1
+        sale_package_id=1,
+        stock_out_date=None,
+        data_usage_month=None,
     ):
         self.expired_at = expired_at
         self.status = DummyStatus("activated")
@@ -33,9 +36,15 @@ class DummyCard:
         self.flow_size = flow_size
         self.data_used = data_used
         self.data_used_month = data_used_month
+        self.data_usage_month = data_usage_month
+        self.data_sync_at = None
+        self.data_source_at = None
         self.addon_flow = 0
         self.addon_flow_month = None
         self.activated_at = None
+        self.stock_out_date = stock_out_date
+        self.test_expire_date = None
+        self.silent_expire_date = None
         self.sale_package_id = sale_package_id
         self.suspend_type = SuspendType.none
         self.suspend_at = None
@@ -57,6 +66,43 @@ def test_resolve_lifecycle_expired_at_preserves_local_when_supplier_is_shorter()
     resolved, preserved = SyncService._resolve_lifecycle_expired_at(card, date(2027, 8, 31))
 
     assert resolved == date(2028, 1, 31)
+    assert preserved is True
+
+
+def test_resolve_lifecycle_expired_at_repairs_supplier_longer_than_local_sale_period():
+    card = DummyCard(
+        expired_at=date(2026, 12, 26),
+        period_type="monthly",
+        period_count=6,
+        carrier="cucc",
+        sale_package_id=22,
+        stock_out_date=date(2026, 1, 15),
+    )
+    card.activated_at = date(2026, 1, 15)
+
+    resolved, preserved = SyncService._resolve_lifecycle_expired_at(card, date(2026, 12, 26))
+
+    assert resolved == date(2026, 6, 26)
+    assert preserved is True
+
+
+def test_active_status_without_supplier_activation_date_still_repairs_expiry():
+    card = DummyCard(
+        expired_at=date(2026, 12, 26),
+        period_type="monthly",
+        period_count=6,
+        carrier="cucc",
+        sale_package_id=22,
+        stock_out_date=date(2026, 1, 15),
+    )
+    card.status = CardStatus.activated
+
+    filled = SyncService._ensure_activated_at_for_active_status(card)
+    resolved, preserved = SyncService._resolve_lifecycle_expired_at(card, date(2026, 12, 26))
+
+    assert filled is True
+    assert card.activated_at == date(2026, 1, 15)
+    assert resolved == date(2026, 6, 26)
     assert preserved is True
 
 
@@ -118,6 +164,29 @@ def test_resolve_lifecycle_activated_at_ignores_supplier_test_activation_date():
     assert ignored is True
 
 
+def test_resolve_lifecycle_activated_at_uses_local_stock_out_date():
+    card = DummyCard(stock_out_date=date(2026, 1, 15))
+
+    resolved, ignored = SyncService._resolve_lifecycle_activated_at(card, date(2026, 1, 15))
+
+    assert resolved == date(2026, 1, 15)
+    assert ignored is True
+
+
+def test_resolve_supplier_lifecycle_date_preserves_stock_out_local_date():
+    card = DummyCard(stock_out_date=date(2026, 1, 15))
+    card.test_expire_date = date(2026, 1, 20)
+
+    resolved, preserved = SyncService._resolve_supplier_lifecycle_date(
+        card,
+        "test_expire_date",
+        date(2025, 12, 27),
+    )
+
+    assert resolved == date(2026, 1, 20)
+    assert preserved is True
+
+
 def test_resolve_lifecycle_activated_at_preserves_local_platform_date():
     card = DummyCard()
     card.activated_at = date(2026, 5, 11)
@@ -174,6 +243,18 @@ async def test_resolve_lifecycle_status_preserves_business_suspend():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("supplier_status", [CardStatus.expired, CardStatus.cancelled])
+async def test_resolve_lifecycle_status_allows_supplier_terminal_status(supplier_status):
+    service = SyncService()
+    card = DummyCard()
+    card.suspend_type = SuspendType.manual
+
+    resolved = await service._resolve_lifecycle_status(None, card, supplier_status.value)
+
+    assert resolved == supplier_status.value
+
+
+@pytest.mark.asyncio
 async def test_resolve_lifecycle_status_ignores_unknown_supplier_status():
     service = SyncService()
     card = DummyCard()
@@ -211,6 +292,48 @@ def test_resolve_usage_data_total_monthly_keeps_at_least_package_flow():
     assert preserved is False
 
 
+def test_resolve_usage_data_total_monthly_ignores_supplier_yearly_total():
+    card = DummyCard(period_type="monthly", data_total=24576, flow_size=10240)
+
+    resolved, preserved = SyncService._resolve_usage_data_total(card, 24576)
+
+    assert resolved == 10240
+    assert preserved is False
+
+
+def test_resolve_usage_data_total_monthly_uses_local_flow_when_supplier_total_missing():
+    card = DummyCard(period_type="monthly", data_total=24576, flow_size=10240)
+
+    resolved, preserved = SyncService._resolve_usage_data_total(card, None)
+
+    assert resolved == 10240
+    assert preserved is False
+
+
+def test_resolve_usage_data_total_monthly_adds_current_local_topup():
+    card = DummyCard(period_type="monthly", data_total=12288, flow_size=10240)
+    card.addon_flow = 2048
+    card.addon_flow_month = get_current_flow_cycle_month()
+
+    resolved, preserved = SyncService._resolve_usage_data_total(card, 24576)
+
+    assert resolved == 12288
+    assert preserved is False
+
+
+def test_resolve_usage_data_total_yearly_does_not_repeat_addon():
+    card = DummyCard(period_type="yearly", data_total=12288, flow_size=10240)
+    card.addon_flow = 2048
+    card.addon_flow_month = get_current_flow_cycle_month()
+
+    first, _ = SyncService._resolve_usage_data_total(card, 10240)
+    card.data_total = first
+    second, _ = SyncService._resolve_usage_data_total(card, 10240)
+
+    assert first == 12288
+    assert second == 12288
+
+
 def test_resolve_usage_data_used_monthly_uses_supplier_value():
     card = DummyCard(period_type="monthly", data_used=50, data_used_month=50)
 
@@ -218,6 +341,21 @@ def test_resolve_usage_data_used_monthly_uses_supplier_value():
 
     assert resolved == 60
     assert month_used == 60
+    assert reset is False
+
+
+def test_resolve_usage_data_used_monthly_uses_month_value_for_supplier_year_cycle():
+    card = DummyCard(period_type="monthly", data_used=3072, data_used_month=3072)
+
+    resolved, month_used, reset = SyncService._resolve_usage_data_used(
+        card,
+        supplier_used=8192,
+        supplier_used_month=512,
+        supplier_usage_scope="cycle",
+    )
+
+    assert resolved == 512
+    assert month_used == 512
     assert reset is False
 
 
@@ -264,3 +402,41 @@ def test_resolve_usage_data_used_yearly_accepts_cycle_usage():
     assert resolved == 36
     assert month_used == 16
     assert reset is False
+
+
+def test_apply_usage_snapshot_rejects_previous_month_for_monthly_card():
+    card = DummyCard(period_type="monthly", data_used=15040, data_total=10240, flow_size=10240)
+
+    accepted, _, _, reason = SyncService._apply_usage_snapshot(card, {
+        "data_used": 15040,
+        "data_total": 10240,
+        "sync_time": "2000-01-31 23:59:59",
+    })
+
+    assert accepted is False
+    assert reason == "供应商仍返回 2000-01 用量"
+    assert card.data_used == 0
+    assert card.data_used_month == 0
+    assert card.data_total == 10240
+    assert card.data_usage_month is None
+    assert card.data_source_at == datetime(2000, 1, 31, 23, 59, 59)
+
+
+def test_yearly_month_usage_uses_explicit_source_month():
+    card = DummyCard(
+        period_type="yearly",
+        data_used=136,
+        data_used_month=36,
+        data_usage_month="2026-08",
+    )
+
+    resolved, month_used, reset = SyncService._resolve_usage_data_used(
+        card,
+        6,
+        supplier_usage_scope="month",
+        supplier_usage_month="2026-09",
+    )
+
+    assert resolved == 142
+    assert month_used == 6
+    assert reset is True

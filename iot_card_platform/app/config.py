@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """应用配置类"""
     app_name: str = "IoT Card Platform"
     app_env: str = "development"
-    debug: bool = True
+    debug: bool = False
     port: int = 8000
 
     # 数据库配置 - 支持单独字段或完整URL
@@ -48,10 +48,13 @@ class Settings(BaseSettings):
     # 批量操作限制
     max_batch_operation_size: int = 10000
     max_export_size: int = 10000
+    max_history_export_size: int = 2000
+    max_history_export_months: int = 24
     refresh_resume_fallback_seconds: int = 30
     refresh_resume_delay_seconds: int = 180
     supplier_callback_reconcile_seconds: int = 90
     supplier_status_conflict_window_seconds: int = 600
+    upiot_callback_token: str = ""
     refresh_status_poll_interval_seconds: int = 5
     refresh_suspend_confirm_timeout_seconds: int = 45
     refresh_resume_confirm_timeout_seconds: int = 90
@@ -80,3 +83,5 @@ settings = Settings()
 # 安全检查：生产环境必须配置SECRET_KEY
 if settings.app_env == "production" and not settings.secret_key:
     raise ValueError("生产环境必须设置 SECRET_KEY 环境变量")
+if settings.app_env == "production" and settings.debug:
+    raise ValueError("生产环境禁止开启 DEBUG")

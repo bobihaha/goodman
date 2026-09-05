@@ -138,6 +138,8 @@ async def test_pool_flow_only_counts_activated_cards(db_session):
             data_used=data_used,
             data_used_month=data_used,
             data_sync_at=current_cycle_sync_time(),
+            data_source_at=current_cycle_sync_time(),
+            data_usage_month=get_current_flow_cycle_month(),
             status=status,
         )
         for index, (status, data_used) in enumerate([
@@ -186,6 +188,8 @@ async def test_billed_suspended_cards_keep_flow_but_expired_card_does_not(db_ses
         data_used=250,
         data_used_month=250,
         data_sync_at=current_cycle_sync_time(),
+        data_source_at=current_cycle_sync_time(),
+        data_usage_month=get_current_flow_cycle_month(),
         status=CardStatus.activated,
     )
     pool_exceed_card = IotCardModel(
@@ -203,6 +207,8 @@ async def test_billed_suspended_cards_keep_flow_but_expired_card_does_not(db_ses
         data_used=150,
         data_used_month=150,
         data_sync_at=current_cycle_sync_time(),
+        data_source_at=current_cycle_sync_time(),
+        data_usage_month=get_current_flow_cycle_month(),
         status=CardStatus.suspended,
         suspend_type=SuspendType.pool_exceed,
     )
@@ -221,6 +227,8 @@ async def test_billed_suspended_cards_keep_flow_but_expired_card_does_not(db_ses
         data_used=100,
         data_used_month=100,
         data_sync_at=current_cycle_sync_time(),
+        data_source_at=current_cycle_sync_time(),
+        data_usage_month=get_current_flow_cycle_month(),
         status=CardStatus.suspended,
         suspend_type=SuspendType.manual,
     )
@@ -239,6 +247,8 @@ async def test_billed_suspended_cards_keep_flow_but_expired_card_does_not(db_ses
         data_used=50,
         data_used_month=50,
         data_sync_at=current_cycle_sync_time(),
+        data_source_at=current_cycle_sync_time(),
+        data_usage_month=get_current_flow_cycle_month(),
         status=CardStatus.suspended,
         suspend_type=SuspendType.expired,
     )
@@ -293,6 +303,8 @@ async def test_monthly_pool_ignores_previous_month_usage_during_cycle_switch(db_
         data_used=15040,
         data_used_month=15040,
         data_sync_at=cycle_start - timedelta(seconds=1),
+        data_source_at=cycle_start - timedelta(seconds=1),
+        data_usage_month=previous_month,
         status=CardStatus.activated,
     )
     db.add_all([pool, card])

@@ -16,7 +16,7 @@ from app.db.models.suspend import (
     SuspendPolicyModel, SuspendLogModel, SupplierSuspendOperationModel, AlertLogModel,
     SuspendActionType, AlertLevel, AlertTargetType
 )
-from app.db.models.iot_card import IotCardModel, CardStatus, CardType, SuspendType
+from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.supplier import SupplierModel
 from app.db.models.sys_log import SysOperationLogModel
 from app.db.models.sys_user import SysUserModel, UserLevel
@@ -24,6 +24,7 @@ from app.schemas.suspend import (
     PolicyCreate, PolicyUpdate, ManualSuspend, ManualResume, SuspendResult
 )
 from app.config import settings
+from app.flow_packages import get_current_flow_cycle_month
 from app.clients.supplier_api import get_supplier_client
 from app.clients.upiot_client import UPIOT_STATUS_MAP
 from app.services.notification_service import NotificationService
@@ -70,6 +71,7 @@ class SuspendPolicyService:
     @staticmethod
     async def get_policies(
         db: AsyncSession,
+        user_ids: Optional[List[int]] = None,
         policy_type: Optional[str] = None,
         user_id: Optional[int] = None,
         is_enabled: Optional[bool] = None,
@@ -79,6 +81,7 @@ class SuspendPolicyService:
         """获取策略列表"""
         policies, total = await SuspendPolicyCRUD.get_list(
             db=db,
+            user_ids=user_ids,
             policy_type=policy_type,
             user_id=user_id,
             is_enabled=is_enabled,
@@ -108,14 +111,8 @@ class SuspendActionService:
 
     @staticmethod
     def _supplier_supports_network_switch(card: IotCardModel, supplier: Optional[SupplierModel]) -> bool:
-        """判断供应商是否支持当前卡片的网络开关操作。"""
-        if not supplier:
-            return False
-        supplier_code = str(supplier.code or "").strip()
-        if supplier_code != "002":
-            return True
-        card_type = card.card_type.value if hasattr(card.card_type, "value") else str(card.card_type or "")
-        return card_type == CardType.pool.value
+        """供应商能力由对应客户端校验，不与平台销售卡类型耦合。"""
+        return supplier is not None
 
     @staticmethod
     async def _create_alert_and_notify(
@@ -129,7 +126,11 @@ class SuspendActionService:
         policy_id: Optional[int] = None,
         user_id: Optional[int] = None,
         extra_context: Optional[Dict[str, Any]] = None,
-        notify: bool = True
+        notify: bool = True,
+        data_used_snapshot: Optional[int] = None,
+        data_total_snapshot: Optional[int] = None,
+        remaining_flow_snapshot: Optional[int] = None,
+        sync_at_snapshot: Optional[datetime] = None,
     ) -> AlertLogModel:
         """创建告警后尝试发送通知邮件"""
         alert = await AlertLogCRUD.create(
@@ -141,7 +142,11 @@ class SuspendActionService:
             usage_percent=usage_percent,
             threshold=threshold,
             policy_id=policy_id,
-            user_id=user_id
+            user_id=user_id,
+            data_used_snapshot=data_used_snapshot,
+            data_total_snapshot=data_total_snapshot,
+            remaining_flow_snapshot=remaining_flow_snapshot,
+            sync_at_snapshot=sync_at_snapshot,
         )
         if notify:
             await NotificationService.send_alert_email(
@@ -159,6 +164,9 @@ class SuspendActionService:
 
     @staticmethod
     def _check_single_card_resume_eligibility(card: IotCardModel) -> Tuple[bool, Optional[str]]:
+        period_type = card.period_type.value if getattr(card, "period_type", None) else None
+        if period_type == "monthly" and getattr(card, "data_usage_month", None) != get_current_flow_cycle_month():
+            return True, None
         if card.data_used > card.data_total:
             return False, "单卡流量仍超限，请先补量"
         return True, None
@@ -1234,6 +1242,7 @@ class SuspendActionService:
         """手动停卡"""
         success_cards = []
         fail_cards = []
+        affected_pool_ids = set()
 
         # 获取卡片
         cards = await CardSuspendCRUD.get_cards_by_ids(
@@ -1323,6 +1332,10 @@ class SuspendActionService:
             )
 
             success_cards.append(card.iccid)
+            if getattr(card, "pool_id", None):
+                affected_pool_ids.add(card.pool_id)
+
+        await SuspendActionService._safe_refresh_pool_stats(db, affected_pool_ids)
 
         return SuspendResult(
             success_count=len(success_cards),
@@ -1346,6 +1359,7 @@ class SuspendActionService:
         """手动复机"""
         success_cards = []
         fail_cards = []
+        affected_pool_ids = set()
 
         # 获取卡片
         cards = await CardSuspendCRUD.get_cards_by_ids(
@@ -1423,6 +1437,10 @@ class SuspendActionService:
                 )
 
             success_cards.append(card.iccid)
+            if getattr(card, "pool_id", None):
+                affected_pool_ids.add(card.pool_id)
+
+        await SuspendActionService._safe_refresh_pool_stats(db, affected_pool_ids)
 
         return SuspendResult(
             success_count=len(success_cards),
@@ -1436,6 +1454,7 @@ class SuspendActionService:
         """自动停卡：到期停卡"""
         cards = await CardSuspendCRUD.get_expired_cards(db)
         suspended_count = 0
+        affected_pool_ids = set()
 
         for card in cards:
             # 检查是否有生效的策略
@@ -1467,6 +1486,10 @@ class SuspendActionService:
             )
 
             suspended_count += 1
+            if getattr(card, "pool_id", None):
+                affected_pool_ids.add(card.pool_id)
+
+        await SuspendActionService._safe_refresh_pool_stats(db, affected_pool_ids)
 
         return {"suspended_count": suspended_count}
 
@@ -1475,7 +1498,7 @@ class SuspendActionService:
         """自动停卡：单卡超量"""
         suspended_count = 0
         alerts_created = 0
-        notify_user_ids = set()
+        notify_alert_ids: Dict[int, List[int]] = {}
 
         # 获取所有启用的单卡超量策略
         policies, _ = await SuspendPolicyCRUD.get_list(
@@ -1500,6 +1523,9 @@ class SuspendActionService:
         cards = result.scalars().all()
 
         for card in cards:
+            period_type = card.period_type.value if card.period_type else None
+            if period_type == "monthly" and card.data_usage_month != get_current_flow_cycle_month():
+                continue
             usage_percent = card.get_data_usage_percent()
             
             # 客户专属策略优先于全局策略；同一范围内使用最新策略。
@@ -1551,7 +1577,7 @@ class SuspendActionService:
                     db, AlertTargetType.card, card.id, AlertLevel.exceed
                 )
                 if not exists:
-                    await SuspendActionService._create_alert_and_notify(
+                    alert = await SuspendActionService._create_alert_and_notify(
                         db=db,
                         target_type=AlertTargetType.card,
                         target_id=card.id,
@@ -1564,11 +1590,15 @@ class SuspendActionService:
                         extra_context={
                             "reason": f"单卡流量超限({usage_percent}%)"
                         },
-                        notify=False
+                        notify=False,
+                        data_used_snapshot=card.data_used,
+                        data_total_snapshot=card.data_total,
+                        remaining_flow_snapshot=max(0, card.data_total - card.data_used),
+                        sync_at_snapshot=card.data_sync_at,
                     )
                     alerts_created += 1
                     if card.user_id:
-                        notify_user_ids.add(card.user_id)
+                        notify_alert_ids.setdefault(card.user_id, []).append(alert.id)
 
             elif usage_percent >= critical_threshold:
                 # 紧急级别
@@ -1576,7 +1606,7 @@ class SuspendActionService:
                     db, AlertTargetType.card, card.id, AlertLevel.critical
                 )
                 if not exists:
-                    await SuspendActionService._create_alert_and_notify(
+                    alert = await SuspendActionService._create_alert_and_notify(
                         db=db,
                         target_type=AlertTargetType.card,
                         target_id=card.id,
@@ -1589,11 +1619,15 @@ class SuspendActionService:
                         extra_context={
                             "reason": "单卡流量达到紧急阈值"
                         },
-                        notify=False
+                        notify=False,
+                        data_used_snapshot=card.data_used,
+                        data_total_snapshot=card.data_total,
+                        remaining_flow_snapshot=max(0, card.data_total - card.data_used),
+                        sync_at_snapshot=card.data_sync_at,
                     )
                     alerts_created += 1
                     if card.user_id:
-                        notify_user_ids.add(card.user_id)
+                        notify_alert_ids.setdefault(card.user_id, []).append(alert.id)
 
             elif usage_percent >= warning_threshold:
                 # 警告级别
@@ -1601,7 +1635,7 @@ class SuspendActionService:
                     db, AlertTargetType.card, card.id, AlertLevel.warning
                 )
                 if not exists:
-                    await SuspendActionService._create_alert_and_notify(
+                    alert = await SuspendActionService._create_alert_and_notify(
                         db=db,
                         target_type=AlertTargetType.card,
                         target_id=card.id,
@@ -1614,14 +1648,18 @@ class SuspendActionService:
                         extra_context={
                             "reason": "单卡流量达到预警阈值"
                         },
-                        notify=False
+                        notify=False,
+                        data_used_snapshot=card.data_used,
+                        data_total_snapshot=card.data_total,
+                        remaining_flow_snapshot=max(0, card.data_total - card.data_used),
+                        sync_at_snapshot=card.data_sync_at,
                     )
                     alerts_created += 1
                     if card.user_id:
-                        notify_user_ids.add(card.user_id)
+                        notify_alert_ids.setdefault(card.user_id, []).append(alert.id)
 
-        for user_id in notify_user_ids:
-            await NotificationService.send_pending_usage_alerts_for_user(db, user_id)
+        for user_id, alert_ids in notify_alert_ids.items():
+            await NotificationService.send_pending_usage_alerts_for_user(db, user_id, alert_ids)
         return {"suspended_count": suspended_count, "alerts_created": alerts_created}
 
     @staticmethod
@@ -1633,6 +1671,7 @@ class SuspendActionService:
     ) -> Dict[str, int]:
         """补量后自动重检并复机"""
         resumed_count = 0
+        affected_pool_ids = set()
         supplier_map = await SuspendActionService._load_supplier_map(db, cards)
 
         for card in cards:
@@ -1660,6 +1699,10 @@ class SuspendActionService:
                 reason=reason or "补量后自动复机"
             )
             resumed_count += 1
+            if getattr(card, "pool_id", None):
+                affected_pool_ids.add(card.pool_id)
+
+        await SuspendActionService._safe_refresh_pool_stats(db, affected_pool_ids)
 
         return {"resumed_count": resumed_count}
 
@@ -1674,33 +1717,40 @@ class SupplierCallbackService:
     ) -> None:
         callback_no = str(payload.get("callback_no") or "").strip()
         if not callback_no:
-            logger.warning("UPIOT 停复机回调缺少 callback_no: payload=%s", payload)
+            logger.warning("UPIOT 停复机回调缺少 callback_no")
             return
 
         operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, callback_no)
         if not operation:
-            logger.warning("UPIOT 停复机回调未找到操作记录: callback_no=%s payload=%s", callback_no, payload)
+            logger.warning("UPIOT 停复机回调未找到操作记录: callback_no=%s", callback_no)
+            return
+        if getattr(operation, "callback_status", "pending") != "pending":
+            logger.info("忽略已完成的 UPIOT 停复机回调: callback_no=%s", callback_no)
             return
 
         callback_code = str(payload.get("code") or "").strip() or None
         callback_msg = str(payload.get("msg") or "").strip() or None
         account_status = str(payload.get("account_status") or "").strip() or None
 
-        callback_success = (callback_code in {"200", "0", "SUCCESS", "success"} or callback_code is None) and bool(account_status)
+        callback_success = callback_code in {"200", "0", "SUCCESS", "success"}
         mapped_status = UPIOT_STATUS_MAP.get(account_status or "", None)
-
-        card = await db.get(IotCardModel, operation.card_id)
-        if card and mapped_status:
-            SuspendActionService.normalize_card_suspend_state(card, mapped_status)
-
-        await SupplierSuspendOperationCRUD.update_callback_result(
-            db=db,
-            operation=operation,
-            callback_payload=json.dumps(payload, ensure_ascii=False),
-            callback_code=callback_code,
-            callback_msg=callback_msg,
-            account_status=account_status,
-            callback_status="success" if callback_success else "failed"
+        latest_operation_id = await SupplierSuspendOperationCRUD.get_latest_id_for_card(db, operation.card_id)
+        is_latest_operation = latest_operation_id == operation.id
+        action_matches_status = (
+            operation.action == SuspendActionType.suspend and mapped_status == CardStatus.suspended.value
+        ) or (
+            operation.action == SuspendActionType.resume
+            and mapped_status in {
+                CardStatus.activated.value,
+                CardStatus.testing.value,
+                CardStatus.silent.value,
+            }
+        )
+        callback_applies = bool(
+            callback_success
+            and mapped_status
+            and is_latest_operation
+            and action_matches_status
         )
 
         request_meta: Dict[str, Any] = {}
@@ -1710,14 +1760,42 @@ class SupplierCallbackService:
             except Exception:
                 request_meta = {"raw_request_result": operation.request_result}
 
-        audit_success = callback_success and bool(mapped_status)
+        card = await db.get(IotCardModel, operation.card_id)
+        previous_status = card.status if card else None
+        if card and callback_applies:
+            SuspendActionService.normalize_card_suspend_state(card, mapped_status)
+
+        await SupplierSuspendOperationCRUD.update_callback_result(
+            db=db,
+            operation=operation,
+            callback_payload=json.dumps(payload, ensure_ascii=False),
+            callback_code=callback_code,
+            callback_msg=callback_msg,
+            account_status=account_status,
+            callback_status="success" if callback_applies else "failed"
+        )
+
+        if (
+            card
+            and getattr(card, "pool_id", None)
+            and request_meta.get("audit_action") != "restart"
+            and card.status != previous_status
+        ):
+            await SuspendActionService._safe_refresh_pool_stats(db, {card.pool_id})
+
+        audit_success = callback_applies
+        callback_error = callback_msg or "供应商回调失败或状态无法识别"
+        if callback_success and mapped_status and not is_latest_operation:
+            callback_error = "忽略过期操作回调"
+        elif callback_success and mapped_status and not action_matches_status:
+            callback_error = "回调状态与停复机动作不一致"
         await SuspendActionService._safe_update_supplier_action_audit(
             db=db,
             request_meta=request_meta,
             status="success" if audit_success else "failed",
             callback_no=callback_no,
             supplier_status=mapped_status or account_status,
-            error=None if audit_success else (callback_msg or "供应商回调失败或状态无法识别"),
+            error=None if audit_success else callback_error,
             operation=operation,
         )
 
@@ -1754,6 +1832,8 @@ class SuspendLogService:
     @staticmethod
     async def get_logs(
         db: AsyncSession,
+        user_ids: Optional[List[int]] = None,
+        include_api_result: bool = False,
         card_id: Optional[int] = None,
         action: Optional[str] = None,
         suspend_type: Optional[str] = None,
@@ -1766,6 +1846,7 @@ class SuspendLogService:
         """获取停卡记录列表"""
         logs, total = await SuspendLogCRUD.get_list(
             db=db,
+            user_ids=user_ids,
             card_id=card_id,
             action=action,
             suspend_type=suspend_type,
@@ -1775,7 +1856,11 @@ class SuspendLogService:
             page=page,
             page_size=page_size
         )
-        return [log.to_dict() for log in logs], total
+        items = [log.to_dict() for log in logs]
+        if not include_api_result:
+            for item in items:
+                item.pop("api_result", None)
+        return items, total
 
 
 class AlertLogService:
@@ -1787,6 +1872,7 @@ class AlertLogService:
         target_type: Optional[str] = None,
         alert_level: Optional[str] = None,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         handled: Optional[bool] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -1799,6 +1885,7 @@ class AlertLogService:
             target_type=target_type,
             alert_level=alert_level,
             user_id=user_id,
+            user_ids=user_ids,
             handled=handled,
             start_time=start_time,
             end_time=end_time,
@@ -1812,21 +1899,24 @@ class AlertLogService:
         db: AsyncSession,
         alert_id: int,
         handled_by: int,
-        handle_remark: Optional[str] = None
+        handle_remark: Optional[str] = None,
+        user_ids: Optional[List[int]] = None,
     ) -> Optional[dict]:
         """处理告警"""
         alert = await AlertLogCRUD.handle_alert(
             db=db,
             alert_id=alert_id,
             handled_by=handled_by,
-            handle_remark=handle_remark
+            handle_remark=handle_remark,
+            user_ids=user_ids,
         )
         return alert.to_dict() if alert else None
 
     @staticmethod
     async def get_unhandled_count(
         db: AsyncSession,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
     ) -> Dict[str, int]:
         """获取未处理告警统计"""
         from sqlalchemy import select
@@ -1842,6 +1932,8 @@ class AlertLogService:
         
         if user_id:
             query = query.where(AlertLogModel.user_id == user_id)
+        elif user_ids is not None:
+            query = query.where(AlertLogModel.user_id.in_(user_ids))
         
         query = query.group_by(AlertLogModel.alert_level)
         

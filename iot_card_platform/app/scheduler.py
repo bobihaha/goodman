@@ -3,6 +3,7 @@
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from app.db.database import AsyncSessionLocal
 from app.services.sync_service import sync_service
 from app.services.card_expiry_reminder_service import card_expiry_reminder_service
@@ -69,25 +70,16 @@ async def load_sync_tasks():
 
         for supplier in suppliers:
             if supplier.sync_interval and supplier.sync_interval > 0:
-                # 根据同步间隔创建cron表达式
                 interval = supplier.sync_interval
-                if interval >= 60:
-                    # 转换为小时
-                    hours = interval // 60
-                    if hours >= 24:
-                        logger.warning(f"供应商 {supplier.name} 的同步间隔过大({interval}分钟)，跳过")
-                        continue
-                    cron_expr = f"0 */{hours} * * *"
-                else:
-                    cron_expr = f"*/{interval} * * * *"
-
-                # 添加定时任务
                 scheduler.add_job(
                     sync_supplier_usage,
-                    CronTrigger.from_crontab(cron_expr),
+                    IntervalTrigger(minutes=interval, timezone=CHINA_TZ),
                     args=[supplier.id],
                     id=f"sync_supplier_{supplier.id}",
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=max(60, interval * 60),
                 )
                 logger.info(f"已加载同步任务 - 供应商: {supplier.name}, 间隔: {supplier.sync_interval}分钟")
 

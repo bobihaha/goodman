@@ -273,7 +273,8 @@ class TrafficPoolCRUD:
             )
             contributes_usage = and_(
                 contributes_flow,
-                IotCardModel.data_sync_at >= current_month_start,
+                IotCardModel.data_source_at >= current_month_start,
+                IotCardModel.data_usage_month == get_current_flow_cycle_month(),
             )
         query = select(
             func.count(IotCardModel.id).label("card_count"),
@@ -343,34 +344,46 @@ class TrafficPoolCRUD:
             ),
         ]
 
-        should_notify = False
-        for threshold, alert_level in alert_rules:
-            if not threshold or usage_percent < threshold:
-                continue
+        reached_rules = [
+            (threshold, alert_level)
+            for threshold, alert_level in alert_rules
+            if threshold and usage_percent >= threshold
+        ]
+        if not reached_rules:
+            return
 
-            exists = await AlertLogCRUD.check_exists(
-                db,
-                AlertTargetType.pool,
-                pool.id,
-                alert_level
-            )
-            if exists:
-                continue
+        level_priority = {
+            AlertLevel.warning: 1,
+            AlertLevel.critical: 2,
+            AlertLevel.exceed: 3,
+        }
+        threshold, alert_level = max(
+            reached_rules,
+            key=lambda item: (item[0], level_priority[item[1]]),
+        )
+        if await AlertLogCRUD.check_exists(
+            db,
+            AlertTargetType.pool,
+            pool.id,
+            alert_level,
+        ):
+            return
 
-            await AlertLogCRUD.create(
-                db=db,
-                target_type=AlertTargetType.pool,
-                target_id=pool.id,
-                target_name=pool.name,
-                alert_level=alert_level,
-                usage_percent=int(usage_percent),
-                threshold=threshold,
-                user_id=pool.user_id
-            )
-            should_notify = True
-
-        if should_notify:
-            await NotificationService.send_pending_usage_alerts_for_user(db, pool.user_id)
+        alert = await AlertLogCRUD.create(
+            db=db,
+            target_type=AlertTargetType.pool,
+            target_id=pool.id,
+            target_name=pool.name,
+            alert_level=alert_level,
+            usage_percent=int(usage_percent),
+            threshold=threshold,
+            user_id=pool.user_id,
+            data_used_snapshot=pool.data_used,
+            data_total_snapshot=pool.data_total,
+            remaining_flow_snapshot=pool.get_data_remain(),
+            sync_at_snapshot=pool.last_sync_at,
+        )
+        await NotificationService.send_pending_usage_alerts_for_user(db, pool.user_id, [alert.id])
 
     async def _check_pool_stop_threshold(self, db: AsyncSession, pool: TrafficPoolModel) -> None:
         """检查流量池是否超过用户设置的停卡阈值，超过则全池停卡"""

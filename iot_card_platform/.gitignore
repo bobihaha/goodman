@@ -13,7 +13,7 @@ ENV/
 .env
 .env.production
 .env.local
-logs/
+/logs/
 *.log
 .pytest_cache/
 .coverage

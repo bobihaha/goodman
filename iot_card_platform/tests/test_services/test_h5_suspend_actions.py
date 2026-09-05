@@ -7,7 +7,7 @@ import pytest
 from app.db.models.iot_card import CardStatus, SuspendType
 from app.db.models.suspend import SuspendActionType, SuspendLogModel
 from app.services.h5_service import H5Service
-from app.services.suspend_service import SuspendActionService
+from app.services.suspend_service import SupplierCallbackService, SuspendActionService
 
 
 @pytest.mark.asyncio
@@ -174,6 +174,125 @@ async def test_h5_resume_reuses_pending_restart_resume_request():
     assert result["callback_no"] == "res-existing"
     assert "请勿重复提交" in result["message"]
     mock_resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_h5_suspend_callback_refreshes_pool_stats_after_status_change():
+    operation = SimpleNamespace(
+        id=91,
+        card_id=24,
+        action=SuspendActionType.suspend,
+        callback_no="sus-callback",
+        callback_status="pending",
+        request_result=json.dumps({
+            "audit_source": "h5",
+            "audit_action": "suspend",
+            "audit_phase": "suspend",
+        }),
+    )
+    card = SimpleNamespace(
+        id=24,
+        iccid="898604F21023C0012037",
+        status=CardStatus.activated,
+        suspend_type=SuspendType.none,
+        suspend_at=None,
+        suspend_reason=None,
+        pool_id=88,
+    )
+    db = MagicMock()
+    db.get = AsyncMock(return_value=card)
+
+    with patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.get_by_callback_no",
+        AsyncMock(return_value=operation),
+    ), patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.get_latest_id_for_card",
+        AsyncMock(return_value=operation.id),
+    ), patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.update_callback_result",
+        AsyncMock(),
+    ), patch.object(
+        SuspendActionService,
+        "_safe_update_supplier_action_audit",
+        AsyncMock(),
+    ), patch.object(
+        SuspendActionService,
+        "_safe_refresh_pool_stats",
+        AsyncMock(),
+    ) as refresh_pool_stats:
+        await SupplierCallbackService.handle_upiot_sor_callback(
+            db,
+            {"callback_no": "sus-callback", "code": "200", "account_status": "02"},
+        )
+
+    assert card.status == CardStatus.suspended
+    assert card.suspend_type == SuspendType.manual
+    refresh_pool_stats.assert_awaited_once_with(db, {88})
+
+
+@pytest.mark.asyncio
+async def test_failed_callback_does_not_change_card_status():
+    operation = SimpleNamespace(
+        id=92,
+        card_id=24,
+        action=SuspendActionType.suspend,
+        callback_no="failed-callback",
+        callback_status="pending",
+        request_result="{}",
+        supplier_id=None,
+    )
+    card = SimpleNamespace(
+        status=CardStatus.activated,
+        pool_id=None,
+    )
+    db = MagicMock(get=AsyncMock(return_value=card))
+
+    with patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.get_by_callback_no",
+        AsyncMock(return_value=operation),
+    ), patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.get_latest_id_for_card",
+        AsyncMock(return_value=operation.id),
+    ), patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.update_callback_result",
+        AsyncMock(),
+    ) as update_callback, patch.object(
+        SuspendActionService,
+        "_safe_update_supplier_action_audit",
+        AsyncMock(),
+    ):
+        await SupplierCallbackService.handle_upiot_sor_callback(
+            db,
+            {"callback_no": operation.callback_no, "code": "500", "account_status": "02"},
+        )
+
+    assert card.status == CardStatus.activated
+    assert update_callback.await_args.kwargs["callback_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_replayed_callback_is_ignored():
+    operation = SimpleNamespace(
+        id=93,
+        card_id=24,
+        callback_no="replayed-callback",
+        callback_status="success",
+    )
+    db = MagicMock()
+
+    with patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.get_by_callback_no",
+        AsyncMock(return_value=operation),
+    ), patch(
+        "app.services.suspend_service.SupplierSuspendOperationCRUD.update_callback_result",
+        AsyncMock(),
+    ) as update_callback:
+        await SupplierCallbackService.handle_upiot_sor_callback(
+            db,
+            {"callback_no": operation.callback_no, "code": "200", "account_status": "02"},
+        )
+
+    update_callback.assert_not_awaited()
 
 
 @pytest.mark.asyncio

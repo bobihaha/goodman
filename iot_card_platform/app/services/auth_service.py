@@ -23,6 +23,21 @@ ALGORITHM = "HS256"
 
 class AuthService:
     @staticmethod
+    def _token_data(user: SysUserModel, **extra: Any) -> Dict[str, Any]:
+        return {
+            "sub": str(user.id),
+            "account": user.account,
+            "user_level": user.user_level,
+            "tv": int(getattr(user, "token_version", 0) or 0),
+            **extra,
+        }
+
+    @staticmethod
+    def _verify_token_version(payload: Dict[str, Any], user: SysUserModel) -> None:
+        if int(payload.get("tv", 0)) != int(getattr(user, "token_version", 0) or 0):
+            raise AuthException()
+
+    @staticmethod
     def hash_password(password: str) -> str:
         return pwd_context.hash(password)
     
@@ -85,7 +100,7 @@ class AuthService:
 
         permissions = await cls._get_user_permissions(db, user)
         
-        token_data = {"sub": str(user.id), "account": user.account, "user_level": user.user_level, "is_super_login": False}
+        token_data = cls._token_data(user, is_super_login=False)
         access_token = cls.create_access_token(token_data)
         refresh_token = cls.create_refresh_token(token_data)
         
@@ -126,7 +141,11 @@ class AuthService:
         
         permissions = await cls._get_user_permissions(db, target_user)
         
-        token_data = {"sub": str(target_user.id), "account": target_user.account, "user_level": target_user.user_level, "is_super_login": True, "original_user_id": operator.id}
+        token_data = cls._token_data(
+            target_user,
+            is_super_login=True,
+            original_user_id=operator.id,
+        )
         access_token = cls.create_access_token(token_data, expires_delta=timedelta(minutes=settings.super_login_expire_minutes))
         refresh_token = cls.create_refresh_token(token_data)
         
@@ -188,7 +207,7 @@ class AuthService:
         permissions = await cls._get_user_permissions(db, original_user)
         
         # 生成新的token（不再是超级登录模式）
-        token_data = {"sub": str(original_user.id), "account": original_user.account, "user_level": original_user.user_level, "is_super_login": False}
+        token_data = cls._token_data(original_user, is_super_login=False)
         access_token = cls.create_access_token(token_data)
         refresh_token = cls.create_refresh_token(token_data)
         
@@ -214,10 +233,11 @@ class AuthService:
         user = await sys_user_crud.get_by_id(db, int(user_id))
         if not user or user.status != UserStatus.enable:
             raise AuthException()
+        cls._verify_token_version(payload, user)
         
         is_super_login = payload.get("is_super_login", False)
         original_user_id = payload.get("original_user_id")
-        token_data = {"sub": str(user.id), "account": user.account, "user_level": user.user_level, "is_super_login": is_super_login}
+        token_data = cls._token_data(user, is_super_login=is_super_login)
         if original_user_id:
             token_data["original_user_id"] = original_user_id
         access_token = cls.create_access_token(token_data)
@@ -234,6 +254,7 @@ class AuthService:
         user = await sys_user_crud.get_by_id(db, int(user_id))
         if not user or user.is_deleted == 1:
             raise AuthException()
+        cls._verify_token_version(payload, user)
         if user.status != UserStatus.enable:
             raise BusinessException(code=403, msg="用户已被禁用")
         permissions = await cls._get_user_permissions(db, user)
@@ -242,6 +263,17 @@ class AuthService:
             name=user.name, account=user.account, phone=user.phone, email=user.email,
             avatar=user.avatar, status=user.status.value, permissions=permissions,
             is_super_login=payload.get("is_super_login", False), original_user_id=payload.get("original_user_id")
+        )
+
+    @classmethod
+    async def logout(cls, db: AsyncSession, current_user: CurrentUser) -> None:
+        user = await sys_user_crud.get_by_id(db, current_user.id)
+        if not user:
+            return
+        await sys_user_crud.update(
+            db,
+            id=user.id,
+            obj_in={"token_version": int(user.token_version or 0) + 1},
         )
     
     @staticmethod

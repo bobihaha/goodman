@@ -26,6 +26,7 @@ class SysUserModel(BaseModel):
     name = Column(String(50), nullable=False, comment="用户名称")
     account = Column(String(50), unique=True, nullable=False, index=True, comment="用户账户")
     password = Column(String(128), nullable=False, comment="用户密码")
+    token_version = Column(Integer, nullable=False, default=0, comment="令牌版本，改密或退出时递增")
     phone = Column(String(20), nullable=True, index=True, comment="手机号")
     email = Column(String(100), nullable=True, comment="邮箱")
     avatar = Column(String(255), nullable=True, comment="头像URL")

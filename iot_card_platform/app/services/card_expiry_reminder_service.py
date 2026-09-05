@@ -92,7 +92,8 @@ class CardExpiryReminderService:
                     to_email=user.email,
                     subject=subject,
                     content=content,
-                    attachments=[attachment]
+                    attachments=[attachment],
+                    copy_super_admins=True
                 ):
                     await cls._mark_send_success(db, marker_key, len(cards))
                     sent += 1

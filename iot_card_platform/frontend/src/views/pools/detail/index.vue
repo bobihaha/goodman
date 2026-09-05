@@ -222,12 +222,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
-import type { ECharts } from 'echarts'
+import { echarts, type ECharts } from '@/utils/echarts'
 import {
   getPoolDetail,
   getPoolCards,
@@ -721,6 +720,15 @@ onMounted(() => {
   fetchDetail()
   fetchCards()
   fetchFlowLogs()
+})
+
+onBeforeUnmount(() => {
+  cardChart?.dispose()
+  flowChart?.dispose()
+  compositionChart?.dispose()
+  cardChart = null
+  flowChart = null
+  compositionChart = null
 })
 </script>
 

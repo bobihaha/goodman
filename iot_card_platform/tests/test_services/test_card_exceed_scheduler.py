@@ -7,6 +7,7 @@ from app import scheduler as scheduler_module
 from app.db.models.iot_card import CardStatus, CardType, IotCardModel, SuspendType
 from app.db.models.package import CarrierType, PeriodType
 from app.db.models.suspend import SuspendActionType, SuspendPolicyModel
+from app.flow_packages import get_current_flow_cycle_month
 from app.services.suspend_service import SuspendActionService
 from tests.conftest import TestSessionLocal
 
@@ -122,6 +123,7 @@ async def test_card_exceed_prefers_user_policy_and_uses_its_stop_threshold(setup
             card_type=CardType.single,
             data_used=9728,
             data_used_month=9728,
+            data_usage_month=get_current_flow_cycle_month(),
             data_total=10240,
             status=CardStatus.activated,
             is_pool_member=0,

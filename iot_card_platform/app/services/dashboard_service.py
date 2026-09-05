@@ -2,7 +2,7 @@
 仪表盘服务层
 """
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -18,6 +18,7 @@ from app.schemas.dashboard import (
     DashboardOverview, UsageTrend, UsageTrendItem
 )
 from app.utils.const import cache_result
+from app.flow_packages import get_current_flow_cycle_month
 
 
 class DashboardService:
@@ -531,7 +532,12 @@ class DashboardService:
         base_condition = [
             IotCardModel.is_deleted == 0,
             IotCardModel.status.in_([CardStatus.activated, CardStatus.suspended]),
-            IotCardModel.data_total > 0
+            IotCardModel.data_total > 0,
+            IotCardModel.data_used > IotCardModel.data_total,
+            or_(
+                IotCardModel.period_type != "monthly",
+                IotCardModel.data_usage_month == get_current_flow_cycle_month(),
+            ),
         ]
         if user_ids is not None:
             base_condition.append(IotCardModel.user_id.in_(user_ids))
@@ -543,27 +549,21 @@ class DashboardService:
         result = await db.execute(
             select(IotCardModel)
             .where(*base_condition)
+            .order_by((IotCardModel.data_used - IotCardModel.data_total).desc())
+            .limit(50)
         )
         cards = result.scalars().all()
-        
-        # 筛选超量卡（使用率 > 100%）
-        over_usage_cards = []
-        for card in cards:
-            usage_percent = (card.data_used / card.data_total * 100) if card.data_total > 0 else 0
-            if usage_percent > 100:
-                over_usage_cards.append({
-                    "id": card.id,
-                    "iccid": card.iccid,
-                    "msisdn": card.msisdn,
-                    "carrier": card.carrier.value if card.carrier else None,
-                    "data_used": card.data_used,
-                    "data_total": card.data_total,
-                    "usage_percent": round(usage_percent, 2),
-                    "over_usage": card.data_used - card.data_total,
-                    "user_name": ""
-                })
-        
-        # 按超量从大到小排序
-        over_usage_cards.sort(key=lambda x: x["over_usage"], reverse=True)
-        
-        return over_usage_cards[:50]  # 最多返回50条
+        return [
+            {
+                "id": card.id,
+                "iccid": card.iccid,
+                "msisdn": card.msisdn,
+                "carrier": card.carrier.value if card.carrier else None,
+                "data_used": card.data_used,
+                "data_total": card.data_total,
+                "usage_percent": round(card.data_used / card.data_total * 100, 2),
+                "over_usage": card.data_used - card.data_total,
+                "user_name": "",
+            }
+            for card in cards
+        ]

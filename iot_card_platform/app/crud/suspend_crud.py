@@ -13,6 +13,7 @@ from app.db.models.suspend import (
 )
 from app.db.models.iot_card import IotCardModel, CardStatus, SuspendType
 from app.db.models.pool import TrafficPoolModel
+from app.flow_packages import get_current_flow_cycle_month
 
 
 class SuspendPolicyCRUD:
@@ -74,6 +75,7 @@ class SuspendPolicyCRUD:
     @staticmethod
     async def get_list(
         db: AsyncSession,
+        user_ids: Optional[List[int]] = None,
         policy_type: Optional[str] = None,
         user_id: Optional[int] = None,
         is_enabled: Optional[bool] = None,
@@ -88,7 +90,14 @@ class SuspendPolicyCRUD:
             query = query.where(SuspendPolicyModel.policy_type == policy_type)
             count_query = count_query.where(SuspendPolicyModel.policy_type == policy_type)
 
-        if user_id is not None:
+        if user_ids is not None:
+            query = query.where(
+                or_(SuspendPolicyModel.user_id.in_(user_ids), SuspendPolicyModel.user_id.is_(None))
+            )
+            count_query = count_query.where(
+                or_(SuspendPolicyModel.user_id.in_(user_ids), SuspendPolicyModel.user_id.is_(None))
+            )
+        elif user_id is not None:
             query = query.where(
                 or_(SuspendPolicyModel.user_id == user_id, SuspendPolicyModel.user_id.is_(None))
             )
@@ -232,6 +241,19 @@ class SuspendLogCRUD:
         query = select(SuspendLogModel).where(SuspendLogModel.is_deleted == 0)
         count_query = select(func.count(SuspendLogModel.id)).where(SuspendLogModel.is_deleted == 0)
 
+        if user_ids is not None:
+            query = query.join(IotCardModel, IotCardModel.id == SuspendLogModel.card_id).where(
+                IotCardModel.is_deleted == 0,
+                IotCardModel.user_id.in_(user_ids),
+            )
+            count_query = count_query.join(
+                IotCardModel,
+                IotCardModel.id == SuspendLogModel.card_id,
+            ).where(
+                IotCardModel.is_deleted == 0,
+                IotCardModel.user_id.in_(user_ids),
+            )
+
         if card_id:
             query = query.where(SuspendLogModel.card_id == card_id)
             count_query = count_query.where(SuspendLogModel.card_id == card_id)
@@ -299,7 +321,11 @@ class AlertLogCRUD:
         usage_percent: int,
         threshold: int,
         policy_id: Optional[int] = None,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        data_used_snapshot: Optional[int] = None,
+        data_total_snapshot: Optional[int] = None,
+        remaining_flow_snapshot: Optional[int] = None,
+        sync_at_snapshot: Optional[datetime] = None,
     ) -> AlertLogModel:
         """创建告警记录"""
         alert = AlertLogModel(
@@ -311,6 +337,10 @@ class AlertLogCRUD:
             threshold=threshold,
             policy_id=policy_id,
             user_id=user_id,
+            data_used_snapshot=data_used_snapshot,
+            data_total_snapshot=data_total_snapshot,
+            remaining_flow_snapshot=remaining_flow_snapshot,
+            sync_at_snapshot=sync_at_snapshot,
             notified=0,
             handled=0
         )
@@ -336,6 +366,7 @@ class AlertLogCRUD:
         target_type: Optional[str] = None,
         alert_level: Optional[str] = None,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         handled: Optional[bool] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -357,6 +388,9 @@ class AlertLogCRUD:
         if user_id:
             query = query.where(AlertLogModel.user_id == user_id)
             count_query = count_query.where(AlertLogModel.user_id == user_id)
+        elif user_ids is not None:
+            query = query.where(AlertLogModel.user_id.in_(user_ids))
+            count_query = count_query.where(AlertLogModel.user_id.in_(user_ids))
 
         if handled is not None:
             query = query.where(AlertLogModel.handled == (1 if handled else 0))
@@ -388,11 +422,14 @@ class AlertLogCRUD:
         db: AsyncSession,
         alert_id: int,
         handled_by: int,
-        handle_remark: Optional[str] = None
+        handle_remark: Optional[str] = None,
+        user_ids: Optional[List[int]] = None,
     ) -> Optional[AlertLogModel]:
         """处理告警"""
         alert = await AlertLogCRUD.get_by_id(db, alert_id)
         if not alert:
+            return None
+        if user_ids is not None and alert.user_id not in user_ids:
             return None
         
         alert.handled = 1
@@ -479,6 +516,16 @@ class SupplierSuspendOperationCRUD:
             select(SupplierSuspendOperationModel).where(
                 SupplierSuspendOperationModel.callback_no == callback_no,
                 SupplierSuspendOperationModel.is_deleted == 0
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_latest_id_for_card(db: AsyncSession, card_id: int) -> Optional[int]:
+        result = await db.execute(
+            select(func.max(SupplierSuspendOperationModel.id)).where(
+                SupplierSuspendOperationModel.card_id == card_id,
+                SupplierSuspendOperationModel.is_deleted == 0,
             )
         )
         return result.scalar_one_or_none()
@@ -621,6 +668,10 @@ class CardSuspendCRUD:
                 IotCardModel.status == CardStatus.activated,
                 IotCardModel.is_pool_member == 0,
                 IotCardModel.data_total > 0,
+                or_(
+                    IotCardModel.period_type != "monthly",
+                    IotCardModel.data_usage_month == get_current_flow_cycle_month(),
+                ),
                 (IotCardModel.data_used * 100 / IotCardModel.data_total) >= threshold_percent
             )
         )

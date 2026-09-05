@@ -120,6 +120,7 @@ async def get_user_permissions(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """获取用户的所有权限"""
+    await permission_service.ensure_user_access(db, current_user, user_id)
     permissions = await permission_service.get_user_permissions(db, user_id)
     return ResponseModel(data=permissions)
 
@@ -131,6 +132,7 @@ async def get_user_permission_ids(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """获取用户的权限ID列表"""
+    await permission_service.ensure_user_access(db, current_user, user_id)
     permission_ids = await permission_service.get_user_permission_ids(db, user_id)
     return ResponseModel(data=permission_ids)
 
@@ -142,6 +144,7 @@ async def get_user_permission_codes(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """获取用户的权限代码列表"""
+    await permission_service.ensure_user_access(db, current_user, user_id)
     permission_codes = await permission_service.get_user_permission_codes(db, user_id)
     return ResponseModel(data=permission_codes)
 
@@ -157,6 +160,7 @@ async def assign_user_permissions(
     为用户分配权限（覆盖式）
     会清空用户现有权限，然后分配新权限
     """
+    await permission_service.ensure_user_access(db, current_user, user_id, for_write=True)
     result = await permission_service.assign_user_permissions(db, user_id, data.permission_ids)
     return ResponseModel(data=result, msg="权限分配成功")
 
@@ -172,6 +176,7 @@ async def add_user_permissions(
     为用户添加权限（追加式）
     不会清空现有权限，只添加新权限
     """
+    await permission_service.ensure_user_access(db, current_user, user_id, for_write=True)
     result = await permission_service.add_user_permissions(db, user_id, data.permission_ids)
     return ResponseModel(data=result, msg="权限添加成功")
 
@@ -184,6 +189,7 @@ async def remove_user_permissions(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """移除用户权限"""
+    await permission_service.ensure_user_access(db, current_user, user_id, for_write=True)
     result = await permission_service.remove_user_permissions(db, user_id, data.permission_ids)
     return ResponseModel(data=result, msg="权限移除成功")
 
@@ -196,9 +202,9 @@ async def check_user_permission(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """检查用户是否拥有指定权限"""
+    await permission_service.ensure_user_access(db, current_user, user_id)
     has_permission = await permission_service.check_user_permission(db, user_id, permission_code)
     return ResponseModel(data={"has_permission": has_permission})
-
 
 
 

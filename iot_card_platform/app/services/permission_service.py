@@ -4,8 +4,11 @@
 from typing import List, Tuple, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud.permission_crud import permission_crud, user_permission_crud
+from app.crud.sys_user_crud import sys_user_crud
+from app.db.models.sys_user import UserLevel
+from app.schemas.auth import CurrentUser
 from app.schemas.permission import PermissionCreate, PermissionUpdate, PermissionQuery
-from app.utils.exceptions import BusinessException
+from app.utils.exceptions import BusinessException, PermissionDeniedException, UserNotFoundException
 
 
 # 模块名称映射
@@ -24,6 +27,31 @@ MODULE_NAMES = {
 
 class PermissionService:
     """权限服务"""
+
+    @staticmethod
+    async def ensure_user_access(
+        db: AsyncSession,
+        operator: CurrentUser,
+        user_id: int,
+        *,
+        for_write: bool = False,
+    ) -> None:
+        target = await sys_user_crud.get_by_id(db, user_id)
+        if not target:
+            raise UserNotFoundException()
+        if operator.is_super_admin():
+            return
+        if operator.id == target.id:
+            if for_write:
+                raise PermissionDeniedException()
+            return
+        if (
+            operator.is_user()
+            and target.user_level == UserLevel.SUB_USER.value
+            and target.parent_id == operator.id
+        ):
+            return
+        raise PermissionDeniedException()
 
     async def create_permission(self, db: AsyncSession, data: PermissionCreate) -> dict:
         """创建权限"""
@@ -162,7 +190,6 @@ class PermissionService:
 
 
 permission_service = PermissionService()
-
 
 
 

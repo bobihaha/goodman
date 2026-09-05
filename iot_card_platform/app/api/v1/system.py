@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.db.database import get_db
-from app.utils.auth import get_current_user, require_super_admin, require_user_level
+from app.utils.auth import get_current_user, require_super_admin
 from app.schemas.common import ResponseModel, PageResponseModel
 from app.schemas.system import (
     ConfigCreate, ConfigUpdate, ConfigBatchUpdate,
@@ -26,7 +26,7 @@ router = APIRouter()
 @router.get("/configs", summary="获取系统配置列表")
 async def get_configs(
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(require_super_admin)
 ):
     """获取所有系统配置"""
     configs = await SystemConfigService.get_all_configs(db)
@@ -46,7 +46,7 @@ async def get_public_configs(
 async def get_config(
     config_key: str,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(require_super_admin)
 ):
     """获取单个配置"""
     config = await SystemConfigService.get_config(db, config_key)
@@ -59,7 +59,7 @@ async def get_config(
 async def create_config(
     data: ConfigCreate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_user_level)
+    current_user = Depends(require_super_admin)
 ):
     """创建系统配置"""
     # 检查是否已存在
@@ -76,7 +76,7 @@ async def update_config(
     config_key: str,
     data: ConfigUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_user_level)
+    current_user = Depends(require_super_admin)
 ):
     """更新系统配置"""
     config = await SystemConfigService.update_config(db, config_key, data)
@@ -89,7 +89,7 @@ async def update_config(
 async def batch_update_configs(
     data: ConfigBatchUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_user_level)
+    current_user = Depends(require_super_admin)
 ):
     """批量更新系统配置"""
     # 将列表转为字典
@@ -106,7 +106,7 @@ async def batch_update_configs(
 async def delete_config(
     config_key: str,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(require_user_level)
+    current_user = Depends(require_super_admin)
 ):
     """删除系统配置"""
     success = await SystemConfigService.delete_config(db, config_key)

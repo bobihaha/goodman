@@ -129,7 +129,9 @@ class IotCardModel(BaseModel):
     data_used_month = Column(BigInteger, nullable=False, default=0, comment="本月已用流量(MB)")
     addon_flow = Column(BigInteger, nullable=False, default=0, comment="当月补量(MB)")
     addon_flow_month = Column(String(7), nullable=True, comment="补量生效月份(YYYY-MM)")
-    data_sync_at = Column(DateTime, nullable=True, comment="流量同步时间")
+    data_sync_at = Column(DateTime, nullable=True, comment="平台抓取流量时间")
+    data_source_at = Column(DateTime, nullable=True, comment="供应商用量快照时间")
+    data_usage_month = Column(String(7), nullable=True, index=True, comment="当前用量所属月份(YYYY-MM)")
 
     # 机卡分离检测
     latest_imei = Column(String(32), nullable=True, comment="最近一次获取的IMEI")
@@ -239,6 +241,8 @@ class IotCardModel(BaseModel):
             "data_remain": self.data_total - self.data_used if self.data_total else 0,
             "data_usage_percent": self.get_data_usage_percent(),
             "data_sync_at": self.data_sync_at.isoformat() if self.data_sync_at else None,
+            "data_source_at": self.data_source_at.isoformat() if self.data_source_at else None,
+            "data_usage_month": self.data_usage_month,
             "latest_imei": self.latest_imei,
             "previous_imei": self.previous_imei,
             "imei_device_name": self.imei_device_name,

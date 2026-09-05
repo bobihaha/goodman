@@ -452,7 +452,7 @@ import {
   CircleCheckFilled,
   WarningFilled
 } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
+import { echarts, type ECharts } from '@/utils/echarts'
 import { cardApi } from '@/api'
 import { systemApi } from '@/api/modules/system'
 import { useAuthStore } from '@/stores/modules/auth'
@@ -500,7 +500,7 @@ const flowLogLoading = ref(false)
 const flowLogs = ref<OperationLog[]>([])
 const historyDateRange = ref<[Date, Date]>()
 const chartRef = ref<HTMLElement>()
-let chartInstance: echarts.ECharts | null = null
+let chartInstance: ECharts | null = null
 
 // 划拨记录分页
 const transferPagination = ref({
@@ -998,6 +998,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearDeviceSeparationDisplayState()
+  chartInstance?.dispose()
+  chartInstance = null
 })
 </script>
 

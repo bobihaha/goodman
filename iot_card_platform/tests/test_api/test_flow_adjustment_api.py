@@ -61,7 +61,7 @@ class TestFlowAdjustmentApi:
                 "/api/v1/cards/batch/add-flow-by-iccids",
                 json={
                     "iccids": ["8986000000000000101"],
-                    "added_flow_mb": 512,
+                    "added_flow_mb": 1024,
                     "remark": "后台补量"
                 }
             )
@@ -74,7 +74,7 @@ class TestFlowAdjustmentApi:
         mock_service.assert_awaited_once()
         _, kwargs = mock_service.await_args
         assert kwargs["iccids"] == ["8986000000000000101"]
-        assert kwargs["added_flow_mb"] == 512
+        assert kwargs["added_flow_mb"] == 1024
         assert kwargs["current_user_id"] == 2
         assert kwargs["user_level"] == 2
 

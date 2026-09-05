@@ -44,13 +44,11 @@ async def get_policies(
     current_user = Depends(get_current_user)
 ):
     """获取停卡策略列表"""
-    # 普通用户只能看到全局策略和自己的策略 (user_level: 1=超级管理员)
-    user_id = None if current_user.user_level == 1 else current_user.id
-    
+    user_ids = await _get_accessible_user_ids(current_user, db)
     policies, total = await SuspendPolicyService.get_policies(
         db=db,
+        user_ids=user_ids,
         policy_type=policy_type,
-        user_id=user_id,
         is_enabled=is_enabled,
         page=page,
         page_size=page_size
@@ -88,6 +86,9 @@ async def get_policy(
     """获取策略详情"""
     policy = await SuspendPolicyService.get_policy(db, policy_id)
     if not policy:
+        return ResponseModel(code=404, msg="策略不存在")
+    user_ids = await _get_accessible_user_ids(current_user, db)
+    if user_ids is not None and policy.user_id is not None and policy.user_id not in user_ids:
         return ResponseModel(code=404, msg="策略不存在")
     return ResponseModel(data=policy.to_dict())
 
@@ -260,8 +261,11 @@ async def get_suspend_logs(
     current_user = Depends(get_current_user)
 ):
     """获取停卡记录"""
+    user_ids = await _get_accessible_user_ids(current_user, db)
     logs, total = await SuspendLogService.get_logs(
         db=db,
+        user_ids=user_ids,
+        include_api_result=current_user.user_level == 1,
         card_id=card_id,
         action=action,
         suspend_type=suspend_type,
@@ -295,14 +299,13 @@ async def get_alerts(
     current_user = Depends(get_current_user)
 ):
     """获取告警列表"""
-    # 普通用户只能看自己的告警 (user_level: 1=超级管理员)
-    user_id = None if current_user.user_level == 1 else current_user.id
+    user_ids = await _get_accessible_user_ids(current_user, db)
     
     alerts, total = await AlertLogService.get_alerts(
         db=db,
         target_type=target_type,
         alert_level=alert_level,
-        user_id=user_id,
+        user_ids=user_ids,
         handled=handled,
         start_time=start_time,
         end_time=end_time,
@@ -324,9 +327,8 @@ async def get_alert_stats(
     current_user = Depends(get_current_user)
 ):
     """获取未处理告警统计"""
-    user_id = None if current_user.user_level == 1 else current_user.id
-    
-    stats = await AlertLogService.get_unhandled_count(db, user_id)
+    user_ids = await _get_accessible_user_ids(current_user, db)
+    stats = await AlertLogService.get_unhandled_count(db, user_ids=user_ids)
     return ResponseModel(data=stats)
 
 
@@ -338,11 +340,13 @@ async def handle_alert(
     current_user = Depends(get_current_user)
 ):
     """处理告警"""
+    user_ids = await _get_accessible_user_ids(current_user, db)
     alert = await AlertLogService.handle_alert(
         db=db,
         alert_id=alert_id,
         handled_by=current_user.id,
-        handle_remark=data.handle_remark
+        handle_remark=data.handle_remark,
+        user_ids=user_ids,
     )
     
     if not alert:

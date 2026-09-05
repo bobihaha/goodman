@@ -53,7 +53,13 @@ async def suspend_h5_card(
     request: H5CardSuspendRequest = Body(...),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await h5_service.suspend_card(db, slug, card_id, request.reason)
+    result = await h5_service.suspend_card(
+        db,
+        slug,
+        card_id,
+        request.reason,
+        request.verify_code,
+    )
     return ResponseModel(data=result, msg="停机请求已提交")
 
 
@@ -64,7 +70,7 @@ async def resume_h5_card(
     request: H5CardResumeRequest = Body(...),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await h5_service.resume_card(db, slug, card_id)
+    result = await h5_service.resume_card(db, slug, card_id, request.verify_code)
     return ResponseModel(data=result, msg="复机请求已提交")
 
 

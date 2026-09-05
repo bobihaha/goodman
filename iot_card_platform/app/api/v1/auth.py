@@ -29,7 +29,11 @@ async def login(request: Request, login_data: LoginRequest = Body(...), db: Asyn
 
 
 @router.post("/logout", summary="退出登录", response_model=ResponseModel)
-async def logout(current_user: CurrentUser = Depends(get_current_user)):
+async def logout(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    await auth_service.logout(db, current_user)
     return ResponseModel(msg="退出成功")
 
 
@@ -62,4 +66,3 @@ async def get_profile(current_user: CurrentUser = Depends(get_current_user)):
 @router.get("/permissions", summary="获取用户权限", response_model=ResponseModel)
 async def get_permissions(current_user: CurrentUser = Depends(get_current_user)):
     return ResponseModel(data=current_user.permissions)
-

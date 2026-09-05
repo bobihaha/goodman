@@ -226,7 +226,8 @@ class SysOperationLogCRUD:
         detail: Optional[str] = None,
         ip: Optional[str] = None,
         is_success: bool = True,
-        error_msg: Optional[str] = None
+        error_msg: Optional[str] = None,
+        commit: bool = True,
     ) -> SysOperationLogModel:
         """创建操作日志"""
         log = SysOperationLogModel(
@@ -244,7 +245,10 @@ class SysOperationLogCRUD:
             error_msg=error_msg
         )
         db.add(log)
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
         await db.refresh(log)
         return log
 

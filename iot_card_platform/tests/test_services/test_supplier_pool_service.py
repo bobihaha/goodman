@@ -205,6 +205,7 @@ async def test_sync_sends_highest_reached_threshold_and_escalates(db_session):
 
         assert result["success_pools"] == 1
         send_email.assert_awaited_once()
+        assert send_email.await_args.kwargs["copy_super_admins"] is True
         html_content = send_email.await_args.kwargs["html_content"]
         assert "触发阈值" in html_content
         assert "80%" in html_content

@@ -17,6 +17,7 @@ from app.clients.supplier_api import get_supplier_client
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 from app.utils.date_utils import calculate_expiry_date
 from app.utils.exceptions import BusinessException
+from app.utils.timezone import normalize_china_datetime
 from app.config import settings
 
 
@@ -34,6 +35,34 @@ class SyncService:
         return datetime.strptime(value, "%Y-%m-%d").date()
 
     @staticmethod
+    def _parse_supplier_datetime(value) -> Optional[datetime]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return normalize_china_datetime(value)
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+            if timestamp > 10_000_000_000:
+                timestamp /= 1000
+            return normalize_china_datetime(datetime.fromtimestamp(timestamp).astimezone())
+
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return normalize_china_datetime(datetime.fromisoformat(text.replace("Z", "+00:00")))
+        except ValueError:
+            pass
+        for pattern in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(text, pattern)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
     def _enum_value(value) -> Optional[str]:
         if not value:
             return None
@@ -41,7 +70,7 @@ class SyncService:
 
     @staticmethod
     def _resolve_sales_period_expired_at(card: IotCardModel) -> Optional[date]:
-        """按本地销售出库周期计算到期日下限。"""
+        """按本地销售出库周期计算到期日。"""
         if not getattr(card, "sale_package_id", None) or not card.activated_at:
             return None
 
@@ -57,6 +86,58 @@ class SyncService:
             period_months=period_months,
             carrier=SyncService._enum_value(card.carrier),
         )
+
+    @staticmethod
+    def _resolve_local_activation_date(
+        card: IotCardModel,
+        today: Optional[date] = None
+    ) -> Optional[date]:
+        """从本地出库/沉默期/用量规则推导平台激活日。"""
+        if card.activated_at:
+            return card.activated_at
+
+        today = today or date.today()
+        stock_out_date = getattr(card, "stock_out_date", None)
+        if stock_out_date and stock_out_date <= today:
+            return stock_out_date
+
+        silent_expire_date = getattr(card, "silent_expire_date", None)
+        if silent_expire_date and today > silent_expire_date:
+            return silent_expire_date + timedelta(days=1)
+
+        if int(getattr(card, "data_used", 0) or 0) > 0:
+            return today
+
+        return None
+
+    @staticmethod
+    def _resolve_supplier_lifecycle_date(
+        card: IotCardModel,
+        field_name: str,
+        supplier_date: Optional[date]
+    ) -> Tuple[Optional[date], bool]:
+        """已出库卡保留本地生命周期日期，避免供应商底层日期覆盖销售出库信息。"""
+        current_date = getattr(card, field_name, None)
+        has_local_stock_out = bool(
+            getattr(card, "stock_out_date", None)
+            or getattr(card, "sale_package_id", None)
+        )
+        if has_local_stock_out and current_date:
+            return current_date, supplier_date is not None and supplier_date != current_date
+        return supplier_date, False
+
+    @staticmethod
+    def _ensure_activated_at_for_active_status(card: IotCardModel) -> bool:
+        """已激活卡缺失平台激活日时，用本地规则补齐。"""
+        if card.status != CardStatus.activated or card.activated_at:
+            return False
+
+        activated_at = SyncService._resolve_local_activation_date(card)
+        if not activated_at:
+            return False
+
+        card.activated_at = activated_at
+        return True
 
     @staticmethod
     def _protect_sales_period_expired_at(card: IotCardModel) -> bool:
@@ -80,13 +161,26 @@ class SyncService:
         supplier_expired_at: Optional[date]
     ) -> Tuple[Optional[date], bool]:
         """
-        生命周期同步时优先保护本地更长的套餐周期，避免把刚续费的到期日写短。
+        生命周期同步时优先遵循本地出库销售周期，避免供应商底层套餐日期覆盖本地周期。
 
         Returns:
-            (最终应写入的到期日, 是否保留了本地更长周期)
+            (最终应写入的到期日, 是否保留/修复了本地周期)
         """
         if not supplier_expired_at:
             return card.expired_at, False
+        sales_expired_at = SyncService._resolve_sales_period_expired_at(card)
+        if sales_expired_at:
+            current_expired_at = card.expired_at
+            if (
+                current_expired_at
+                and current_expired_at > sales_expired_at
+                and current_expired_at != supplier_expired_at
+            ):
+                return current_expired_at, supplier_expired_at != current_expired_at
+            return sales_expired_at, (
+                supplier_expired_at != sales_expired_at
+                or current_expired_at != sales_expired_at
+            )
         if not card.expired_at:
             return supplier_expired_at, False
         if supplier_expired_at >= card.expired_at:
@@ -105,7 +199,10 @@ class SyncService:
         Returns:
             (最终应保留的本地激活日, 是否忽略了供应商激活日)
         """
-        return card.activated_at, supplier_activated_at is not None
+        return (
+            SyncService._resolve_local_activation_date(card),
+            supplier_activated_at is not None,
+        )
 
     @staticmethod
     def _resolve_usage_data_total(
@@ -113,16 +210,15 @@ class SyncService:
         supplier_total: Optional[int]
     ) -> Tuple[int, bool]:
         """
-        用量同步时保护本地已扩容的年包总量，避免本地续费额度被供应商旧套餐覆盖。
+        客户侧套餐总量以平台销售规格为准：月包不接受供应商底层/年包总量覆盖，
+        年包保护本地续费后的更大额度。
 
         Returns:
             (最终应写入的总流量, 是否保留了本地更大总量)
         """
         current_total = int(card.data_total or 0)
-        if supplier_total is None:
-            return current_total, False
-
-        supplier_total = int(supplier_total)
+        stored_addon = int(card.addon_flow or 0)
+        local_base_total = max(0, current_total - stored_addon)
         if card.addon_flow and not card.addon_flow_month:
             card.addon_flow_month = get_current_flow_cycle_month()
         effective_addon = int(card.addon_flow or 0) if is_flow_cycle_active(card.addon_flow_month) else 0
@@ -132,11 +228,15 @@ class SyncService:
 
         period_type = card.period_type.value if card.period_type else None
         if period_type == "monthly" and card.flow_size:
-            base_total = max(int(card.flow_size), supplier_total)
-            return base_total + effective_addon, False
+            return int(card.flow_size) + effective_addon, False
 
-        if period_type == "yearly" and current_total > supplier_total:
-            return current_total + effective_addon, True
+        if supplier_total is None:
+            return local_base_total + effective_addon, False
+
+        supplier_total = int(supplier_total)
+
+        if period_type == "yearly" and local_base_total > supplier_total:
+            return local_base_total + effective_addon, True
 
         return supplier_total + effective_addon, False
 
@@ -145,12 +245,13 @@ class SyncService:
         card: IotCardModel,
         supplier_used: Optional[int],
         supplier_used_month: Optional[int] = None,
-        supplier_usage_scope: Optional[str] = None
+        supplier_usage_scope: Optional[str] = None,
+        supplier_usage_month: Optional[str] = None,
     ) -> Tuple[int, int, bool]:
         """
         解析供应商用量。
 
-        月卡：供应商返回值就是当前周期已用量。
+        月卡：供应商若返回年/周期累计值，则使用独立的本月用量。
         年卡：优先使用供应商周期累计用量；如果供应商明确只返回当前月用量，
         data_used 维护套餐有效期累计用量。
 
@@ -163,6 +264,8 @@ class SyncService:
         )
         period_type = card.period_type.value if card.period_type else None
         if period_type != "yearly":
+            if supplier_usage_scope == "cycle" and supplier_used_month is not None:
+                return current_month_used, current_month_used, False
             return current_used, current_month_used, False
 
         if supplier_usage_scope == "cycle":
@@ -177,10 +280,50 @@ class SyncService:
         if previous_month_used <= 0:
             return max(previous_total_used, current_month_used), current_month_used, False
 
+        previous_usage_month = getattr(card, "data_usage_month", None)
+        if previous_usage_month and supplier_usage_month:
+            if previous_usage_month != supplier_usage_month:
+                return previous_total_used + current_month_used, current_month_used, True
+            previous_cycle_base = max(0, previous_total_used - previous_month_used)
+            return previous_cycle_base + current_month_used, current_month_used, False
+
         if current_month_used >= previous_month_used:
             return previous_total_used + (current_month_used - previous_month_used), current_month_used, False
 
         return previous_total_used + current_month_used, current_month_used, True
+
+    @classmethod
+    def _apply_usage_snapshot(cls, card: IotCardModel, data: dict) -> Tuple[bool, bool, bool, Optional[str]]:
+        """写入供应商用量；月包只接受当前月份快照。"""
+        source_at = cls._parse_supplier_datetime(data.get("sync_time"))
+        source_month = source_at.strftime("%Y-%m") if source_at else None
+        card.data_sync_at = datetime.now()
+        card.data_source_at = source_at
+
+        if cls._enum_value(card.period_type) == "monthly" and source_month != get_current_flow_cycle_month():
+            card.data_used = 0
+            card.data_used_month = 0
+            card.data_usage_month = None
+            card.data_total, preserved_local_total = cls._resolve_usage_data_total(
+                card,
+                data.get("data_total"),
+            )
+            reason = "供应商用量时间缺失" if not source_month else f"供应商仍返回 {source_month} 用量"
+            return False, preserved_local_total, True, reason
+
+        card.data_used, card.data_used_month, month_usage_reset = cls._resolve_usage_data_used(
+            card,
+            data.get("data_used"),
+            data.get("data_used_month"),
+            data.get("data_used_scope"),
+            source_month,
+        )
+        card.data_usage_month = source_month
+        card.data_total, preserved_local_total = cls._resolve_usage_data_total(
+            card,
+            data.get("data_total"),
+        )
+        return True, preserved_local_total, month_usage_reset, None
 
     @staticmethod
     def _round_usage_mb(value) -> int:
@@ -220,8 +363,16 @@ class SyncService:
         }
         current_suspend_type = card.suspend_type or SuspendType.none
 
-        # 业务停卡优先，避免同步把套餐管控/人工停卡直接冲掉。
-        if current_suspend_type in protected_suspend_types and lifecycle_status != CardStatus.suspended.value:
+        # 业务停卡优先于供应商可用态，避免同步把套餐管控/人工停卡直接冲掉；
+        # 供应商已到期或已销卡属于终态，必须允许其覆盖本地停卡状态。
+        supplier_terminal_statuses = {
+            CardStatus.expired.value,
+            CardStatus.cancelled.value,
+        }
+        if (
+            current_suspend_type in protected_suspend_types
+            and lifecycle_status not in supplier_terminal_statuses | {CardStatus.suspended.value}
+        ):
             return CardStatus.suspended.value
 
         # 只有没有明确业务停卡原因时，才让供应商“已正使用”纠偏覆盖短期状态冲突。
@@ -416,18 +567,18 @@ class SyncService:
                     for card in sup_cards:
                         if card.iccid in usage_map:
                             data = usage_map[card.iccid]
-                            card.data_used, card.data_used_month, month_usage_reset = self._resolve_usage_data_used(
-                                card,
-                                data.get("data_used"),
-                                data.get("data_used_month"),
-                                data.get("data_used_scope")
+                            usage_accepted, preserved_local_total, month_usage_reset, reject_reason = (
+                                self._apply_usage_snapshot(card, data)
                             )
-                            supplier_total = data.get("data_total")
-                            card.data_total, preserved_local_total = self._resolve_usage_data_total(
-                                card,
-                                supplier_total
-                            )
-                            card.data_sync_at = datetime.now()
+                            if not usage_accepted:
+                                fail_count += 1
+                                sync_details.append({
+                                    "iccid": card.iccid,
+                                    "status": "failed",
+                                    "reason": reject_reason,
+                                    "data_source_at": card.data_source_at.isoformat() if card.data_source_at else None,
+                                })
+                                continue
 
                             # 检查并更新卡片状态
                             from app.services.card_status_service import check_and_update_card_status
@@ -438,7 +589,6 @@ class SyncService:
 
                             # 月包：月末额外记录月末快照
                             if card.period_type.value == "monthly":
-                                from datetime import date
                                 import calendar
                                 today = date.today()
                                 last_day = calendar.monthrange(today.year, today.month)[1]
@@ -600,16 +750,33 @@ class SyncService:
                             # 记录旧状态
                             old_status = card.status
                             old_expired_at = card.expired_at
+                            supplier_expired_at = None
+                            preserved_local_expiry = False
+                            preserved_local_lifecycle_dates = []
 
                             # 更新生命周期日期
                             if data.get("test_expire_date"):
-                                card.test_expire_date = datetime.strptime(
+                                supplier_test_expire_date = datetime.strptime(
                                     data["test_expire_date"], "%Y-%m-%d"
                                 ).date()
+                                card.test_expire_date, preserved_local_date = self._resolve_supplier_lifecycle_date(
+                                    card,
+                                    "test_expire_date",
+                                    supplier_test_expire_date
+                                )
+                                if preserved_local_date:
+                                    preserved_local_lifecycle_dates.append("test_expire_date")
                             if data.get("silent_expire_date"):
-                                card.silent_expire_date = datetime.strptime(
+                                supplier_silent_expire_date = datetime.strptime(
                                     data["silent_expire_date"], "%Y-%m-%d"
                                 ).date()
+                                card.silent_expire_date, preserved_local_date = self._resolve_supplier_lifecycle_date(
+                                    card,
+                                    "silent_expire_date",
+                                    supplier_silent_expire_date
+                                )
+                                if preserved_local_date:
+                                    preserved_local_lifecycle_dates.append("silent_expire_date")
                             ignored_supplier_activated_at = False
                             if data.get("activated_at"):
                                 supplier_activated_at = self._parse_supplier_date(data["activated_at"])
@@ -644,6 +811,12 @@ class SyncService:
                             # 检查并更新卡片状态（根据沉默期等规则）
                             from app.services.card_status_service import check_and_update_card_status
                             await check_and_update_card_status(db, card)
+                            filled_local_activated_at = self._ensure_activated_at_for_active_status(card)
+                            if supplier_expired_at:
+                                card.expired_at, preserved_local_expiry = self._resolve_lifecycle_expired_at(
+                                    card,
+                                    supplier_expired_at
+                                )
                             protected_sales_period_expiry = self._protect_sales_period_expired_at(card)
 
                             # 如果卡片从非激活状态变为激活状态，且是流量池卡，自动加入流量池
@@ -660,7 +833,9 @@ class SyncService:
                                 "iccid": card.iccid,
                                 "status": "success",
                                 "ignored_supplier_activated_at": ignored_supplier_activated_at,
-                                "preserved_local_expiry": preserved_local_expiry if data.get("expired_at") else False,
+                                "preserved_local_expiry": preserved_local_expiry,
+                                "preserved_local_lifecycle_dates": preserved_local_lifecycle_dates,
+                                "filled_local_activated_at": filled_local_activated_at,
                                 "protected_sales_period_expiry": protected_sales_period_expiry
                             })
                         else:
@@ -794,32 +969,42 @@ class SyncService:
 
             # 同步流量（带重试）
             usage_data = await self._retry_api_call(client.get_card_usage, iccid)
-            card.data_used, card.data_used_month, month_usage_reset = self._resolve_usage_data_used(
+            usage_accepted, _, month_usage_reset, usage_reject_reason = self._apply_usage_snapshot(
                 card,
-                usage_data.get("data_used"),
-                usage_data.get("data_used_month"),
-                usage_data.get("data_used_scope")
+                usage_data,
             )
-            card.data_total, _ = self._resolve_usage_data_total(
-                card,
-                usage_data.get("data_total")
-            )
-            card.data_sync_at = datetime.now()
 
             lifecycle_data = {}
             lifecycle_error = None
+            supplier_expired_at = None
+            preserved_local_expiry = False
+            preserved_local_lifecycle_dates = []
             try:
                 lifecycle_data = self._extract_lifecycle_from_usage(usage_data, iccid)
                 if not lifecycle_data.get("status"):
                     lifecycle_data = await self._retry_api_call(client.get_card_lifecycle, iccid)
                 if lifecycle_data.get("test_expire_date"):
-                    card.test_expire_date = datetime.strptime(
+                    supplier_test_expire_date = datetime.strptime(
                         lifecycle_data["test_expire_date"], "%Y-%m-%d"
                     ).date()
+                    card.test_expire_date, preserved_local_date = self._resolve_supplier_lifecycle_date(
+                        card,
+                        "test_expire_date",
+                        supplier_test_expire_date
+                    )
+                    if preserved_local_date:
+                        preserved_local_lifecycle_dates.append("test_expire_date")
                 if lifecycle_data.get("silent_expire_date"):
-                    card.silent_expire_date = datetime.strptime(
+                    supplier_silent_expire_date = datetime.strptime(
                         lifecycle_data["silent_expire_date"], "%Y-%m-%d"
                     ).date()
+                    card.silent_expire_date, preserved_local_date = self._resolve_supplier_lifecycle_date(
+                        card,
+                        "silent_expire_date",
+                        supplier_silent_expire_date
+                    )
+                    if preserved_local_date:
+                        preserved_local_lifecycle_dates.append("silent_expire_date")
                 if lifecycle_data.get("activated_at"):
                     supplier_activated_at = self._parse_supplier_date(lifecycle_data["activated_at"])
                     card.activated_at, _ = self._resolve_lifecycle_activated_at(
@@ -828,7 +1013,7 @@ class SyncService:
                     )
                 if lifecycle_data.get("expired_at"):
                     supplier_expired_at = self._parse_supplier_date(lifecycle_data["expired_at"])
-                    card.expired_at, _ = self._resolve_lifecycle_expired_at(
+                    card.expired_at, preserved_local_expiry = self._resolve_lifecycle_expired_at(
                         card,
                         supplier_expired_at
                     )
@@ -872,6 +1057,12 @@ class SyncService:
             # 先基于本地规则修正基础状态，再处理机卡分离锁卡，避免后续状态机把停机覆盖掉。
             from app.services.card_status_service import check_and_update_card_status
             await check_and_update_card_status(db, card)
+            filled_local_activated_at = self._ensure_activated_at_for_active_status(card)
+            if supplier_expired_at:
+                card.expired_at, preserved_local_expiry = self._resolve_lifecycle_expired_at(
+                    card,
+                    supplier_expired_at
+                )
             protected_sales_period_expiry = self._protect_sales_period_expired_at(card)
 
             if (
@@ -941,15 +1132,23 @@ class SyncService:
                 if old_value != after_snapshot[field_name]
             ]
 
+            final_sync_status = SyncStatus.success if usage_accepted else SyncStatus.partial
             await sync_log_crud.update_status(
-                db, log.id, SyncStatus.success,
-                total_count=1, success_count=1, fail_count=0,
+                db, log.id, final_sync_status,
+                total_count=1,
+                success_count=1 if usage_accepted else 0,
+                fail_count=0 if usage_accepted else 1,
                 sync_data={
                     "usage": usage_data,
                     "lifecycle": lifecycle_data,
                     "lifecycle_error": lifecycle_error,
                     "imei": imei_info,
                     "month_usage_reset": month_usage_reset,
+                    "usage_accepted": usage_accepted,
+                    "usage_reject_reason": usage_reject_reason,
+                    "filled_local_activated_at": filled_local_activated_at,
+                    "preserved_local_expiry": preserved_local_expiry,
+                    "preserved_local_lifecycle_dates": preserved_local_lifecycle_dates,
                     "protected_sales_period_expiry": protected_sales_period_expiry
                 }
             )
@@ -958,9 +1157,10 @@ class SyncService:
                 "sync_no": log.sync_no,
                 "sync_type": "single_card",
                 "total": 1,
-                "success": 1,
-                "failed": 0,
-                "status": "success",
+                "success": 1 if usage_accepted else 0,
+                "failed": 0 if usage_accepted else 1,
+                "status": final_sync_status.value,
+                "usage_reject_reason": usage_reject_reason,
                 "changed": bool(changed_fields),
                 "changed_fields": changed_fields,
                 "device_separation_detection_status": detection_status,

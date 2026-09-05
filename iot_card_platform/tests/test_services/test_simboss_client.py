@@ -259,6 +259,18 @@ async def test_get_traffic_pool_list_normalizes_rows(client):
 
 
 @pytest.mark.asyncio
+async def test_get_supplier_pool_id_uses_supplier_membership(client):
+    with patch.object(client, "_post", AsyncMock(return_value={
+        "code": "0",
+        "data": {"id": 18246, "poolSpecification": -1},
+    })) as mock_post:
+        pool_id = await client._get_supplier_pool_id("8986")
+
+    assert pool_id == "18246"
+    mock_post.assert_awaited_once_with("card/pool/detail", {"iccid": "8986"})
+
+
+@pytest.mark.asyncio
 async def test_suspend_and_resume_send_simboss_status(client):
     mock_post = AsyncMock(return_value={"code": "0", "data": "success"})
     mock_status_payload = AsyncMock(side_effect=[
@@ -266,6 +278,7 @@ async def test_suspend_and_resume_send_simboss_status(client):
         {"status": "activation", "deviceStatus": "ACTIVATED_NAME"},
     ])
     with patch.object(client, "_post", mock_post), \
+         patch.object(client, "_get_supplier_pool_id", AsyncMock(return_value="18246")), \
          patch.object(client, "_get_status_payload", mock_status_payload):
         assert await client.suspend_card("8986") is True
         assert await client.resume_card("8986") is True
@@ -283,6 +296,7 @@ async def test_suspend_and_resume_send_simboss_status(client):
 @pytest.mark.asyncio
 async def test_resume_returns_false_when_device_status_remains_deactivated(client):
     with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": "success"})), \
+         patch.object(client, "_get_supplier_pool_id", AsyncMock(return_value="18246")), \
          patch.object(client, "_get_status_payload", AsyncMock(return_value={
              "status": "activation",
              "deviceStatus": "DEACTIVATED_NAME",
@@ -298,6 +312,7 @@ async def test_resume_returns_false_when_device_status_remains_deactivated(clien
 @pytest.mark.asyncio
 async def test_resume_returns_false_when_status_remains_deactivation(client):
     with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": "success"})), \
+         patch.object(client, "_get_supplier_pool_id", AsyncMock(return_value="18246")), \
          patch.object(client, "_get_status_payload", AsyncMock(return_value={
              "status": "deactivation",
              "deviceStatus": "ACTIVATED_NAME",
@@ -313,6 +328,7 @@ async def test_resume_returns_false_when_status_remains_deactivation(client):
 @pytest.mark.asyncio
 async def test_resume_status_query_failure_keeps_submission_for_reconcile(client):
     with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": "success"})), \
+         patch.object(client, "_get_supplier_pool_id", AsyncMock(return_value="18246")), \
          patch.object(client, "_get_status_payload", AsyncMock(side_effect=TimeoutError("query timeout"))):
         result = await client.resume_card("8986")
 
@@ -337,7 +353,18 @@ async def test_get_card_imei_info_detects_split(client):
     assert result["lock_triggered"] is True
 
 
-def test_simboss_network_switch_only_supports_pool_cards():
+@pytest.mark.asyncio
+async def test_simboss_network_switch_requires_supplier_pool_membership(client):
+    with patch.object(client, "_post", AsyncMock(return_value={"code": "0", "data": {}})) as mock_post:
+        result = await client.resume_card("8986")
+
+    assert result is False
+    assert client.last_sor_result["submitted"] is False
+    assert "供应商流量池归属" in client.last_sor_result["error"]
+    mock_post.assert_awaited_once_with("card/pool/detail", {"iccid": "8986"})
+
+
+def test_simboss_network_switch_does_not_depend_on_local_sale_type():
     supplier = MagicMock()
     supplier.code = "002"
     card = MagicMock()
@@ -346,7 +373,7 @@ def test_simboss_network_switch_only_supports_pool_cards():
     assert SuspendActionService._supplier_supports_network_switch(card, supplier) is True
 
     card.card_type = CardType.single
-    assert SuspendActionService._supplier_supports_network_switch(card, supplier) is False
+    assert SuspendActionService._supplier_supports_network_switch(card, supplier) is True
 
 
 def test_non_simboss_network_switch_keeps_existing_behavior():

@@ -138,7 +138,8 @@ class AccountBalanceService:
             detail=(
                 f"账户余额分配 {amount} 元，分配前 {old_balance} 元，分配后 {new_balance} 元。"
                 f"备注：{remark or ''}"
-            )
+            ),
+            commit=False,
         )
         return {
             "target_user_id": target.id,
@@ -182,7 +183,8 @@ class AccountBalanceService:
             target_type=target_type,
             target_id=target_id,
             target_name=target_name,
-            detail=f"{detail}，消费 {amount} 元，消费前 {old_balance} 元，消费后 {new_balance} 元"
+            detail=f"{detail}，消费 {amount} 元，消费前 {old_balance} 元，消费后 {new_balance} 元",
+            commit=False,
         )
 
         return {

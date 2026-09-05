@@ -508,6 +508,7 @@ class SupplierTrafficPoolService:
             "usage_percent": pool.usage_percent,
             "threshold": alert_threshold,
             "thresholds": " / ".join(f"{item}%" for item in thresholds),
+            "alert_time": beijing_now().strftime("%Y-%m-%d %H:%M:%S"),
             "sync_time": pool.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if pool.last_sync_at else "-",
         }
 
@@ -520,7 +521,8 @@ class SupplierTrafficPoolService:
                     to_email=email,
                     customer_name=pool.supplier_pool_name or pool.supplier_pool_code,
                     pool_alerts=[pool_alert],
-                    card_alerts=[]
+                    card_alerts=[],
+                    copy_super_admins=not sent_any
                 )
                 sent_any = sent_any or sent
             except Exception as exc:

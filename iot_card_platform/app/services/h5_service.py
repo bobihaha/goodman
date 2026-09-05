@@ -52,6 +52,11 @@ class H5Service:
     def _is_enabled(user) -> bool:
         return bool(user.h5_enabled) and (user.h5_status or "enabled") == "enabled"
 
+    @staticmethod
+    def _enforce_verification(user, verify_code: Optional[str] = None) -> None:
+        if bool(getattr(user, "h5_require_verify", False)):
+            raise BusinessException(code=403, msg="验证码服务尚未配置，请联系客服")
+
     async def _get_accessible_user_ids(self, db: AsyncSession, user) -> Optional[List[int]]:
         if user.user_level == UserLevel.SUPER_ADMIN.value:
             return None
@@ -338,9 +343,11 @@ class H5Service:
         db: AsyncSession,
         slug: str,
         card_id: int,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        verify_code: Optional[str] = None,
     ) -> dict:
         user = await self._get_h5_user(db, slug)
+        self._enforce_verification(user, verify_code)
         if not user.h5_allow_suspend:
             raise BusinessException(code=403, msg="当前账号H5未开通停机功能")
 
@@ -388,8 +395,15 @@ class H5Service:
             message="停机成功" if completed else "停机请求已提交，处理中"
         ).model_dump()
 
-    async def resume_card(self, db: AsyncSession, slug: str, card_id: int) -> dict:
+    async def resume_card(
+        self,
+        db: AsyncSession,
+        slug: str,
+        card_id: int,
+        verify_code: Optional[str] = None,
+    ) -> dict:
         user = await self._get_h5_user(db, slug)
+        self._enforce_verification(user, verify_code)
         if not user.h5_allow_resume:
             raise BusinessException(code=403, msg="当前账号H5未开通复机功能")
 
@@ -438,6 +452,7 @@ class H5Service:
 
     async def refresh_card(self, db: AsyncSession, slug: str, card_id: int) -> dict:
         user = await self._get_h5_user(db, slug)
+        self._enforce_verification(user)
         if not user.h5_allow_suspend or not user.h5_allow_resume:
             raise BusinessException(code=403, msg="当前账号H5未同时开通停机和复机功能")
 

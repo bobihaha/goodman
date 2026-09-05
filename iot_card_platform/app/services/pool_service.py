@@ -732,7 +732,12 @@ class PoolService:
 
         self._apply_pool_addon_flow(pool, added_flow_mb)
         await db.flush()
-        pool = await pool_crud.update_stats(db, pool.id)
+        pool = await pool_crud.update_stats(
+            db,
+            pool.id,
+            commit=False,
+            run_checks=False,
+        )
 
         suspended_cards_result = await db.execute(
             select(IotCardModel).where(

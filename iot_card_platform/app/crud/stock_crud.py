@@ -475,10 +475,10 @@ class StockOutCRUD:
         # 记录套餐单价到已出库的卡片（用于续费价格锁定）
         if sale_package_row and sale_package_row.price_sale:
             sale_price_decimal = sale_package_row.price_sale
-            for card_id in card_ids:
+            for card_info in out_card_infos:
                 await db.execute(
                     text("UPDATE iot_cards SET sale_price = :sale_price WHERE id = :card_id"),
-                    {"sale_price": sale_price_decimal, "card_id": card_id}
+                    {"sale_price": sale_price_decimal, "card_id": card_info["card_id"]}
                 )
         
         # 创建新表记录（stock_out_records）

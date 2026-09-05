@@ -85,6 +85,8 @@ class CardInfo(BaseModel):
     data_remain: int = 0
     data_usage_percent: float = 0
     data_sync_at: Optional[str] = None
+    data_source_at: Optional[str] = None
+    data_usage_month: Optional[str] = None
     latest_imei: Optional[str] = None
     previous_imei: Optional[str] = None
     imei_device_name: Optional[str] = None
@@ -211,7 +213,7 @@ class CardRenewQuoteRequest(BaseModel):
 
 class CardExportRequest(BaseModel):
     """卡片导出请求"""
-    card_ids: Optional[List[int]] = Field(None, description="指定卡片ID列表 (为空则导出全部)")
+    card_ids: Optional[List[int]] = Field(None, max_length=10000, description="指定卡片ID列表 (为空则导出全部)")
     keyword: Optional[str] = Field(None, description="关键词")
     status: Optional[CardStatus] = Field(None, description="按状态筛选")
     carrier: Optional[CarrierType] = Field(None, description="按运营商筛选")
@@ -227,3 +229,10 @@ class CardExportRequest(BaseModel):
     activated_end: Optional[str] = Field(None, description="激活结束日期 YYYY-MM-DD")
     expired_start: Optional[str] = Field(None, description="到期开始日期 YYYY-MM-DD")
     expired_end: Optional[str] = Field(None, description="到期结束日期 YYYY-MM-DD")
+
+
+class CardHistoryExportRequest(CardExportRequest):
+    """卡片历史用量导出请求。"""
+    card_ids: Optional[List[int]] = Field(None, max_length=2000, description="指定卡片ID列表")
+    start_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")

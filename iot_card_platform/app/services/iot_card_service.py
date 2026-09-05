@@ -960,6 +960,8 @@ class IotCardService:
         expired_end: Optional[str] = None
     ) -> List[dict]:
         """导出卡片数据"""
+        if card_ids and len(card_ids) > settings.max_export_size:
+            raise BusinessException(code=400, msg=f"单次最多导出 {settings.max_export_size} 张卡片")
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
 
         if card_ids:
@@ -2003,6 +2005,33 @@ class IotCardService:
         from app.crud.iot_card_crud import card_usage_history_crud
         from datetime import datetime
 
+        if card_ids and len(card_ids) > settings.max_history_export_size:
+            raise BusinessException(
+                code=400,
+                msg=f"单次最多导出 {settings.max_history_export_size} 张卡片的历史用量",
+            )
+
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
+            end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else date.today()
+        except ValueError as exc:
+            raise BusinessException(code=400, msg="日期格式必须为 YYYY-MM-DD") from exc
+
+        if start is None:
+            month_offset = settings.max_history_export_months - 1
+            month_index = end.year * 12 + end.month - 1 - month_offset
+            start_year, start_month_index = divmod(month_index, 12)
+            start_month = start_month_index + 1
+            start = date(start_year, start_month, 1)
+        month_count = (end.year - start.year) * 12 + end.month - start.month + 1
+        if start > end:
+            raise BusinessException(code=400, msg="开始日期不能晚于结束日期")
+        if month_count > settings.max_history_export_months:
+            raise BusinessException(
+                code=400,
+                msg=f"历史用量导出时间范围最多 {settings.max_history_export_months} 个月",
+            )
+
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
         if card_ids:
             cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
@@ -2030,16 +2059,23 @@ class IotCardService:
                 expired_start=expired_start,
                 expired_end=expired_end,
                 page=1,
-                page_size=100000
+                page_size=settings.max_history_export_size + 1
+            )
+        if len(cards) > settings.max_history_export_size:
+            raise BusinessException(
+                code=400,
+                msg=f"筛选结果超过 {settings.max_history_export_size} 张，请缩小范围后再导出",
             )
         if not cards:
             return []
 
-        start = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
-        end = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
-
         card_ids_list = [c.id for c in cards]
-        history_records = await card_usage_history_crud.get_cards_history(db, card_ids_list, start, end)
+        history_records = await card_usage_history_crud.get_cards_monthly_history(
+            db,
+            card_ids_list,
+            start,
+            end,
+        )
 
         history_map = {}
         for h in history_records:
@@ -2048,21 +2084,15 @@ class IotCardService:
             history_map[h.card_id].append(h)
 
         month_labels: List[str] = []
-        if start and end:
-            cursor_year = start.year
-            cursor_month = start.month
-            while (cursor_year, cursor_month) <= (end.year, end.month):
-                month_labels.append(f"{cursor_year:04d}-{cursor_month:02d}")
-                if cursor_month == 12:
-                    cursor_year += 1
-                    cursor_month = 1
-                else:
-                    cursor_month += 1
-        else:
-            month_labels = sorted({
-                (h.snapshot_month or h.snapshot_date.strftime("%Y-%m"))
-                for h in history_records
-            })
+        cursor_year = start.year
+        cursor_month = start.month
+        while (cursor_year, cursor_month) <= (end.year, end.month):
+            month_labels.append(f"{cursor_year:04d}-{cursor_month:02d}")
+            if cursor_month == 12:
+                cursor_year += 1
+                cursor_month = 1
+            else:
+                cursor_month += 1
 
         export_data = []
         for card in cards:

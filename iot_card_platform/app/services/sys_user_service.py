@@ -27,6 +27,14 @@ UNLIMITED_QUOTA = -1
 
 
 class SysUserService:
+    FINANCIAL_QUOTA_FIELDS = {
+        "account_balance",
+        "last_grant_at",
+        "last_grant_amount",
+        "last_grant_before_balance",
+        "last_grant_operator_id",
+        "last_grant_request_id",
+    }
     DEFAULT_USER_PERMISSION_MODULES = ["dashboard", "user", "card", "renewal", "pool", "system"]
     DEFAULT_USER_MENU_CODES = [
         "dashboard",
@@ -216,6 +224,23 @@ class SysUserService:
         update_dict = user_data.model_dump(exclude_unset=True)
         if not update_dict:
             raise BusinessException(code=400, msg="没有需要更新的字段")
+
+        if operator.id == target_user.id and ({"quota", "status"} & update_dict.keys()):
+            raise PermissionDeniedException()
+        if "quota" in update_dict:
+            if not operator.is_super_admin():
+                raise PermissionDeniedException()
+            current_quota = dict(target_user.quota or {})
+            requested_quota = {
+                **current_quota,
+                **dict(update_dict["quota"] or {}),
+            }
+            for field in cls.FINANCIAL_QUOTA_FIELDS:
+                if field in current_quota:
+                    requested_quota[field] = current_quota[field]
+                else:
+                    requested_quota.pop(field, None)
+            update_dict["quota"] = requested_quota
         
         user = await sys_user_crud.update(db, id=user_id, obj_in=update_dict)
         return cls._build_user_info(user)
@@ -284,7 +309,11 @@ class SysUserService:
         if not AuthService.verify_password(password_data.old_password, user.password):
             raise BusinessException(code=400, msg="旧密码错误")
         new_password_hash = AuthService.hash_password(password_data.new_password)
-        await sys_user_crud.update(db, id=operator.id, obj_in={"password": new_password_hash})
+        await sys_user_crud.update(
+            db,
+            id=operator.id,
+            obj_in={"password": new_password_hash, "token_version": int(user.token_version or 0) + 1},
+        )
         return True
 
     @classmethod
@@ -294,9 +323,15 @@ class SysUserService:
         target_user = await sys_user_crud.get_by_id(db, user_id)
         if not target_user:
             raise UserNotFoundException()
+        if operator.id == target_user.id:
+            raise BusinessException(code=403, msg="请使用修改密码功能并验证旧密码")
         cls._check_manage_permission(operator, target_user)
         new_password_hash = AuthService.hash_password(password_data.new_password)
-        await sys_user_crud.update(db, id=user_id, obj_in={"password": new_password_hash})
+        await sys_user_crud.update(
+            db,
+            id=user_id,
+            obj_in={"password": new_password_hash, "token_version": int(target_user.token_version or 0) + 1},
+        )
         return True
     
     @classmethod
@@ -304,8 +339,17 @@ class SysUserService:
         target_user = await sys_user_crud.get_by_id(db, user_id)
         if not target_user:
             raise UserNotFoundException()
+        if operator.id == target_user.id:
+            raise PermissionDeniedException()
         cls._check_manage_permission(operator, target_user)
-        user = await sys_user_crud.update(db, id=user_id, obj_in={"status": status})
+        user = await sys_user_crud.update(
+            db,
+            id=user_id,
+            obj_in={
+                "status": status,
+                "token_version": int(getattr(target_user, "token_version", 0) or 0) + 1,
+            },
+        )
         return cls._build_user_info(user)
 
     @classmethod

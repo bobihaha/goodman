@@ -215,6 +215,10 @@ class AlertLogModel(BaseModel):
     alert_level = Column(Enum(AlertLevel), nullable=False, comment="告警级别")
     usage_percent = Column(Integer, nullable=False, comment="当前用量百分比")
     threshold = Column(Integer, nullable=False, comment="触发阈值")
+    data_used_snapshot = Column(BigInteger, nullable=True, comment="告警时已用流量快照(MB)")
+    data_total_snapshot = Column(BigInteger, nullable=True, comment="告警时总流量快照(MB)")
+    remaining_flow_snapshot = Column(BigInteger, nullable=True, comment="告警时剩余流量快照(MB)")
+    sync_at_snapshot = Column(DateTime, nullable=True, comment="告警时流量同步时间快照")
     
     # 关联
     policy_id = Column(BigInteger, nullable=True, comment="触发策略ID")
@@ -241,6 +245,10 @@ class AlertLogModel(BaseModel):
             "alert_level_name": ALERT_LEVEL_NAMES.get(self.alert_level.value, "") if self.alert_level else None,
             "usage_percent": self.usage_percent,
             "threshold": self.threshold,
+            "data_used_snapshot": self.data_used_snapshot,
+            "data_total_snapshot": self.data_total_snapshot,
+            "remaining_flow_snapshot": self.remaining_flow_snapshot,
+            "sync_at_snapshot": self.sync_at_snapshot.isoformat() if self.sync_at_snapshot else None,
             "policy_id": self.policy_id,
             "user_id": self.user_id,
             "notified": self.notified == 1,

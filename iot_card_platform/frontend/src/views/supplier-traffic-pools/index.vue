@@ -191,8 +191,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import * as echarts from 'echarts'
-import type { ECharts } from 'echarts'
+import { echarts, type ECharts } from '@/utils/echarts'
 import * as XLSX from 'xlsx'
 import {
   exportSupplierTrafficPoolHistories,
