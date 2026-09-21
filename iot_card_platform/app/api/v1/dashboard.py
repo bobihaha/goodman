@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.utils.auth import get_current_user
 from app.schemas.common import ResponseModel
 from app.services.dashboard_service import DashboardService
+from app.services.pool_service import pool_service
 
 router = APIRouter()
 
@@ -114,7 +115,7 @@ async def get_pool_stats(
     """获取流量池统计数据"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
-    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
+    user_ids = await pool_service._get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
     stats = await DashboardService.get_pool_stats(db, user_id, user_ids)
     return ResponseModel(data=stats.model_dump())
@@ -151,7 +152,7 @@ async def get_pools_usage_percent(
     """获取流量池用量百分比"""
     is_admin = current_user.user_level == 1
     user_id = None if is_admin else current_user.id
-    user_ids = await DashboardService.get_accessible_user_ids(db, current_user.id, current_user.user_level)
+    user_ids = await pool_service._get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
     pools = await DashboardService.get_pools_usage_percent(db, user_id, user_ids)
     return ResponseModel(data=pools)

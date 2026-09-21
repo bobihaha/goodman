@@ -302,7 +302,10 @@ class DashboardService:
         cards = await DashboardService.get_card_stats(db, card_user_id, user_ids)
         users = await DashboardService.get_user_stats(db, user_id, user_level)
         packages = await DashboardService.get_package_stats(db)
-        pools = await DashboardService.get_pool_stats(db, card_user_id, user_ids)
+        from app.services.pool_service import pool_service
+
+        pool_user_ids = await pool_service._get_accessible_user_ids(db, user_id, user_level)
+        pools = await DashboardService.get_pool_stats(db, user_ids=pool_user_ids)
         alerts = await DashboardService.get_alert_stats(db, card_user_id, user_ids)
 
         return DashboardOverview(

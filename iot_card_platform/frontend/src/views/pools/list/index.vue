@@ -12,6 +12,16 @@
             @clear="handleSearch"
           />
         </el-form-item>
+        <el-form-item label="客户名称">
+          <el-input
+            v-model="searchForm.customer_name"
+            placeholder="请输入客户名称"
+            clearable
+            style="width: 200px"
+            @clear="handleSearch"
+            @keyup.enter="handleSearch"
+          />
+        </el-form-item>
         <el-form-item label="运营商">
           <el-select
             v-model="searchForm.carrier"
@@ -120,6 +130,8 @@
             查看详情 <el-icon><ArrowRight /></el-icon>
           </el-button>
         </div>
+
+        <p class="pool-customer">所属客户：{{ pool.user_name || (pool.user_id ? '客户名称不可用' : '平台公共池') }}</p>
 
         <!-- 流量使用情况 -->
         <div class="pool-usage">
@@ -252,6 +264,7 @@ const router = useRouter()
 // 搜索表单
 const searchForm = reactive<PoolListParams>({
   name: '',
+  customer_name: '',
   carrier: undefined,
   status: undefined,
   is_alert: undefined
@@ -343,6 +356,7 @@ const handlePageSizeChange = () => {
 const handleReset = () => {
   Object.assign(searchForm, {
     name: '',
+    customer_name: '',
     carrier: undefined,
     status: undefined,
     is_alert: undefined
@@ -510,6 +524,12 @@ onMounted(() => {
             color: #000000;
           }
         }
+      }
+
+      .pool-customer {
+        margin: 0 0 10px;
+        font-size: 13px;
+        overflow-wrap: anywhere;
       }
 
       .pool-usage {

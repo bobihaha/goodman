@@ -1,0 +1,15 @@
+# 流量池客户查询与直属下级可见范围；无 SQL、无配置变更
+# 版本：3.1.26
+# 生产备份：release_backups/20260921_102053_pool_direct_customer_scope_20260921
+# 验证：独立暂存快照 16 项测试通过；生产 Docker 前端构建通过；四个容器健康
+# 观察：30 分钟内四个容器持续健康、HTTPS 健康检查通过，后端日志未检出异常
+# 业务验收：55 个账号列表/统计、33 次客户查询、54 次越权详情拦截均通过
+# 回滚：恢复备份 files/source_files_20260921_102053.tar.gz 后重建 app、frontend；无需恢复数据库
+app/api/v1/pool.py
+app/api/v1/dashboard.py
+app/crud/pool_crud.py
+app/services/pool_service.py
+app/services/dashboard_service.py
+frontend/src/types/pool.d.ts
+frontend/src/views/pools/list/index.vue
+frontend/src/views/pools/detail/index.vue

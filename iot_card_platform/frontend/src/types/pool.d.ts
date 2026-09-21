@@ -53,6 +53,7 @@ export interface PoolListParams {
   page?: number
   page_size?: number
   name?: string
+  customer_name?: string
   carrier?: Carrier
   sale_package_id?: number
   status?: PoolStatus

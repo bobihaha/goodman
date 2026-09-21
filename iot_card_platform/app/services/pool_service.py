@@ -92,16 +92,14 @@ class PoolService:
         db: AsyncSession,
         current_user_id: int,
         user_level: int
-    ) -> Optional[List[int]]:
-        """获取当前用户可见的用户范围"""
-        if user_level == UserLevel.SUPER_ADMIN.value:
-            return None
+    ) -> List[int]:
+        """所有账号（含超级管理员）仅可见本人及直属下级。"""
 
         if user_level == UserLevel.SUB_USER.value:
             return [current_user_id]
 
         sys_user_crud = SysUserCRUDEnhanced()
-        child_ids = await sys_user_crud.get_children_ids(db, current_user_id)
+        child_ids = await sys_user_crud.get_children_ids(db, current_user_id, max_depth=1)
         return [current_user_id, *child_ids]
 
     async def _get_pool_in_scope(
@@ -192,7 +190,8 @@ class PoolService:
         status: Optional[str] = None,
         is_alert: Optional[bool] = None,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        customer_name: Optional[str] = None
     ) -> Tuple[List[dict], int]:
         """获取流量池列表"""
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
@@ -200,6 +199,7 @@ class PoolService:
             db=db,
             user_ids=user_ids,
             name=name,
+            customer_name=customer_name,
             carrier=carrier,
             status=status,
             is_alert=is_alert,

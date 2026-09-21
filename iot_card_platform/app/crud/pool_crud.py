@@ -85,31 +85,10 @@ class TrafficPoolCRUD:
         )
 
     def _apply_user_scope(self, query, user_ids: Optional[List[int]] = None):
-        """按用户可见范围过滤流量池。
-
-        可见流量池包括：
-        1. 流量池归属在当前可见用户范围内
-        2. 当前可见用户名下有卡片加入的共享流量池
-        """
+        """仅按池归属过滤，防止共享池成员关联暴露范围外客户的用量。"""
         if user_ids is None:
             return query
-
-        visible_pool_ids = (
-            select(IotCardModel.pool_id)
-            .where(
-                IotCardModel.user_id.in_(user_ids),
-                IotCardModel.pool_id.is_not(None),
-                IotCardModel.is_pool_member == 1,
-                IotCardModel.is_deleted == 0
-            )
-            .distinct()
-        )
-        return query.where(
-            or_(
-                TrafficPoolModel.user_id.in_(user_ids),
-                TrafficPoolModel.id.in_(visible_pool_ids)
-            )
-        )
+        return query.where(TrafficPoolModel.user_id.in_(user_ids))
 
     async def create(
         self,
@@ -179,7 +158,8 @@ class TrafficPoolCRUD:
         status: Optional[str] = None,
         is_alert: Optional[bool] = None,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        customer_name: Optional[str] = None
     ) -> Tuple[List[TrafficPoolModel], int]:
         """获取流量池列表"""
         query = select(TrafficPoolModel).where(TrafficPoolModel.is_deleted == 0)
@@ -196,6 +176,16 @@ class TrafficPoolCRUD:
         if name:
             query = query.where(TrafficPoolModel.name.like(f"%{name}%"))
             count_query = count_query.where(TrafficPoolModel.name.like(f"%{name}%"))
+        if customer_name and customer_name.strip():
+            from app.db.models.sys_user import SysUserModel
+
+            customer_ids = select(SysUserModel.id).where(
+                SysUserModel.is_deleted == 0,
+                SysUserModel.name.contains(customer_name.strip(), autoescape=True),
+            )
+            customer_condition = TrafficPoolModel.user_id.in_(customer_ids)
+            query = query.where(customer_condition)
+            count_query = count_query.where(customer_condition)
         if carrier:
             query = query.where(TrafficPoolModel.carrier == carrier)
             count_query = count_query.where(TrafficPoolModel.carrier == carrier)

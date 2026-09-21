@@ -10,6 +10,8 @@
       </template>
     </el-page-header>
 
+    <p>所属客户：{{ poolDetail.user_name || (poolDetail.user_id ? '客户名称不可用' : '平台公共池') }}</p>
+
     <!-- 操作按钮 -->
     <div class="action-buttons">
       <el-button type="primary" @click="handleRecharge">后台补量</el-button>

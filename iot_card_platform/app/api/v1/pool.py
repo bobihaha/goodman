@@ -22,6 +22,7 @@ router = APIRouter(tags=["流量池管理"])
 @router.get("", summary="获取流量池列表", response_model=ResponseModel)
 async def get_pools(
     name: Optional[str] = Query(None, description="流量池名称(模糊搜索)"),
+    customer_name: Optional[str] = Query(None, description="客户名称(模糊搜索)"),
     carrier: Optional[str] = Query(None, description="运营商: cmcc/cucc/ctcc"),
     status: Optional[str] = Query(None, description="状态: enable/disable"),
     is_alert: Optional[bool] = Query(None, description="告警状态: true=告警中, false=未告警"),
@@ -32,14 +33,14 @@ async def get_pools(
 ):
     """
     获取流量池列表
-    - 超级管理员: 可查看所有流量池
-    - 普通用户: 只能查看自己的流量池
+    - 所有账号（含超级管理员）: 可查看自己和直属下级的流量池，不可查看下下级
     """
     items, total = await pool_service.get_pools(
         db=db,
         current_user_id=current_user.id,
         user_level=current_user.user_level,
         name=name,
+        customer_name=customer_name,
         carrier=carrier,
         status=status,
         is_alert=is_alert,
@@ -101,7 +102,7 @@ async def create_pool(
     - 需要指定规格 (运营商+流量+周期)
     - 只有相同规格的已激活卡才能加入此池
     """
-    user_id = None if current_user.user_level == 1 else current_user.id
+    user_id = current_user.id
 
     pool = await pool_service.create_pool(
         db=db,
