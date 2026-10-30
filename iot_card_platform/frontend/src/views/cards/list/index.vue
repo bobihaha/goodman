@@ -15,7 +15,7 @@
           </div>
         </el-col>
         <el-col :span="6">
-          <div class="stat-card">
+          <button type="button" class="stat-card stat-card-clickable" @click="handleStatusFilter('activated')">
             <div class="stat-icon activated">
               <el-icon><CircleCheck /></el-icon>
             </div>
@@ -23,10 +23,10 @@
               <div class="stat-value">{{ stats.activated }}</div>
               <div class="stat-label">已激活</div>
             </div>
-          </div>
+          </button>
         </el-col>
         <el-col :span="6">
-          <div class="stat-card">
+          <button type="button" class="stat-card stat-card-clickable" @click="handleStatusFilter('silent')">
             <div class="stat-icon silent">
               <el-icon><Clock /></el-icon>
             </div>
@@ -34,10 +34,10 @@
               <div class="stat-value">{{ stats.silent }}</div>
               <div class="stat-label">沉默期</div>
             </div>
-          </div>
+          </button>
         </el-col>
         <el-col :span="6">
-          <div class="stat-card">
+          <button type="button" class="stat-card stat-card-clickable" @click="handleStatusFilter('suspended')">
             <div class="stat-icon suspended">
               <el-icon><WarningFilled /></el-icon>
             </div>
@@ -45,7 +45,7 @@
               <div class="stat-value">{{ stats.suspended }}</div>
               <div class="stat-label">已停机</div>
             </div>
-          </div>
+          </button>
         </el-col>
       </el-row>
     </div>
@@ -1326,6 +1326,16 @@ const handleSearch = () => {
   fetchCardList()
 }
 
+// 统计卡快捷筛选
+const handleStatusFilter = (status: 'activated' | 'silent' | 'suspended') => {
+  searchForm.status = status
+  isBatchQueryMode.value = false
+  batchQueryIccids.value = []
+  batchQueryNotFound.value = []
+  clearSelection()
+  handleSearch()
+}
+
 // 重置
 const handleReset = () => {
   Object.assign(searchForm, {
@@ -1808,6 +1818,20 @@ onMounted(() => {
   border-radius: 8px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   transition: all 0.3s;
+
+  &.stat-card-clickable {
+    width: 100%;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--el-color-primary);
+      outline-offset: 2px;
+    }
+  }
 
   &:hover {
     transform: translateY(-2px);

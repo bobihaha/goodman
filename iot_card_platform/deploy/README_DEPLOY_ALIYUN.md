@@ -51,6 +51,21 @@ ssh -i /Users/renhui/Desktop/aliyun.pem -p 22222 deploy@47.100.81.73
 - HTTPS 域名：`zerodaai.com` / `www.zerodaai.com`
 - HTTPS 证书目录：`/home/deploy/iot_card_platform/certs`
 
+### 2026-10-30 卡片列表统计卡点击修复
+
+- 仅发布 `frontend/src/views/cards/list/index.vue` 中“沉默期”“已停机”点击筛选修复；使用生产原文件对比后的隔离发布包，排除本地未发布的 `over_usage` 重置修改。无 SQL、环境变量或后端变更。
+- 使用文件清单发布脚本的临时副本执行备份及发布，前端启动命令增加 `--no-deps`，仅重建前端，后端保持运行。
+- 备份：`/home/deploy/iot_card_platform/release_backups/20261030_112116_card_status_click_20261030`，包含 MySQL、Redis 和原页面文件。
+- 验证：生产 Vite 镜像构建通过，四个容器健康，`check_system.sh` 通过；两个 HTTPS 域名返回 200，HTTP 返回 301，公网页面 JS/CSS 已包含修复。筛选逻辑及 Vue 编译在本地通过；本地全量类型检查未完成，验收浏览器无登录会话，登录后的点击验收及 30–60 分钟观察尚未完成。
+- 回滚：从上述备份的 `files/source_files_20261030_112116.tar.gz` 恢复原页面文件，执行 `docker compose up -d --no-deps --build frontend`，随后执行健康检查；本次无需恢复数据库。
+
+#### 同日追加：已激活统计卡
+
+- 追加发布“已激活”统计卡，复用相同的状态筛选、分页重置及批量查询退出逻辑；发布范围仍仅为上述页面，未包含本地其他修改。
+- 备份：`/home/deploy/iot_card_platform/release_backups/20261030_112858_card_activated_click_20261030`，包含 MySQL、Redis 和追加发布前的页面。
+- 验证：三个状态入口的针对性逻辑验证及 Vue 脚本/模板编译通过；生产镜像构建、`check_system.sh` 和公网 HTTPS 检查通过，四个容器健康，公网 JS 确认包含三个状态点击绑定。验收浏览器无登录会话，实际登录点击及长时间观察尚未完成；本地完整 Vite 构建被 esbuild 依赖异常阻塞。
+- 追加发布回滚：从此次备份的 `files/source_files_20261030_112858.tar.gz` 恢复页面并仅重建前端，可保留首次发布的沉默期、已停机修复；完全回滚两次修改则使用首次备份。
+
 登录后建议先执行：
 
 ```bash
