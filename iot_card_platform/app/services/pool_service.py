@@ -20,6 +20,7 @@ from app.services.suspend_service import SuspendActionService
 from app.services.account_balance_service import account_balance_service
 from app.flow_packages import get_current_flow_cycle_month, is_flow_cycle_active
 from app.utils.exceptions import BusinessException
+from app.services.sub_user_pool_service import sub_user_pool_service
 
 
 class PoolService:
@@ -171,6 +172,8 @@ class PoolService:
         user_level: int
     ) -> dict:
         """获取流量池详情"""
+        if user_level == UserLevel.SUB_USER.value:
+            return await sub_user_pool_service.get_pool(db, current_user_id, pool_id)
         await self._get_pool_in_scope(db, pool_id, current_user_id, user_level)
         pool = await pool_crud.update_stats(db, pool_id)
         if not pool:
@@ -194,6 +197,13 @@ class PoolService:
         customer_name: Optional[str] = None
     ) -> Tuple[List[dict], int]:
         """获取流量池列表"""
+        if user_level == UserLevel.SUB_USER.value:
+            items = await sub_user_pool_service.get_pools(
+                db, current_user_id, name=name, customer_name=customer_name,
+                carrier=carrier, status=status, is_alert=is_alert,
+            )
+            offset = (page - 1) * page_size
+            return items[offset:offset + page_size], len(items)
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
         items, total = await pool_crud.get_list(
             db=db,
@@ -400,7 +410,10 @@ class PoolService:
     ) -> Tuple[List[dict], int]:
         """获取流量池内卡片列表"""
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
-        await self._get_pool_in_scope(db, pool_id, current_user_id, user_level)
+        if user_level == UserLevel.SUB_USER.value:
+            await sub_user_pool_service.get_pool(db, current_user_id, pool_id)
+        else:
+            await self._get_pool_in_scope(db, pool_id, current_user_id, user_level)
 
         items, total = await pool_card_crud.get_pool_cards(
             db=db, pool_id=pool_id, user_ids=user_ids, page=page, page_size=page_size
@@ -414,6 +427,8 @@ class PoolService:
         user_level: int
     ) -> dict:
         """获取流量池总体统计"""
+        if user_level == UserLevel.SUB_USER.value:
+            return await sub_user_pool_service.get_stats(db, current_user_id)
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
         stats = await pool_crud.get_stats(db, user_ids=user_ids)
         return stats
@@ -426,6 +441,21 @@ class PoolService:
         user_level: int
     ) -> dict:
         """获取流量池用量统计"""
+        if user_level == UserLevel.SUB_USER.value:
+            pool = await sub_user_pool_service.get_pool(db, current_user_id, pool_id)
+            cards, _ = await pool_card_crud.get_pool_cards(
+                db, pool_id, user_ids=[current_user_id], page=1, page_size=1000,
+            )
+            return {
+                **{key: pool[key] for key in (
+                    "spec_name", "card_count", "data_total", "data_used", "usage_percent",
+                    "alert_threshold_1", "alert_threshold_2", "alert_threshold_3", "is_alert", "is_exceed",
+                )},
+                "pool_id": pool_id, "pool_name": pool["name"],
+                "data_remain": pool["data_remaining"],
+                "cards": [{"card_id": c.id, "iccid": c.iccid, "data_used": c.data_used,
+                           "data_total": c.data_total, "usage_percent": c.get_data_usage_percent()} for c in cards],
+            }
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
         pool = await self._get_pool_in_scope(db, pool_id, current_user_id, user_level)
 

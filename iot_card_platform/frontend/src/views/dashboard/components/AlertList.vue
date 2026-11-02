@@ -39,13 +39,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Warning, CircleClose, InfoFilled } from '@element-plus/icons-vue'
 import { dashboardApi, type Alert } from '@/api'
 import { formatRelativeTime } from '@/utils/formatter'
 
 const loading = ref(false)
 const alerts = ref<Alert[]>([])
+const emit = defineEmits<{ (e: 'view-all'): void }>()
 
 // 获取告警数据
 const fetchAlerts = async () => {
@@ -61,7 +61,7 @@ const fetchAlerts = async () => {
 
 // 查看全部
 const handleViewAll = () => {
-  ElMessage.info('跳转到告警管理页面')
+  emit('view-all')
 }
 
 onMounted(() => {

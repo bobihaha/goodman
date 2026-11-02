@@ -131,7 +131,7 @@
           </el-button>
         </div>
 
-        <p class="pool-customer">所属客户：{{ pool.user_name || (pool.user_id ? '客户名称不可用' : '平台公共池') }}</p>
+        <p v-if="pool.statistics_scope !== 'assigned_cards'" class="pool-customer">所属客户：{{ pool.user_name || (pool.user_id ? '客户名称不可用' : '平台公共池') }}</p>
 
         <!-- 流量使用情况 -->
         <div class="pool-usage">
@@ -188,7 +188,7 @@
         </div>
 
         <!-- 操作按钮 -->
-        <div class="pool-actions" @click.stop>
+        <div v-if="!pool.read_only" class="pool-actions" @click.stop>
           <el-button size="small" @click="handleEdit(pool)">告警设置</el-button>
           <el-button size="small" type="warning" plain @click="handleRecharge(pool)">后台补量</el-button>
           <el-button

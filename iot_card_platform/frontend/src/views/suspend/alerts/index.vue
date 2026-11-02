@@ -62,7 +62,7 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column v-if="!readOnly" label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="!row.handled"
@@ -122,10 +122,14 @@ import { getAlerts, handleAlert, type SuspendAlert } from '@/api/modules/suspend
 import dayjs from 'dayjs'
 
 const loading = ref(false)
+const props = withDefaults(defineProps<{
+  readOnly?: boolean
+  initialHandled?: boolean | ''
+}>(), { readOnly: false, initialHandled: '' })
 const alertList = ref<SuspendAlert[]>([])
 const filterType = ref('')
 const filterLevel = ref('')
-const filterHandled = ref<boolean | ''>('')
+const filterHandled = ref<boolean | ''>(props.initialHandled)
 
 const pagination = reactive({
   page: 1,

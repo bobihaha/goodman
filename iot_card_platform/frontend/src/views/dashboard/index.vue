@@ -57,7 +57,7 @@
           :extra="overview?.alerts?.unhandled ? '需要处理' : '一切正常'"
           :extra-color="overview?.alerts?.unhandled ? '#ff4d4f' : '#52c41a'"
           clickable
-          @click="router.push('/suspend/alerts')"
+          @click="alertDialogVisible = true"
         />
       </div>
     </div>
@@ -92,8 +92,11 @@
 
     <!-- 告警列表 -->
     <div class="alert-section">
-      <alert-list />
+      <alert-list @view-all="alertDialogVisible = true" />
     </div>
+    <el-dialog v-model="alertDialogVisible" title="告警消息" width="90%" destroy-on-close>
+      <suspend-alerts v-if="alertDialogVisible" read-only :initial-handled="false" />
+    </el-dialog>
   </div>
 </template>
 
@@ -101,6 +104,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import SuspendAlerts from '@/views/suspend/alerts/index.vue'
 import { 
   Refresh, 
   CreditCard, 
@@ -122,6 +126,7 @@ import AlertList from './components/AlertList.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
+const alertDialogVisible = ref(false)
 
 // 用户信息
 const userInfo = computed(() => authStore.userInfo)

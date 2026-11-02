@@ -232,10 +232,15 @@ class DashboardService:
     async def get_pool_stats(
         db: AsyncSession,
         user_id: Optional[int] = None,
-        user_ids: Optional[List[int]] = None
+        user_ids: Optional[List[int]] = None,
+        member_user_id: Optional[int] = None,
     ) -> PoolStats:
         """获取流量池统计"""
-        stats = await pool_crud.get_stats(db, user_id=user_id, user_ids=user_ids)
+        if member_user_id is not None:
+            from app.services.sub_user_pool_service import sub_user_pool_service
+            stats = await sub_user_pool_service.get_stats(db, member_user_id)
+        else:
+            stats = await pool_crud.get_stats(db, user_id=user_id, user_ids=user_ids)
         total_pools = stats["total"]
         total_data = stats["total_flow"]
         used_data = stats["used_flow"]
@@ -305,7 +310,9 @@ class DashboardService:
         from app.services.pool_service import pool_service
 
         pool_user_ids = await pool_service._get_accessible_user_ids(db, user_id, user_level)
-        pools = await DashboardService.get_pool_stats(db, user_ids=pool_user_ids)
+        pools = await DashboardService.get_pool_stats(
+            db, user_ids=pool_user_ids, member_user_id=user_id if user_level == 3 else None,
+        )
         alerts = await DashboardService.get_alert_stats(db, card_user_id, user_ids)
 
         return DashboardOverview(
@@ -447,9 +454,16 @@ class DashboardService:
     async def get_pools_usage_percent(
         db: AsyncSession,
         user_id: Optional[int] = None,
-        user_ids: Optional[List[int]] = None
+        user_ids: Optional[List[int]] = None,
+        member_user_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """获取流量池用量百分比"""
+        if member_user_id is not None:
+            from app.services.sub_user_pool_service import sub_user_pool_service
+            pools = await sub_user_pool_service.get_pools(db, member_user_id)
+            return [{key: pool[key] for key in (
+                "id", "name", "carrier", "data_total", "data_used", "usage_percent", "card_count", "is_alert",
+            )} for pool in pools[:10]]
         pools, _ = await pool_crud.get_list(
             db=db,
             user_id=user_id,

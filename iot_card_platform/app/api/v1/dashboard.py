@@ -117,7 +117,9 @@ async def get_pool_stats(
     user_id = None if is_admin else current_user.id
     user_ids = await pool_service._get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
-    stats = await DashboardService.get_pool_stats(db, user_id, user_ids)
+    stats = await DashboardService.get_pool_stats(
+        db, user_id, user_ids, member_user_id=current_user.id if current_user.user_level == 3 else None,
+    )
     return ResponseModel(data=stats.model_dump())
 
 
@@ -154,7 +156,9 @@ async def get_pools_usage_percent(
     user_id = None if is_admin else current_user.id
     user_ids = await pool_service._get_accessible_user_ids(db, current_user.id, current_user.user_level)
     
-    pools = await DashboardService.get_pools_usage_percent(db, user_id, user_ids)
+    pools = await DashboardService.get_pools_usage_percent(
+        db, user_id, user_ids, member_user_id=current_user.id if current_user.user_level == 3 else None,
+    )
     return ResponseModel(data=pools)
 
 

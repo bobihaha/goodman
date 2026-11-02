@@ -10,10 +10,10 @@
       </template>
     </el-page-header>
 
-    <p>所属客户：{{ poolDetail.user_name || (poolDetail.user_id ? '客户名称不可用' : '平台公共池') }}</p>
+    <p v-if="poolDetail.statistics_scope !== 'assigned_cards'">所属客户：{{ poolDetail.user_name || (poolDetail.user_id ? '客户名称不可用' : '平台公共池') }}</p>
 
     <!-- 操作按钮 -->
-    <div class="action-buttons">
+    <div v-if="!poolDetail.read_only && authStore.userInfo?.user_level !== 3" class="action-buttons">
       <el-button type="primary" @click="handleRecharge">后台补量</el-button>
       <el-button type="danger" plain :loading="repairingStatus" @click="handleRepairStatus">状态修复</el-button>
       <el-button type="success" @click="handleAutoPool">自动续池</el-button>
@@ -179,7 +179,7 @@
     </el-card>
 
     <!-- 补量日志 -->
-    <el-card class="table-card" shadow="never">
+    <el-card v-if="authStore.userInfo?.user_level !== 3" class="table-card" shadow="never">
       <template #header>
         <div class="card-header">
           <span>池子操作日志</span>
@@ -333,6 +333,7 @@ const fetchCards = async () => {
  * 获取补量日志
  */
 const fetchFlowLogs = async () => {
+  if (authStore.userInfo?.user_level === 3) return
   flowLogLoading.value = true
   try {
     const res: any = await systemApi.getOperationLogs({

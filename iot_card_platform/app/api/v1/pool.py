@@ -34,6 +34,7 @@ async def get_pools(
     """
     获取流量池列表
     - 所有账号（含超级管理员）: 可查看自己和直属下级的流量池，不可查看下下级
+    - 子账号还可只读查看本人卡片关联池，所有统计仅包含本人卡片
     """
     items, total = await pool_service.get_pools(
         db=db,

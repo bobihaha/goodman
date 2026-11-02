@@ -1,0 +1,7 @@
+# 在生产基线隔离目录执行，避免夹带 dashboard 本地其他改动
+app/services/sub_user_pool_service.py
+frontend/src/views/pools/list/index.vue
+frontend/src/views/pools/detail/index.vue
+frontend/src/views/dashboard/index.vue
+frontend/src/views/dashboard/components/AlertList.vue
+frontend/src/views/suspend/alerts/index.vue

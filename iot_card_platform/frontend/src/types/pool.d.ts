@@ -36,6 +36,8 @@ export interface Pool {
   user_name?: string
   sale_package_name?: string     // 销售套餐名称
   can_self_topup?: boolean
+  read_only?: boolean
+  statistics_scope?: 'assigned_cards'
   // 卡片统计
   card_stats?: {
     activated: number            // 已激活

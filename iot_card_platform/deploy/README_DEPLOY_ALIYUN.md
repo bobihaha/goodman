@@ -51,6 +51,26 @@ ssh -i /Users/renhui/Desktop/aliyun.pem -p 22222 deploy@47.100.81.73
 - HTTPS 域名：`zerodaai.com` / `www.zerodaai.com`
 - HTTPS 证书目录：`/home/deploy/iot_card_platform/certs`
 
+### 2026-11-02 子账号关联流量池只读修复
+
+#### 当日 15:00 追加：补量展示与首页告警入口
+
+- 使用生产基线隔离包发布 `deploy/release_manifests/sub_user_pool_addon_alert_20261102.txt` 中 6 个文件，未包含本地首页其他未发布功能。无 SQL、环境或依赖变更。
+- 子账号流量池列表和详情移除所属客户及统计口径说明；池级有效补量每池一次计入总额度，过期补量排除，沿用历史无月份补量的兼容逻辑。
+- 首页告警卡和“查看全部”改为只读弹窗，默认查询未处理告警，无需停卡管理菜单；后端原有账号范围不变。
+- 备份：`/home/deploy/iot_card_platform/release_backups/20261102_145908_sub_user_pool_addon_alert_20261102`，MySQL 12,861,002 字节、Redis 88 字节、原文件归档 14,477 字节。回滚恢复该归档的 6 个文件并重建 app/frontend，不恢复数据库；旧镜像保留为 `iot_card_platform:rollback-subpool-addon-20261102` 与 `iot_card_frontend:rollback-subpool-addon-20261102`。
+- 验证：18 项相关测试、本地类型检查/构建、生产镜像构建及系统健康检查通过。实际账号 API 核验：浦东融媒体 3 池 27 卡，总额度 138,240 MB（135G），当前有效池级补量 0；上海翕禾 4 条未处理告警与首页统计一致，返回记录均在账号范围内。
+- 公网生产静态资源配合模拟 API 的浏览器验证通过：没有停卡菜单时点击首页告警可打开列表，停留首页、不提示无权限、不显示处理按钮。该验证不是使用真实账号密码的浏览器登录验收。发布后的完整 30–60 分钟观察尚未完成。
+
+- 北京时间 10:16 完成前后端切换。清单：`deploy/release_manifests/sub_user_pool_scope_20261102.txt`，共 8 个运行文件；发布前确认生产原文件与本次补丁基线一致，无 SQL、环境变量或依赖变更，未覆盖其他未发布模块。
+- 子账号可查看本人有效卡片对应流量池；列表、详情、用量、统计及仪表盘只汇总本人卡片，不含共享池补量，保持池级写入和全池日志权限边界。前端显示统计范围并隐藏池级操作。
+- 备份：`/home/deploy/iot_card_platform/release_backups/20261102_101516_sub_user_pool_scope_20261102`。MySQL 压缩备份 12,851,822 字节、Redis 88 字节、原源码归档 22,198 字节，目录 700、文件 600；MySQL/源码 gzip 完整性检查通过，Redis RDB 校验通过。
+- 生产镜像构建、`check_system.sh` 通过，四个容器健康，前后端重启次数 0；MySQL/Redis 未重启。8 个源文件 SHA-256 与本地发布文件一致，两个 HTTPS 域名返回 200，HTTP 返回 301。
+- 实际账号 API 验收：上海翕禾传媒科技有限公司下“浦东融媒体”返回 3 个流量池、27 张本人有效池卡；列表、详情、卡片、用量、统计、仪表盘、告警筛选和分页通过；无关池及全池日志返回业务 404，未认证返回业务 401。验证只发送 GET，短期验证凭据仅保留在容器进程内存，不写文件或输出。
+- 本地相关测试 15 项、前端类型检查及构建通过。刚发布后的健康与接口验证通过；30–60 分钟完整观察及真实浏览器登录交互尚未完成，不将其记作已验收。
+- 回滚：恢复此次 `files/source_files_20261102_101516.tar.gz` 的原文件，移走新增的 `app/services/sub_user_pool_service.py` 后仅重建 app/frontend；旧镜像另保留为 `iot_card_platform:rollback-subpool-20261102` 与 `iot_card_frontend:rollback-subpool-20261102`。无数据库结构变更，不恢复整库，回滚后重做健康及权限检查。
+
+
 ### 2026-10-30 卡片列表统计卡点击修复
 
 - 仅发布 `frontend/src/views/cards/list/index.vue` 中“沉默期”“已停机”点击筛选修复；使用生产原文件对比后的隔离发布包，排除本地未发布的 `over_usage` 重置修改。无 SQL、环境变量或后端变更。
