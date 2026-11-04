@@ -228,7 +228,7 @@ async def run_expired_task(
     result = await SuspendActionService.auto_suspend_expired(db)
     return ResponseModel(
         data=result,
-        msg=f"任务完成，停卡{result['suspended_count']}张"
+        msg=f"任务完成，确认停机{result['suspended_count']}张，待确认{result['submitted_count']}张，失败{result['failed_count']}张"
     )
 
 

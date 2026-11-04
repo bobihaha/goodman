@@ -14,6 +14,18 @@ from app.utils.logger import logger
 
 scheduler = AsyncIOScheduler()
 CARD_EXCEED_CHECK_MINUTES = 5
+CARD_EXPIRED_CHECK_MINUTES = 5
+
+
+async def check_card_expired():
+    """核对本地到期管控与供应商实际停机状态。"""
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await SuspendActionService.auto_suspend_expired(db)
+            logger.info("到期停机核对完成: %s", result)
+        except Exception:
+            await db.rollback()
+            logger.exception("到期停机核对失败")
 
 
 async def sync_supplier_usage(supplier_id: int = None):
@@ -86,6 +98,15 @@ async def load_sync_tasks():
 
 def start_scheduler():
     """启动调度器"""
+    scheduler.add_job(
+        check_card_expired,
+        CronTrigger(minute=f"*/{CARD_EXPIRED_CHECK_MINUTES}", timezone=CHINA_TZ),
+        id="card_expired_auto_suspend",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=CARD_EXPIRED_CHECK_MINUTES * 60,
+    )
     scheduler.add_job(
         send_card_expiry_reminders,
         CronTrigger(day="10,15", hour=9, minute=0, timezone=CHINA_TZ),

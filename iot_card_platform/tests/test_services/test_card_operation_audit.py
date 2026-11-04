@@ -128,3 +128,24 @@ async def test_batch_suspend_by_iccids_keeps_original_operator():
     service._get_user_name.assert_awaited_once_with(db, 1)
     assert mock_suspend.await_args.kwargs["operator_name"] == "平台管理员"
     assert mock_suspend.await_args.kwargs["original_user_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_suspend_refreshes_pool_stats_to_remove_quota():
+    # 到期核对按单卡提交结果汇总池统计，单张失败不丢失其他卡的统计刷新。
+    db = MagicMock(commit=AsyncMock(), rollback=AsyncMock())
+    with patch(
+        "app.services.expired_suspend_service._recover_pending", AsyncMock(return_value=0),
+    ), patch(
+        "app.services.expired_suspend_service.CardSuspendCRUD.get_expired_cards",
+        AsyncMock(return_value=[SimpleNamespace(id=318), SimpleNamespace(id=319)]),
+    ), patch(
+        "app.services.expired_suspend_service._check_card",
+        AsyncMock(side_effect=[("submitted_count", 89), RuntimeError("supplier offline")]),
+    ), patch.object(
+        SuspendActionService, "_safe_refresh_pool_stats", AsyncMock(),
+    ) as refresh_pool_stats:
+        result = await SuspendActionService.auto_suspend_expired(db)
+
+    assert result["submitted_count"] == result["failed_count"] == 1
+    refresh_pool_stats.assert_awaited_once_with(db, {89})

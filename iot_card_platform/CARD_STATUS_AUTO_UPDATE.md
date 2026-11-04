@@ -15,6 +15,11 @@
 - testing/silent → activated: 检测到流量使用时激活，自动设置 activated_at 和计算 expired_at
 - activated → suspended: 到期自动停机
 
+> 本地状态转换用于套餐到期管控，不代表供应商已断网。供应商关停由
+> `app/services/expired_suspend_service.py` 每 5 分钟核对并执行，包含历史仅本地停机的卡。
+> 操作记录区分待确认、成功、失败；失败可重试，已续费卡不再补停。
+> 详见 `docs/suspend_module.md` 的“到期关停执行约定”。
+
 **关键代码**:
 ```python
 async def check_and_update_card_status(db: AsyncSession, card: IotCardModel) -> bool:

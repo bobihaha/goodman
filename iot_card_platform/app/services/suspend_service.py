@@ -538,6 +538,8 @@ class SuspendActionService:
                 )
                 lifecycle_data = await supplier_client.get_card_lifecycle(card.iccid)
                 lifecycle_status = lifecycle_data.get("status")
+                if supplier.code == "002":
+                    lifecycle_status = lifecycle_data.get("network_status", "unknown")
 
                 request_meta: Dict[str, Any] = {}
                 if operation.request_result:
@@ -545,6 +547,22 @@ class SuspendActionService:
                         request_meta = json.loads(operation.request_result)
                     except Exception:
                         request_meta = {"raw_request_result": operation.request_result}
+                from app.services.expired_suspend_service import operation_context, confirm_expired_operation
+                expiry_context = operation_context(operation)
+                is_expired_operation = expiry_context.get("operation_source") == "expired"
+                if is_expired_operation:
+                    request_meta = expiry_context
+                    await db.commit()
+                    await db.refresh(operation)
+                    if operation.callback_status != "pending":
+                        return
+                    latest_id = await SupplierSuspendOperationCRUD.get_latest_id_for_card(db, card.id)
+                    if latest_id != operation.id:
+                        await SupplierSuspendOperationCRUD.update_callback_result(
+                            db, operation, "{}", "SUPERSEDED", "已有更新的停复机操作", lifecycle_status, "failed"
+                        )
+                        return
+                    await db.refresh(card)
                 request_meta["auto_reconcile_checked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 request_meta["auto_reconcile_observed_status"] = lifecycle_status
                 request_meta["auto_reconcile_attempts"] = int(request_meta.get("auto_reconcile_attempts") or 0) + 1
@@ -609,12 +627,13 @@ class SuspendActionService:
                             callback_no,
                             request_meta["suspend_type"],
                         )
-                SuspendActionService.normalize_card_suspend_state(
-                    card,
-                    lifecycle_status,
-                    suspend_type=suspend_type,
-                    reason=request_meta.get("reason") or "供应商生命周期自动对账收敛",
-                )
+                if not is_expired_operation:
+                    SuspendActionService.normalize_card_suspend_state(
+                        card,
+                        lifecycle_status,
+                        suspend_type=suspend_type,
+                        reason=request_meta.get("reason") or "供应商生命周期自动对账收敛",
+                    )
                 await SupplierSuspendOperationCRUD.update_callback_result(
                     db=db,
                     operation=operation,
@@ -632,6 +651,8 @@ class SuspendActionService:
                     account_status=lifecycle_status,
                     callback_status="success"
                 )
+                if is_expired_operation:
+                    await confirm_expired_operation(db, card, operation)
                 if (
                     operation.action == SuspendActionType.suspend
                     and request_meta.get("operation_source") == "pool_exceed"
@@ -805,7 +826,7 @@ class SuspendActionService:
             )
             return False, None, None
         callback_no = SuspendActionService._generate_callback_no(SuspendActionType.suspend, card.iccid)
-        request_payload = {"number": card.iccid, "type": "01", "callback_no": callback_no}
+        request_payload = {"number": card.iccid, "type": "01", "callback_no": callback_no, **(request_context or {})}
         operation = await SuspendActionService._create_supplier_operation(
             db=db,
             card=card,
@@ -1451,47 +1472,10 @@ class SuspendActionService:
 
     @staticmethod
     async def auto_suspend_expired(db: AsyncSession) -> Dict[str, Any]:
-        """自动停卡：到期停卡"""
-        cards = await CardSuspendCRUD.get_expired_cards(db)
-        suspended_count = 0
-        affected_pool_ids = set()
+        """执行到期关停及历史状态核对。"""
+        from app.services.expired_suspend_service import reconcile_expired_cards
 
-        for card in cards:
-            # 检查是否有生效的策略
-            policies = await SuspendPolicyCRUD.get_active_policies(
-                db, "expired", user_id=card.user_id
-            )
-            
-            policy = policies[0] if policies else None
-            if policy and policy.auto_suspend != 1:
-                continue
-
-            # 执行停卡
-            await CardSuspendCRUD.suspend_card(
-                db=db,
-                card_id=card.id,
-                suspend_type=SuspendType.expired,
-                reason="套餐到期自动停卡"
-            )
-
-            # 记录日志
-            await SuspendLogCRUD.create(
-                db=db,
-                card_id=card.id,
-                iccid=card.iccid,
-                action=SuspendActionType.suspend,
-                suspend_type="expired",
-                policy_id=policy.id if policy else None,
-                reason="套餐到期自动停卡"
-            )
-
-            suspended_count += 1
-            if getattr(card, "pool_id", None):
-                affected_pool_ids.add(card.pool_id)
-
-        await SuspendActionService._safe_refresh_pool_stats(db, affected_pool_ids)
-
-        return {"suspended_count": suspended_count}
+        return await reconcile_expired_cards(db)
 
     @staticmethod
     async def auto_suspend_card_exceed(db: AsyncSession) -> Dict[str, Any]:
@@ -1760,9 +1744,11 @@ class SupplierCallbackService:
             except Exception:
                 request_meta = {"raw_request_result": operation.request_result}
 
+        from app.services.expired_suspend_service import operation_context, confirm_expired_operation
+        is_expired_operation = operation_context(operation).get("operation_source") == "expired"
         card = await db.get(IotCardModel, operation.card_id)
         previous_status = card.status if card else None
-        if card and callback_applies:
+        if card and callback_applies and not is_expired_operation:
             SuspendActionService.normalize_card_suspend_state(card, mapped_status)
 
         await SupplierSuspendOperationCRUD.update_callback_result(
@@ -1774,6 +1760,8 @@ class SupplierCallbackService:
             account_status=account_status,
             callback_status="success" if callback_applies else "failed"
         )
+        if card and callback_applies and is_expired_operation:
+            await confirm_expired_operation(db, card, operation)
 
         if (
             card

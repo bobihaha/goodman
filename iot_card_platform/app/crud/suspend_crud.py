@@ -643,15 +643,20 @@ class CardSuspendCRUD:
 
     @staticmethod
     async def get_expired_cards(db: AsyncSession) -> List[IotCardModel]:
-        """获取已到期但未停卡的卡片"""
-        from datetime import date
-        today = date.today()
+        """获取到期管控待核对卡，包含历史漏停和续费后遗留的到期停机。"""
+        from app.utils.timezone import beijing_now
+        today = beijing_now().date()
         
         result = await db.execute(
             select(IotCardModel).where(
                 IotCardModel.is_deleted == 0,
-                IotCardModel.status == CardStatus.activated,
-                IotCardModel.expired_at < today
+                IotCardModel.expired_at.is_not(None),
+                or_(
+                    and_(IotCardModel.status == CardStatus.activated,
+                         IotCardModel.expired_at < today),
+                    and_(IotCardModel.status == CardStatus.suspended,
+                         IotCardModel.suspend_type == SuspendType.expired),
+                ),
             )
         )
         return list(result.scalars().all())
