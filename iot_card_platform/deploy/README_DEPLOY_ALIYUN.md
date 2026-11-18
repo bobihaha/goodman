@@ -395,3 +395,21 @@ bash deploy/scripts/predeploy_check.sh
 - 基于生产源码更新 MainLayout.vue 和 ProjectGroups.vue，仅重建前端。卡片列表直达全量视图，项目列表按需展开。
 - 前后端、MySQL、Redis 健康检查通过。使用生产静态资源和模拟业务接口验证了全量入口、项目切换、刷新和浏览器后退。
 - 备份目录为 /home/deploy/iot_card_platform/release_backups/20261110_104552_cardnav。回滚时恢复其中 files 目录的原源码，将 iot_card_frontend:rollback-cardnav-20261110 标记为 iot_card_frontend:latest，然后执行 docker compose up -d --no-deps --no-build frontend 并复查健康状态。
+
+### 2026-11-18 客户订单记录发布
+
+- 00:02 完成生产出库单手填日期字段及索引迁移，保留历史空日期。
+- 当日用户再次明确要求发布后，于 17:51 完成前后端标准镜像构建及切换。
+- 发布清单见 `deploy/release_manifests/customer_orders_20261118.txt`。MainLayout.vue、routes.ts、guards.ts 以生产原文件为基础加入本次入口，工作区其他官网及余额记录改动仍待各自发布。
+- 本次备份目录为生产 `/home/deploy/iot_card_platform/release_backups/20261118_174620_customer_orders_20261118/`，含 MySQL、Redis 和被替换的 6 个已有文件。新增文件为 `app/api/v1/customer_orders.py`、`frontend/src/views/cards/orders/index.vue`。
+- 健康检查通过。真实客户只读验证覆盖订单列表、明细、整单卡号数量及字符串格式、跨客户拒绝访问。本地 7 项相关测试通过。
+- 应用回退时恢复上述文件归档并重建 app/frontend；新增文件在恢复引用后可保留，数据库新增的可空字段及索引与旧应用兼容。
+
+### 2026-11-18 订单日期、卡片跳转和客户备注调整
+
+- 历史订单缺少手填日期时，列表展示、排序和筛选统一使用出库记录创建日期。
+- 查看卡片进入带 batch_id（出库单号）参数的卡片列表，展开高级筛选并支持刷新恢复。
+- 操作栏增加备注，最多 500 字，可清空，独立保存 customer_remark，仅收货账号可写。
+- 已备份并添加可空 customer_remark 字段，迁移使用 INSTANT 和 5 秒元数据锁等待限制。
+- 生产备份目录为 `/home/deploy/iot_card_platform/release_backups/20261118_175806_customer_order_enhancement_20261118/`。发布范围见 `deploy/release_manifests/customer_order_enhancement_20261118.txt`。
+- 7 项后端回归测试、前端类型检查及构建通过。浏览器模拟接口验证备注保存/刷新/清空及跳转/刷新恢复。生产真实客户只读验证订单日期回退、日期筛选、明细/下载数量和跨账号隔离。

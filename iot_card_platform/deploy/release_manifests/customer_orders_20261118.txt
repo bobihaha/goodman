@@ -1,0 +1,10 @@
+app/api/v1/iot_card.py
+app/api/v1/customer_orders.py
+app/crud/stock_crud.py
+app/services/stock_service.py
+frontend/src/views/cards/orders/index.vue
+frontend/src/components/layout/MainLayout.vue
+frontend/src/router/routes.ts
+frontend/src/router/guards.ts
+# 发布时 MainLayout.vue、routes.ts、guards.ts 以生产原文件为基础，仅加入订单入口和权限映射。
+# 本地上述文件另有官网及余额记录改动，禁止直接覆盖生产。

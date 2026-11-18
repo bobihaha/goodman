@@ -1028,7 +1028,7 @@ const searchForm = reactive<CardListParams>({
   over_usage: undefined,
   remark: undefined,
   customer_id: undefined,
-  batch_id: undefined
+  batch_id: typeof route.query.batch_id === 'string' ? route.query.batch_id : undefined
 })
 
 // 分页
@@ -1862,10 +1862,17 @@ const getProgressColor = (percent: number) => {
 // 初始化
 watch([activeProject, () => authStore.userInfo?.id], changeProject)
 watch(() => cardProjects.revision, handleProjectUpdated)
+watch(() => route.query.batch_id, value => {
+  searchForm.batch_id = typeof value === 'string' ? value : undefined
+  showAdvanced.value = !!searchForm.batch_id
+  handleSearch()
+})
 
 onMounted(() => {
   loadColumnOrder()
   loadVisibleColumns()
+
+  showAdvanced.value = !!searchForm.batch_id
 
   // 读取 URL 参数
   const carrierParam = route.query.carrier as string

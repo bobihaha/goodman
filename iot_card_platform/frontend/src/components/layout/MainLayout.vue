@@ -33,6 +33,9 @@
                     <el-icon><component :is="child.icon" /></el-icon>
                     <span>{{ child.name }}</span>
                   </el-menu-item>
+                  <el-menu-item v-if="child.path === '/cards/list' && userInfo?.user_level !== 1" index="/cards/orders">
+                    <el-icon><Folder /></el-icon><span>订单记录</span>
+                  </el-menu-item>
                   <el-sub-menu v-if="child.path === '/cards/list'" :index="projectMenuIndex" popper-class="card-project-popup">
                     <template #title><el-icon><Folder /></el-icon><span>项目列表</span></template>
                     <ProjectGroups :key="userInfo?.id" />

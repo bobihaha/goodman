@@ -562,6 +562,11 @@ class StockService:
         from app.db.models.iot_card import IotCardModel, CardStatus, CardType
         from app.db.models.package import SalePackageModel
 
+        from app.utils.timezone import beijing_now
+        from app.crud.stock_crud import generate_stock_out_no, insert_out_record
+        from app.db.models.stock import StockOutRecordCardModel
+
+        groups = {}
         total = len(items)
         success = 0
         failed = 0
@@ -574,10 +579,10 @@ class StockService:
                     IotCardModel.status == CardStatus.stock,
                     IotCardModel.is_deleted == 0
                 )
-                card_result = await db.execute(card_query)
+                card_result = await db.execute(card_query.with_for_update())
                 card = card_result.scalar_one_or_none()
 
-                if not card:
+                if not card or card.user_id is not None:
                     fail_details.append({
                         "row": idx + 2,
                         "iccid": item.iccid,
@@ -602,6 +607,7 @@ class StockService:
                     failed += 1
                     continue
 
+                card_type = CardType(item.card_type) if item.card_type else None
                 card.user_id = item.user_id
                 card.sale_package_id = item.sale_package_id
                 card.period_count = item.period_count
@@ -610,8 +616,8 @@ class StockService:
                 card.period_type = package.period_type
                 card.data_total = package.flow_size
 
-                if item.card_type:
-                    card.card_type = CardType(item.card_type)
+                if card_type:
+                    card.card_type = card_type
 
                 card.stock_out_date = item.stock_out_date
                 card.test_expire_date = item.test_expire_date
@@ -624,11 +630,19 @@ class StockService:
                 else:
                     card.status = CardStatus.silent
 
-                card.stock_out_at = datetime.now()
+                card.stock_out_at = beijing_now()
 
+                key = (item.user_id, item.sale_package_id, item.stock_out_date)
+                groups.setdefault(key, []).append((
+                    StockOutRecordCardModel(card_id=card.id, iccid=card.iccid,
+                        sale_package_id=package.id, sale_package_name=package.name,
+                        target_user_id=item.user_id, test_expire_date=item.test_expire_date,
+                        silent_expire_date=item.silent_expire_date),
+                    int((package.price_sale or 0) * 100)
+                ))
                 success += 1
 
-            except Exception as e:
+            except ValueError as e:
                 fail_details.append({
                     "row": idx + 2,
                     "iccid": item.iccid,
@@ -636,6 +650,14 @@ class StockService:
                 })
                 failed += 1
 
+        for (user_id, package_id, order_date), entries in groups.items():
+            record_id = await insert_out_record(
+                db, generate_stock_out_no(), user_id, package_id, order_date,
+                len(entries), len(entries), entries[0][1], None, created_by
+            )
+            for relation, _ in entries:
+                relation.record_id = record_id
+                db.add(relation)
         await db.commit()
 
         return {

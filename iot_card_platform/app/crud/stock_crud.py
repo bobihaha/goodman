@@ -362,6 +362,39 @@ class StockInCRUD:
         return items, total
 
 
+from app.utils.timezone import beijing_now
+
+
+async def insert_out_record(db, record_no, to_user_id, sale_package_id, stock_out_date,
+                            card_count, success_count, unit_price, remark, created_by):
+    from sqlalchemy import text
+
+    new_record_sql = """
+        INSERT INTO stock_out_records
+        (user_id, to_user_id, record_no, sale_package_id, stock_out_date, card_count, success_count, failed_count,
+         unit_price, total_amount, remark, operator_id, created_at, updated_at)
+        VALUES
+        (:user_id, :to_user_id, :record_no, :sale_package_id, :stock_out_date, :card_count, :success_count, :failed_count,
+         :unit_price, :total_amount, :remark, :operator_id, :now, :now)
+    """
+    new_record_result = await db.execute(text(new_record_sql), {
+        "user_id": to_user_id,
+        "to_user_id": to_user_id,
+        "record_no": record_no,
+        "sale_package_id": sale_package_id,
+        "stock_out_date": stock_out_date,
+        "card_count": card_count,
+        "success_count": success_count,
+        "failed_count": card_count - success_count,
+        "unit_price": unit_price,
+        "total_amount": unit_price * success_count,
+        "remark": remark,
+        "operator_id": created_by,
+        "now": beijing_now()
+    })
+    return new_record_result.lastrowid
+
+
 class StockOutCRUD:
     """出库记录 CRUD"""
 
@@ -412,7 +445,7 @@ class StockOutCRUD:
             "period_type": sale_pkg.period_type.value if sale_pkg.period_type else None,
         }
 
-        for card_id in card_ids:
+        for card_id in dict.fromkeys(card_ids):
             # 获取卡片
             card_query = select(IotCardModel).where(
                 IotCardModel.id == card_id,
@@ -420,7 +453,7 @@ class StockOutCRUD:
                 IotCardModel.user_id.is_(None),
                 IotCardModel.is_deleted == 0
             )
-            card_result = await db.execute(card_query)
+            card_result = await db.execute(card_query.with_for_update())
             card = card_result.scalar_one_or_none()
 
             if card:
@@ -470,7 +503,6 @@ class StockOutCRUD:
         sale_package_result = await db.execute(sale_package_query, {"package_id": sale_package_id})
         sale_package_row = sale_package_result.fetchone()
         unit_price = int(sale_package_row.price_sale * 100) if sale_package_row and sale_package_row.price_sale else 0
-        total_amount = unit_price * success_count
 
         # 记录套餐单价到已出库的卡片（用于续费价格锁定）
         if sale_package_row and sale_package_row.price_sale:
@@ -482,28 +514,10 @@ class StockOutCRUD:
                 )
         
         # 创建新表记录（stock_out_records）
-        new_record_sql = """
-            INSERT INTO stock_out_records 
-            (user_id, to_user_id, record_no, sale_package_id, card_count, success_count, failed_count,
-             unit_price, total_amount, remark, operator_id, created_at, updated_at)
-            VALUES 
-            (:user_id, :to_user_id, :record_no, :sale_package_id, :card_count, :success_count, :failed_count,
-             :unit_price, :total_amount, :remark, :operator_id, NOW(), NOW())
-        """
-        new_record_result = await db.execute(text(new_record_sql), {
-            "user_id": to_user_id,
-            "to_user_id": to_user_id,
-            "record_no": record.record_no,
-            "sale_package_id": sale_package_id,
-            "card_count": len(card_ids),
-            "success_count": success_count,
-            "failed_count": len(card_ids) - success_count,
-            "unit_price": unit_price,
-            "total_amount": total_amount,
-            "remark": remark,
-            "operator_id": created_by
-        })
-        new_record_id = new_record_result.lastrowid
+        new_record_id = await insert_out_record(
+            db, record.record_no, to_user_id, sale_package_id, stock_out_date,
+            len(card_ids), success_count, unit_price, remark, created_by
+        )
 
         # 获取用户、销售套餐、供应商、底层套餐信息
         from app.db.models.sys_user import SysUserModel

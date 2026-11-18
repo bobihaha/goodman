@@ -75,6 +75,12 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'cards/orders',
+        name: 'CustomerOrders',
+        component: () => import('@/views/cards/orders/index.vue'),
+        meta: { title: '订单记录', requiresAuth: true }
+      },
+      {
         path: 'cards/detail/:id',
         name: 'CardDetail',
         component: () => import('@/views/cards/detail/index.vue'),

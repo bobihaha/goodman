@@ -1,0 +1,5 @@
+app/api/v1/customer_orders.py
+frontend/src/views/cards/orders/index.vue
+frontend/src/views/cards/list/index.vue
+# 依赖迁移 app/db/migrations/20261118_customer_order_remark.sql。
+# 卡片列表采用生产原文件加本次 URL 筛选改动，排除工作区其他重置逻辑差异。

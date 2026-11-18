@@ -88,6 +88,7 @@ export function setupRouterGuards(router: Router): void {
  * 当访问详情页时，检查用户是否有对应列表页的权限
  */
 const DETAIL_TO_LIST_MAP: Record<string, string[]> = {
+  '/cards/orders': ['/cards/list', '/card/list', '/card'],
   '/cards/detail': ['/cards/list', '/card/list', '/card'],
   '/pools/detail': ['/pools/list', '/pool/list', '/pool'],
   '/records/purchases': ['/renewal/management']

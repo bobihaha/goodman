@@ -22,7 +22,10 @@ from app.schemas.iot_card import (
     BatchAddFlowByIccidsRequest, CardTopupQuoteRequest, CardRenewQuoteRequest
 )
 
+from app.api.v1.customer_orders import router as order_router
+
 router = APIRouter(prefix="/cards", tags=["卡片管理"])
+router.include_router(order_router)
 
 
 def _build_simple_xlsx(headers: List[str], rows: List[List[object]]) -> BytesIO:

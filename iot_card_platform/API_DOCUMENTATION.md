@@ -990,12 +990,10 @@
 
 ---
 
+### 客户订单记录
+以下接口要求登录，按出库收货账号隔离。订单日期为手填出库日期，历史空值使用出库记录创建日期，展示、排序与筛选口径一致。列表返回独立的 customer_remark 客户订单备注。
+- `GET /api/v1/cards/orders` 按 start、end（含首尾日期）、number（完整单号）、page 查询。每页 20 条，返回 items 和 total。
+- `GET /api/v1/cards/orders/{order_id}/cards` 按 keyword（ICCID）、page 查询订单快照。card_id 仅对当前可访问的卡返回。
+- `GET /api/v1/cards/orders/{order_id}/numbers` 返回整单 ICCID 字符串数组，客户端生成 Excel。
 
-
-
-
-
-
-
-
-
+- `PUT /api/v1/cards/orders/{order_id}/remark` 接收 remark 字符串（最多 500 字），空字符串清空客户备注，仅收货账号可写。
