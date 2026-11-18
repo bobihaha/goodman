@@ -145,7 +145,8 @@ async def get_cards(
     remark: Optional[str] = Query(None, description="备注关键词"),
     customer_id: Optional[int] = Query(None, description="关联客户ID"),
     batch_id: Optional[str] = Query(None, description="出库单号/批次ID"),
-    project_id: Optional[int] = Query(None, description="项目ID"),
+    project_id: Optional[int] = Query(None, gt=0, description="本人项目ID"),
+    ungrouped: bool = Query(False, description="仅本人未分组卡片"),
     stock_out_start: Optional[str] = Query(None, description="出库开始日期 YYYY-MM-DD"),
     stock_out_end: Optional[str] = Query(None, description="出库结束日期 YYYY-MM-DD"),
     activated_start: Optional[str] = Query(None, description="激活开始日期 YYYY-MM-DD"),
@@ -177,6 +178,7 @@ async def get_cards(
         customer_id=customer_id,
         batch_id=batch_id,
         project_id=project_id,
+        ungrouped=ungrouped,
         stock_out_start=stock_out_start,
         stock_out_end=stock_out_end,
         activated_start=activated_start,
@@ -193,12 +195,14 @@ async def get_cards(
 
 @router.get("/stats", summary="获取卡片统计", response_model=ResponseModel)
 async def get_card_stats(
+    project_id: Optional[int] = Query(None, gt=0),
+    ungrouped: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """获取卡片统计信息"""
     stats = await iot_card_service.get_stats(
-        db=db, current_user_id=current_user.id, user_level=current_user.user_level
+        db=db, current_user_id=current_user.id, user_level=current_user.user_level, project_id=project_id, ungrouped=ungrouped
     )
     return ResponseModel(data=stats)
 
@@ -511,6 +515,8 @@ async def batch_force_resume_by_iccids(
 
 @router.post("/batch-query", summary="批量查询卡片", response_model=ResponseModel)
 async def batch_query_cards(
+    project_id: Optional[int] = Query(None, gt=0),
+    ungrouped: bool = Query(False),
     iccids: List[str] = Body(..., description="ICCID列表"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
@@ -527,7 +533,7 @@ async def batch_query_cards(
     
     result = await iot_card_service.batch_query_cards(
         db=db, iccids=iccids,
-        current_user_id=current_user.id, user_level=current_user.user_level
+        current_user_id=current_user.id, user_level=current_user.user_level, project_id=project_id, ungrouped=ungrouped
     )
     return ResponseModel(data=result, msg=f"查询完成：找到 {len(result['found'])} 张卡片")
 
@@ -551,6 +557,8 @@ async def export_cards(
         remark=request.remark,
         customer_id=request.customer_id,
         batch_id=request.batch_id,
+        project_id=request.project_id,
+        ungrouped=request.ungrouped,
         stock_out_start=request.stock_out_start,
         stock_out_end=request.stock_out_end,
         activated_start=request.activated_start,
@@ -686,6 +694,8 @@ async def export_cards_history(
         remark=payload.remark,
         customer_id=payload.customer_id,
         batch_id=payload.batch_id,
+        project_id=payload.project_id,
+        ungrouped=payload.ungrouped,
         stock_out_start=payload.stock_out_start,
         stock_out_end=payload.stock_out_end,
         activated_start=payload.activated_start,

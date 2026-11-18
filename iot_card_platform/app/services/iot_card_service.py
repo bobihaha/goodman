@@ -123,6 +123,17 @@ class IotCardService:
         if not card_dicts:
             return card_dicts
 
+        project_ids = {item["project_id"] for item in card_dicts if item.get("project_id")}
+        project_names = {}
+        if project_ids:
+            from app.db.models.project import ProjectModel
+            project_names = dict((await db.execute(select(ProjectModel.id, ProjectModel.name).where(
+                ProjectModel.id.in_(project_ids), ProjectModel.user_id == current_user_id,
+                ProjectModel.is_deleted == 0,
+            ))).all())
+        for item in card_dicts:
+            item["project_name"] = project_names.get(item.get("project_id"))
+
         card_ids = [item["id"] for item in card_dicts if item.get("id") is not None]
         card_user_ids = {
             item["user_id"] for item in card_dicts
@@ -341,6 +352,16 @@ class IotCardService:
         child_ids = await sys_user_crud.get_children_ids(db, current_user_id)
         return [current_user_id, *child_ids]
 
+    async def _project_user_scope(self, db, current_user_id, user_ids, project_id=None, ungrouped=False):
+        if project_id is not None and ungrouped:
+            raise BusinessException(msg="项目和未分组不能同时筛选")
+        if project_id is not None:
+            from app.services.project_service import project_service
+            await project_service.get_owned_project(db, current_user_id, project_id)
+        if project_id is not None or ungrouped:
+            return [current_user_id] if user_ids is None or current_user_id in user_ids else []
+        return user_ids
+
     async def _get_customer_filter_user_ids(
         self,
         db: AsyncSession,
@@ -455,6 +476,7 @@ class IotCardService:
         customer_id: Optional[int] = None,
         batch_id: Optional[str] = None,
         project_id: Optional[int] = None,
+        ungrouped: bool = False,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
         activated_start: Optional[str] = None,
@@ -473,6 +495,7 @@ class IotCardService:
             user_ids = customer_user_ids
             customer_id = None
 
+        user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
         items, total = await iot_card_crud.get_list(
             db=db,
             user_ids=user_ids,
@@ -489,6 +512,7 @@ class IotCardService:
             customer_id=customer_id,
             batch_id=batch_id,
             project_id=project_id,
+            ungrouped=ungrouped,
             stock_out_start=stock_out_start,
             stock_out_end=stock_out_end,
             activated_start=activated_start,
@@ -717,10 +741,15 @@ class IotCardService:
         self,
         db: AsyncSession,
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        project_id: Optional[int] = None,
+        ungrouped: bool = False,
     ) -> dict:
         """获取卡片统计"""
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
+        if project_id is not None or ungrouped:
+            user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
+            return await iot_card_crud.get_stats_in_scope(db, user_ids, project_id, ungrouped)
         if user_ids is None:
             return await iot_card_crud.get_stats(db, None)
         return await iot_card_crud.get_stats_in_scope(db, user_ids)
@@ -957,7 +986,9 @@ class IotCardService:
         activated_start: Optional[str] = None,
         activated_end: Optional[str] = None,
         expired_start: Optional[str] = None,
-        expired_end: Optional[str] = None
+        expired_end: Optional[str] = None,
+        project_id: Optional[int] = None,
+        ungrouped: bool = False
     ) -> List[dict]:
         """导出卡片数据"""
         if card_ids and len(card_ids) > settings.max_export_size:
@@ -965,17 +996,21 @@ class IotCardService:
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
 
         if card_ids:
+            user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
             # 导出指定卡片
-            items = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
+            items = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids, project_id=project_id, ungrouped=ungrouped)
         else:
             # 导出全部 (根据筛选条件)
             customer_user_ids = await self._get_customer_filter_user_ids(db, customer_id, user_level)
             if customer_user_ids is not None:
                 user_ids = customer_user_ids
                 customer_id = None
+            user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
             items, _ = await iot_card_crud.get_list(
                 db=db,
                 user_ids=user_ids,
+                project_id=project_id,
+                ungrouped=ungrouped,
                 keyword=keyword,
                 status=status,
                 carrier=carrier,
@@ -1041,6 +1076,7 @@ class IotCardService:
                 "销售套餐ID": d.get("sale_package_id") or "",
                 "套餐单价(元/周期)": d.get("sale_price") if d.get("sale_price") is not None else "",
                 "项目ID": d.get("project_id") or "",
+                "所属项目": d.get("project_name") or "",
                 "流量同步时间": d.get("data_sync_at") or "",
                 "最近IMEI": d.get("latest_imei") or "",
                 "上一次IMEI": d.get("previous_imei") or "",
@@ -1163,10 +1199,21 @@ class IotCardService:
         db: AsyncSession,
         iccids: List[str],
         current_user_id: int,
-        user_level: int
+        user_level: int,
+        project_id: Optional[int] = None,
+        ungrouped: bool = False,
     ) -> dict:
         """批量查询卡片"""
-        found_cards = await self._get_cards_by_iccids_in_scope(db, iccids, current_user_id, user_level)
+        user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
+        user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
+        query = select(IotCardModel).where(IotCardModel.iccid.in_(iccids), IotCardModel.is_deleted == 0)
+        if user_ids is not None:
+            query = query.where(IotCardModel.user_id.in_(user_ids))
+        if project_id is not None:
+            query = query.where(IotCardModel.project_id == project_id)
+        if ungrouped:
+            query = query.where(IotCardModel.project_id.is_(None))
+        found_cards = list((await db.execute(query)).scalars().all())
         
         # 找到的ICCID
         found_iccids = {card.iccid for card in found_cards}
@@ -1999,7 +2046,9 @@ class IotCardService:
         activated_start: Optional[str] = None,
         activated_end: Optional[str] = None,
         expired_start: Optional[str] = None,
-        expired_end: Optional[str] = None
+        expired_end: Optional[str] = None,
+        project_id: Optional[int] = None,
+        ungrouped: bool = False
     ):
         """导出卡片历史用量"""
         from app.crud.iot_card_crud import card_usage_history_crud
@@ -2034,15 +2083,19 @@ class IotCardService:
 
         user_ids = await self._get_accessible_user_ids(db, current_user_id, user_level)
         if card_ids:
-            cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids)
+            user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
+            cards = await iot_card_crud.get_by_ids(db, card_ids, user_ids=user_ids, project_id=project_id, ungrouped=ungrouped)
         else:
             customer_user_ids = await self._get_customer_filter_user_ids(db, customer_id, user_level)
             if customer_user_ids is not None:
                 user_ids = customer_user_ids
                 customer_id = None
+            user_ids = await self._project_user_scope(db, current_user_id, user_ids, project_id, ungrouped)
             cards, _ = await iot_card_crud.get_list(
                 db=db,
                 user_ids=user_ids,
+                project_id=project_id,
+                ungrouped=ungrouped,
                 keyword=keyword,
                 status=status,
                 carrier=carrier,

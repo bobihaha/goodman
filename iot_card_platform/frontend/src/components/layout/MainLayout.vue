@@ -12,7 +12,10 @@
 
         <el-scrollbar class="menu-scrollbar">
           <el-menu
+            :key="isCollapse ? 'collapsed' : 'expanded'"
+            ref="menuRef"
             :default-active="activeMenu"
+            :default-openeds="openedCardMenus"
             :collapse="isCollapse"
             :unique-opened="true"
             router
@@ -25,16 +28,16 @@
                   <el-icon><component :is="item.icon" /></el-icon>
                   <span>{{ item.name }}</span>
                 </template>
-                <el-menu-item
-                  v-for="child in item.children"
-                  :key="child.path"
-                  :index="child.path"
-                >
-                  <template #default>
+                <template v-for="child in item.children" :key="child.path">
+                  <el-menu-item :index="child.path" @click="child.path === '/cards/list' && menuRef?.close(projectMenuIndex)">
                     <el-icon><component :is="child.icon" /></el-icon>
                     <span>{{ child.name }}</span>
-                  </template>
-                </el-menu-item>
+                  </el-menu-item>
+                  <el-sub-menu v-if="child.path === '/cards/list'" :index="projectMenuIndex" popper-class="card-project-popup">
+                    <template #title><el-icon><Folder /></el-icon><span>项目列表</span></template>
+                    <ProjectGroups :key="userInfo?.id" />
+                  </el-sub-menu>
+                </template>
               </el-sub-menu>
 
               <!-- 无子菜单 -->
@@ -123,15 +126,19 @@
         </el-main>
       </el-container>
     </el-container>
+    <ProjectMoveDialog :key="userInfo?.id" v-model="cardProjects.moveVisible" :projects="cardProjects.projects"
+      :initial-iccids="cardProjects.moveIccids" :initial-target="cardProjects.moveTarget" :source="cardProjects.moveSource"
+      @success="cardProjects.updated" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type MenuInstance } from 'element-plus'
 import {
   Fold,
+  Folder,
   Expand,
   FullScreen,
   User,
@@ -150,14 +157,20 @@ import {
   Calendar
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores'
+import { parseProjectScope, useCardProjectsStore } from '@/stores/modules/cardProjects'
+import ProjectGroups from '@/views/cards/list/components/ProjectGroups.vue'
+import ProjectMoveDialog from '@/views/cards/list/components/ProjectMoveDialog.vue'
 import SuperLoginBanner from '@/components/common/SuperLoginBanner.vue'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const cardProjects = useCardProjectsStore()
+
 
 // 侧边栏折叠状态
 const isCollapse = ref(false)
+const menuRef = ref<MenuInstance>()
 
 // 缓存的视图
 const cachedViews = ref<string[]>([])
@@ -166,7 +179,9 @@ const cachedViews = ref<string[]>([])
 const userInfo = computed(() => authStore.userInfo)
 
 // 当前激活的菜单
-const activeMenu = computed(() => route.path)
+const projectMenuIndex = 'card-projects'
+const inProject = computed(() => route.path === '/cards/list' && parseProjectScope(route.query.project) !== 'all')
+const activeMenu = computed(() => inProject.value ? projectMenuIndex : route.path)
 
 // 图标映射（根据菜单code或path匹配图标）
 const iconMap: Record<string, any> = {
@@ -233,8 +248,27 @@ const convertMenus = (menus: any[]) => {
 // 菜单列表（根据用户权限动态生成）
 const menuList = computed(() => {
   const userMenus = authStore.menus || []
-  return convertMenus(userMenus)
+  return convertMenus(userMenus).map(item => item.path === '/cards/list'
+    ? { path: '/cards', name: '卡片管理', icon: CreditCard, children: [item] }
+    : item)
 })
+
+const cardMenu = computed(() => menuList.value.find(item => item.children?.some((child: any) => child.path === '/cards/list')))
+const openedCardMenus = computed(() => {
+  if (route.path !== '/cards/list' || !cardMenu.value) return []
+  return inProject.value ? [cardMenu.value.path, projectMenuIndex] : [cardMenu.value.path]
+})
+watch(openedCardMenus, async () => {
+  await nextTick()
+  if (!isCollapse.value) openedCardMenus.value.forEach(path => menuRef.value?.open(path))
+})
+watch([() => userInfo.value?.id, () => !!cardMenu.value], ([id, enabled], previous) => {
+  cardProjects.reset()
+  if (previous?.[0] && previous[0] !== id && route.path === '/cards/list') {
+    router.replace({ path: route.path, query: { ...route.query, project: undefined } })
+  }
+  if (id && enabled) cardProjects.refresh()
+}, { immediate: true })
 
 // 面包屑
 const breadcrumbs = computed(() => {

@@ -222,7 +222,7 @@ CREATE TABLE `projects` (
     `name` VARCHAR(100) NOT NULL COMMENT '项目名称',
     `user_id` BIGINT UNSIGNED NOT NULL COMMENT '所属用户ID',
     `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
-    `card_count` INT NOT NULL DEFAULT 0 COMMENT '关联卡片数量',
+    `sort_order` INT NOT NULL DEFAULT 0 COMMENT '账号内项目顺序',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `is_deleted` TINYINT DEFAULT 0,
@@ -230,6 +230,13 @@ CREATE TABLE `projects` (
     KEY `idx_user_id` (`user_id`)
 ) COMMENT='项目表';
 ```
+
+项目卡数 `card_count` 由未删除且持卡人为项目所属账号的卡片实时聚合，不作为存储计数器。
+卡片通过可空的 `iot_cards.project_id` 关联唯一项目；`NULL` 表示未分组。
+普通列表、批量查询、统计和导出指定项目或未分组时均收窄到本人持卡范围。
+持卡人变更时，卡片 ORM 更新钩子强制将 `project_id` 写为 `NULL`，避免划拨、出库、回收或并发更新遗留旧项目关系；直接 SQL 更新持卡人时也必须显式清空该字段。
+项目排序先按 `sort_order` 升序，再按 ID 降序；已有库上线前需应用 `app/db/migrations/20261030_add_project_sort_order.sql`。
+该迁移兼容未创建项目表的环境：按需创建 `projects`，补充默认值为 0 的 `sort_order` 和可空的 `iot_cards.project_id`，不修改已有卡片归属。可重复执行；应用回滚时保留新增结构，不删除项目或卡片数据。
 
 ### 8. 渠道推广积分表
 

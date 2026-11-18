@@ -3,6 +3,8 @@
 包含: 卡片表、采购批次表、流量池表、划拨记录表
 """
 from sqlalchemy import Column, String, Enum, BigInteger, Integer, Date, DateTime, Text, DECIMAL, UniqueConstraint, Index
+from sqlalchemy import event, inspect
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
 from app.db.models.base import BaseModel, Base
@@ -356,3 +358,12 @@ class CardUserRemarkModel(BaseModel):
     user_id = Column(BigInteger, nullable=False, index=True, comment="备注所属用户ID")
     remark = Column(String(500), nullable=True, comment="备注内容")
     source = Column(String(20), nullable=False, default="system", comment="来源: system/h5")
+
+
+@event.listens_for(IotCardModel, "before_update")
+def clear_project_when_owner_changes(mapper, connection, card):
+    """持卡人变更必须清除项目，覆盖划拨、出库、回收和导入修正。"""
+    if inspect(card).attrs.user_id.history.has_changes():
+        card.project_id = None
+        # 即使加载时未分组，也强制写 NULL，防止并发分组留下旧账号的项目关系。
+        flag_modified(card, "project_id")

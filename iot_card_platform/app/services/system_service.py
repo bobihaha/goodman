@@ -321,7 +321,7 @@ class OperationLogService:
         "package_period": ["package_period"],
     }
     MODULE_ACTION_ALIASES = {
-        "card": ["transfer", "update_remark", "suspend", "resume", "restart", "renew", "add_flow", "card_renew_purchase", "card_topup_purchase"],
+        "card": ["transfer", "update_remark", "suspend", "resume", "restart", "renew", "add_flow", "card_renew_purchase", "card_topup_purchase", "move_project", "delete_project"],
         "suspend": ["suspend", "resume", "restart"],
         "pool": ["add_flow", "pool_topup_purchase"],
     }

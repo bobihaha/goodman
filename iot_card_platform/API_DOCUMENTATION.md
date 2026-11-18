@@ -874,6 +874,45 @@
 
 ---
 
+## 13. 卡片项目分组
+
+### 13.1 查询范围
+
+`GET /api/v1/cards`、`GET /api/v1/cards/stats` 和 `POST /api/v1/cards/batch-query` 支持查询参数 `project_id`（正整数）或 `ungrouped=true`，两者互斥。
+批量查询请求体继续使用 ICCID 字符串数组，保持旧接口兼容。
+`POST /api/v1/cards/export` 和 `POST /api/v1/cards/export-history` 在 JSON 请求体接受相同字段；即使传入 `card_ids`，也必须与项目范围取交集。
+不指定分组时保留原有卡片可见范围；指定项目或未分组时仅查询当前账号持有的卡，管理员也不能借项目筛选扩大范围。
+卡片返回值增加 `project_name`（仅补齐本人项目名称），并继续返回 `project_id`。
+
+### 13.2 项目导航和排序
+
+- `GET /api/v1/projects/all` 返回本人项目，字段包含 `id`、`name`、`user_id`、`remark`、`card_count`；卡数为本人未删除卡片数量。
+- `PUT /api/v1/projects/order` 请求体示例：`{"project_ids": [2, 1]}`。必须包含当前账号所有未删除项目 ID，且不得重复；项目集合变化或含其他账号项目时返回业务码 `409`，客户端应刷新后重排。
+- 项目增删改沿用 `/api/v1/projects`；删除项目解除卡片关系，并记录移出审计。
+
+### 13.3 项目转移
+
+`POST /api/v1/projects/move-cards`
+
+```json
+{
+  "iccids": ["89860000000000000001", "89860000000000000002"],
+  "project_id": 2,
+  "source_project_id": 1,
+  "source_ungrouped": false
+}
+```
+
+- `project_id` 必传；正整数为目标项目，`null` 为移出到未分组。
+- `source_project_id` 可选，限制来源项目；`source_ungrouped=true` 限制来源为未分组，两者互斥。项目内操作传入来源约束，来源已变化则逐卡失败。
+- 每批接受 1–10000 个 ICCID 字符串，去空格并去重；格式校验为 10–30 位字母或数字，不将卡号转成数值。格式错误卡逐项返回失败。
+- 卡片与目标项目均须属于当前账号；目标不存在、已删除或不属于本人时整批拒绝，卡号不存在或无权操作统一返回同一失败原因。
+- 返回 `success_count`、`skipped_count`、`failed_count`、`duplicate_count` 及对应 `success_list`、`skipped_list`、`failed_list`；失败项含 `iccid`、`error`。已在目标位置的卡无需变更。
+- 项目变更与操作日志同事务提交；数据库提交失败时回滚。操作日志记录当前账号、超级登录原始账号、卡号、原项目、目标项目和时间。
+- 项目转移不改变持卡人、套餐、流量池或卡片状态。持卡人变更时解除原项目关联。
+
+---
+
 ## 📝 附录
 
 ### 枚举值说明

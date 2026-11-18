@@ -79,13 +79,13 @@ export const cardApi = {
   },
 
   // 获取卡片统计
-  getStats(): Promise<CardStats> {
-    return get<CardStats>('/cards/stats')
+  getStats(params?: { project_id?: number; ungrouped?: boolean }): Promise<CardStats> {
+    return get<CardStats>('/cards/stats', { params })
   },
 
   // 批量查询
   batchQuery(data: CardBatchQueryRequest): Promise<{ found: Card[]; not_found: string[] }> {
-    return post<{ found: Card[]; not_found: string[] }>('/cards/batch-query', data.iccids)
+    return post<{ found: Card[]; not_found: string[] }>('/cards/batch-query', data.iccids, { params: { project_id: data.project_id, ungrouped: data.ungrouped } })
   },
 
   // 单卡划拨

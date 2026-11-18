@@ -57,6 +57,8 @@ class CardInfo(BaseModel):
     imsi: Optional[str] = None
     msisdn: Optional[str] = None
     user_id: Optional[int] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
     related_user_id: Optional[int] = None
     related_user_name: Optional[str] = None
     related_user_account: Optional[str] = None
@@ -214,6 +216,8 @@ class CardRenewQuoteRequest(BaseModel):
 class CardExportRequest(BaseModel):
     """卡片导出请求"""
     card_ids: Optional[List[int]] = Field(None, max_length=10000, description="指定卡片ID列表 (为空则导出全部)")
+    project_id: Optional[int] = Field(None, gt=0, description="本人项目ID")
+    ungrouped: bool = False
     keyword: Optional[str] = Field(None, description="关键词")
     status: Optional[CardStatus] = Field(None, description="按状态筛选")
     carrier: Optional[CarrierType] = Field(None, description="按运营商筛选")

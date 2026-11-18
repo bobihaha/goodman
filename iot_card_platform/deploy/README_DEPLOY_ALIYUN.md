@@ -389,3 +389,9 @@ bash deploy/scripts/predeploy_check.sh
 - 2026-11-04 14:29 复查：四个容器健康，后端连续运行约 24 小时；最近半小时到期任务每 5 分钟正常执行，未再次下发关停，卡 26 仅有上述一笔新停机操作。
 - 已知遗留：卡 ID 5（89860012345678901238）在供应商侧返回 resource-not-found，任务每轮记录一次查询失败并重试；没有擅自删除或修改该历史业务数据。
 - 回滚：恢复本次备份中的原源码，将旧镜像重新标记为 latest，再执行 `docker compose up -d --no-deps --no-build app` 并做健康检查；新增模块可保留不引用。不要恢复整库。应用回滚不会自动撤销已成功的供应商停机，若需恢复网络应按当前套餐与停机原因单独处理。
+
+### 2026-11-10 卡片管理侧栏发布
+
+- 基于生产源码更新 MainLayout.vue 和 ProjectGroups.vue，仅重建前端。卡片列表直达全量视图，项目列表按需展开。
+- 前后端、MySQL、Redis 健康检查通过。使用生产静态资源和模拟业务接口验证了全量入口、项目切换、刷新和浏览器后退。
+- 备份目录为 /home/deploy/iot_card_platform/release_backups/20261110_104552_cardnav。回滚时恢复其中 files 目录的原源码，将 iot_card_frontend:rollback-cardnav-20261110 标记为 iot_card_frontend:latest，然后执行 docker compose up -d --no-deps --no-build frontend 并复查健康状态。

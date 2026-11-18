@@ -78,6 +78,10 @@ const handleClose = () => {
 }
 
 const handleExport = async () => {
+  if (props.exportCount === 0) {
+    ElMessage.warning('当前没有可导出的卡片')
+    return
+  }
   if (!form.value.dateRange || form.value.dateRange.length !== 2) {
     ElMessage.warning('请选择日期范围')
     return

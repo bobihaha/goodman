@@ -31,7 +31,7 @@ class ProjectCRUD:
 
         # 分页查询
         offset = (page - 1) * page_size
-        stmt = select(ProjectModel).where(*conditions).order_by(ProjectModel.id.desc()).offset(offset).limit(page_size)
+        stmt = select(ProjectModel).where(*conditions).order_by(ProjectModel.sort_order.asc(), ProjectModel.id.desc()).offset(offset).limit(page_size)
         result = await db.execute(stmt)
         projects = list(result.scalars().all())
 
@@ -40,6 +40,7 @@ class ProjectCRUD:
         for p in projects:
             card_count_stmt = select(func.count(IotCardModel.id)).where(
                 IotCardModel.project_id == p.id,
+                IotCardModel.user_id == user_id,
                 IotCardModel.is_deleted == 0
             )
             card_count_result = await db.execute(card_count_stmt)
@@ -91,7 +92,7 @@ class ProjectCRUD:
         stmt = select(ProjectModel).where(
             ProjectModel.user_id == user_id,
             ProjectModel.is_deleted == 0
-        ).order_by(ProjectModel.id.desc())
+        ).order_by(ProjectModel.sort_order.asc(), ProjectModel.id.desc())
         result = await db.execute(stmt)
         return list(result.scalars().all())
 

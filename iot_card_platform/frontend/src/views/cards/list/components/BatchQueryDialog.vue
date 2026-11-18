@@ -59,6 +59,7 @@ const BATCH_MAX_COUNT = 10000
 
 interface Props {
   modelValue: boolean
+  projectScope?: { project_id?: number; ungrouped?: boolean }
 }
 
 interface Emits {
@@ -84,7 +85,7 @@ const iccidCount = computed(() => {
 
 const parseICCIDs = (text: string): string[] => {
   if (!text.trim()) return []
-  const lines = text.split(/[\n,]/)
+  const lines = text.split(/[\s,，;；]+/)
   const iccids = lines.map(line => line.trim()).filter(line => line.length > 0)
   return [...new Set(iccids)]
 }
@@ -102,10 +103,12 @@ const handleQuery = async () => {
     return
   }
 
+  const scope = JSON.stringify(props.projectScope)
   loading.value = true
   try {
-    const result = await cardApi.batchQuery({ iccids })
+    const result = await cardApi.batchQuery({ iccids, ...props.projectScope })
 
+    if (!props.modelValue || scope !== JSON.stringify(props.projectScope)) return
     if (result.not_found.length > 0) {
       ElMessage.warning(`查询完成：找到 ${result.found.length} 张，未找到 ${result.not_found.length} 张`)
     } else {

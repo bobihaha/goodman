@@ -1,5 +1,8 @@
 <template>
   <div class="card-list-page">
+    <div class="project-scope-heading">
+      <h2>{{ activeProjectLabel }}</h2><span>{{ pagination.total }} 张卡片</span>
+    </div>
     <!-- 统计卡片 -->
     <div class="stats-row">
       <el-row :gutter="16">
@@ -231,6 +234,7 @@
             <el-icon><Search /></el-icon>
             批量查询
           </el-button>
+          <el-button @click="cardProjects.openMove(selectedCardIccids, undefined, activeProject)">项目转移</el-button>
           <el-button
             type="success"
             @click="showBatchTransferDialog"
@@ -352,6 +356,8 @@
     <!-- 卡片列表 -->
     <el-card class="table-card" shadow="never">
       <el-table
+        ref="cardTableRef"
+        row-key="id"
         v-loading="loading"
         :data="cardList"
         border
@@ -359,6 +365,11 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
+        <el-table-column width="40" fixed align="center">
+          <template #default="{ row }">
+            <span v-if="isOwnCard(row)" class="card-drag-handle" draggable="true" title="拖到项目或未分组" @dragstart="startCardDrag($event, row)">⠿</span>
+          </template>
+        </el-table-column>
         
         <el-table-column prop="iccid" width="200" fixed>
           <template #header>
@@ -511,6 +522,9 @@
               <template v-else-if="column.key === 'related_user_name'">
                 <span>{{ row.related_user_name || '-' }}</span>
               </template>
+              <template v-else-if="column.key === 'project_name'">
+                {{ row.project_name || (isOwnCard(row) && !row.project_id ? '未分组' : '-') }}
+              </template>
               <template v-else-if="column.key === 'remark'">
                 <span>{{ row.remark || '-' }}</span>
               </template>
@@ -537,6 +551,8 @@
                   <el-dropdown-menu>
                     <el-dropdown-item command="detail">详情</el-dropdown-item>
                     <el-dropdown-item command="transfer">划拨</el-dropdown-item>
+                    <el-dropdown-item v-if="isOwnCard(row)" command="project">{{ row.project_id ? '转移项目' : '移入项目' }}</el-dropdown-item>
+                    <el-dropdown-item v-if="isOwnCard(row) && row.project_id" command="removeProject">移出项目</el-dropdown-item>
                     <el-dropdown-item command="remark">备注</el-dropdown-item>
                     <el-dropdown-item v-if="isSuperAdmin" command="renew">续费</el-dropdown-item>
                     <el-dropdown-item
@@ -589,6 +605,7 @@
     <!-- 批量查询对话框 -->
     <BatchQueryDialog
       v-model="batchQueryVisible"
+      :project-scope="projectScope"
       @success="handleBatchQuerySuccess"
     />
 
@@ -706,7 +723,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
@@ -760,8 +777,10 @@ import TransferDialog from './components/TransferDialog.vue'
 import RemarkDialog from './components/RemarkDialog.vue'
 import ExportHistoryDialog from './components/ExportHistoryDialog.vue'
 import CardDiagnosticsDialog from './components/CardDiagnosticsDialog.vue'
+import { parseProjectScope, useCardProjectsStore } from '@/stores/modules/cardProjects'
 
 type DraggableColumnKey =
+  | 'project_name'
   | 'imsi'
   | 'msisdn'
   | 'material'
@@ -798,6 +817,7 @@ interface DraggableColumnConfig {
 const COLUMN_ORDER_STORAGE_KEY = 'card-list-column-order'
 const COLUMN_VISIBILITY_STORAGE_KEY = 'card-list-visible-columns'
 const DEFAULT_DRAGGABLE_COLUMN_ORDER: DraggableColumnKey[] = [
+  'project_name',
   'imsi',
   'msisdn',
   'material',
@@ -822,6 +842,7 @@ const DEFAULT_DRAGGABLE_COLUMN_ORDER: DraggableColumnKey[] = [
 ]
 
 const DRAGGABLE_COLUMN_MAP: Record<DraggableColumnKey, DraggableColumnConfig> = {
+  project_name: { key: 'project_name', label: '所属项目', prop: 'project_name', width: 150, showOverflowTooltip: true },
   imsi: { key: 'imsi', label: 'IMSI', prop: 'imsi', width: 180, sortField: 'imsi' },
   msisdn: { key: 'msisdn', label: '号码', prop: 'msisdn', width: 130, sortField: 'msisdn' },
   material: { key: 'material', label: '材质', prop: 'material_name', width: 160, sortField: 'material' },
@@ -848,6 +869,43 @@ const DRAGGABLE_COLUMN_MAP: Record<DraggableColumnKey, DraggableColumnConfig> = 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const cardProjects = useCardProjectsStore()
+const activeProject = computed(() => parseProjectScope(route.query.project))
+const activeProjectLabel = computed(() => activeProject.value === 'all' ? '全部卡片' : activeProject.value === 'ungrouped' ? '未分组' : cardProjects.projects.find(p => p.id === activeProject.value)?.name || '当前项目')
+const cardTableRef = ref<{ clearSelection: () => void }>()
+const projectScope = computed(() => ({
+  project_id: typeof activeProject.value === 'number' ? activeProject.value : undefined,
+  ungrouped: activeProject.value === 'ungrouped' || undefined
+}))
+const isOwnCard = (card: Card) => card.user_id === authStore.userInfo?.id
+const changeProject = () => {
+  isBatchQueryMode.value = false
+  batchQueryIccids.value = []
+  batchQueryNotFound.value = []
+  clearSelection()
+  cardList.value = []
+  pagination.page = 1
+  pagination.total = 0
+  fetchCardList()
+  fetchStats()
+}
+const handleProjectUpdated = () => {
+  clearSelection()
+  refreshCurrentList()
+  fetchStats()
+}
+const startCardDrag = (event: DragEvent, card: Card) => {
+  const cards = selectedCards.value.some(item => item.id === card.id) ? selectedCards.value : [card]
+  if (!cards.every(isOwnCard) || !event.dataTransfer) {
+    event.preventDefault()
+    ElMessage.warning('只能转移自己账号的卡片，请调整勾选')
+    return
+  }
+  event.dataTransfer.setData('application/x-card-iccids', JSON.stringify(cards.map(item => item.iccid)))
+  event.dataTransfer.effectAllowed = 'move'
+}
+let listRequestId = 0
+let statsRequestId = 0
 
 // 数据
 const loading = ref(false)
@@ -1029,6 +1087,7 @@ const exportHistoryScopeLabel = computed(() => {
 })
 const exportHistoryFilterParams = computed(() => ({
   ...searchForm,
+  ...projectScope.value,
   stock_out_start: stockOutRange.value?.[0] || undefined,
   stock_out_end: stockOutRange.value?.[1] || undefined,
   activated_start: activatedRange.value?.[0] || undefined,
@@ -1252,12 +1311,14 @@ const handleColumnSort = (field: string, order: SortOrder) => {
 
 // 获取卡片列表
 const fetchCardList = async () => {
+  const requestId = ++listRequestId
   loading.value = true
   try {
     const params: CardListParams = {
       page: pagination.page,
       page_size: pagination.page_size,
       ...searchForm,
+      ...projectScope.value,
       stock_out_start: stockOutRange.value?.[0] || undefined,
       stock_out_end: stockOutRange.value?.[1] || undefined,
       activated_start: activatedRange.value?.[0] || undefined,
@@ -1270,34 +1331,52 @@ const fetchCardList = async () => {
     
     const response: any = await cardApi.getList(params)
     
+    if (requestId !== listRequestId) return
+    clearSelection()
     cardList.value = normalizeCardList(response.items || [])
+    if (!cardList.value.length && response.total > 0 && pagination.page > 1) {
+      pagination.page = Math.max(1, Math.ceil(response.total / pagination.page_size))
+      await fetchCardList()
+      return
+    }
     
     pagination.total = response.total
   } catch (error) {
     console.error('获取卡片列表失败:', error)
   } finally {
-    loading.value = false
+    if (requestId === listRequestId) loading.value = false
   }
 }
 
 const refreshCurrentList = async () => {
   if (isBatchQueryMode.value && batchQueryIccids.value.length > 0) {
-    const result = await cardApi.batchQuery({ iccids: batchQueryIccids.value })
-    batchQueryNotFound.value = result.not_found
-    cardList.value = normalizeCardList(result.found)
-    pagination.total = result.found.length
-    pagination.page = 1
-    sortBatchQueryList()
+    const requestId = ++listRequestId
+    loading.value = true
+    try {
+      const result = await cardApi.batchQuery({ iccids: batchQueryIccids.value, ...projectScope.value })
+      if (requestId !== listRequestId) return
+      clearSelection()
+      batchQueryNotFound.value = result.not_found
+      cardList.value = normalizeCardList(result.found)
+      pagination.total = result.found.length
+      pagination.page = 1
+      sortBatchQueryList()
+    } catch (error) {
+      console.error('刷新批量查询失败:', error)
+    } finally {
+      if (requestId === listRequestId) loading.value = false
+    }
     return
   }
-
   await fetchCardList()
 }
 
 // 获取统计数据
 const fetchStats = async () => {
+  const requestId = ++statsRequestId
   try {
-    stats.value = await cardApi.getStats()
+    const result = await cardApi.getStats(projectScope.value)
+    if (requestId === statsRequestId) stats.value = result
   } catch (error) {
     console.error('获取统计数据失败:', error)
   }
@@ -1322,6 +1401,10 @@ const searchCustomers = async (query: string) => {
 
 // 搜索
 const handleSearch = () => {
+  isBatchQueryMode.value = false
+  batchQueryIccids.value = []
+  batchQueryNotFound.value = []
+  clearSelection()
   pagination.page = 1
   fetchCardList()
 }
@@ -1373,6 +1456,7 @@ const handleSelectionChange = (selection: Card[]) => {
 
 // 清空选择
 const clearSelection = () => {
+  cardTableRef.value?.clearSelection()
   selectedCards.value = []
 }
 
@@ -1383,20 +1467,19 @@ const viewDetail = (id: number) => {
 
 // 显示批量查询对话框
 const showBatchQueryDialog = async () => {
-  if (selectedCardIccids.value.length > 0) {
+  const iccids = [...selectedCardIccids.value]
+  if (iccids.length > 0) {
+    const requestId = ++listRequestId
     loading.value = true
     try {
-      const result = await cardApi.batchQuery({ iccids: selectedCardIccids.value })
-      handleBatchQuerySuccess({
-        ...result,
-        iccids: selectedCardIccids.value
-      })
-      ElMessage.success(`已按勾选的 ${selectedCardIccids.value.length} 张卡片查询`)
+      const result = await cardApi.batchQuery({ iccids, ...projectScope.value })
+      if (requestId !== listRequestId) return
+      handleBatchQuerySuccess({ ...result, iccids })
+      ElMessage.success(`已按勾选的 ${iccids.length} 张卡片查询`)
     } catch (error) {
       console.error('批量查询失败:', error)
-      ElMessage.error('批量查询失败')
     } finally {
-      loading.value = false
+      if (requestId === listRequestId) loading.value = false
     }
     return
   }
@@ -1445,6 +1528,7 @@ const showBatchResumeDialog = () => {
 
 // 导出
 const handleExport = async () => {
+  if (exportHistoryCount.value === 0) { ElMessage.warning('当前没有可导出的卡片'); return }
   try {
     const params = {
       ...exportHistoryFilterParams.value,
@@ -1540,6 +1624,10 @@ const handleRowRefresh = async (card: Card) => {
 
 const handleRowAction = (command: string, card: Card) => {
   switch (command) {
+    case 'project':
+    case 'removeProject':
+      cardProjects.openMove([card.iccid], command === 'removeProject' ? 0 : undefined, card.project_id || 'ungrouped')
+      break
     case 'detail':
       viewDetail(card.id)
       break
@@ -1681,6 +1769,9 @@ const handleRowForceResume = async (card: Card) => {
 
 // 批量查询成功回调
 const handleBatchQuerySuccess = (data: { found: Card[]; not_found: string[]; iccids: string[] }) => {
+  ++listRequestId
+  loading.value = false
+  clearSelection()
   isBatchQueryMode.value = true
   batchQueryIccids.value = data.iccids
   batchQueryNotFound.value = data.not_found
@@ -1700,6 +1791,7 @@ const clearBatchQuery = () => {
 
 // 批量划拨成功回调
 const handleBatchTransferSuccess = () => {
+  cardProjects.refresh()
   clearSelection()
   refreshCurrentList()
   fetchStats()
@@ -1740,6 +1832,7 @@ const handleBatchResumeSuccess = () => {
 
 // 单卡划拨成功回调
 const handleTransferSuccess = () => {
+  cardProjects.refresh()
   refreshCurrentList()
   fetchStats()
 }
@@ -1767,6 +1860,9 @@ const getProgressColor = (percent: number) => {
 }
 
 // 初始化
+watch([activeProject, () => authStore.userInfo?.id], changeProject)
+watch(() => cardProjects.revision, handleProjectUpdated)
+
 onMounted(() => {
   loadColumnOrder()
   loadVisibleColumns()
@@ -1798,6 +1894,11 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.project-scope-heading { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.project-scope-heading h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.project-scope-heading > span { flex-shrink: 0; color: #86909c; font-size: 13px; }
+
+.card-drag-handle { cursor: grab; color: #86909c; padding: 8px 0; display: inline-block; }
 .card-list-page {
   padding: 16px 20px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',

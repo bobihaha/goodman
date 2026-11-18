@@ -3,10 +3,16 @@
  */
 
 import request from '@/utils/request'
-import type { Project, ProjectCreateRequest, ProjectUpdateRequest, ProjectListParams } from '@/types/project'
+import type { Project, ProjectCreateRequest, ProjectUpdateRequest, ProjectListParams, ProjectMoveRequest, ProjectMoveResult } from '@/types/project'
 import type { PaginationResponse } from '@/types/common'
 
 export const projectApi = {
+  reorder(projectIds: number[]): Promise<void> {
+    return request.put('/projects/order', { project_ids: projectIds })
+  },
+  moveCards(data: ProjectMoveRequest): Promise<ProjectMoveResult> {
+    return request.post('/projects/move-cards', data)
+  },
   /**
    * 获取项目列表
    */
@@ -17,7 +23,7 @@ export const projectApi = {
   /**
    * 获取所有项目（下拉选择用）
    */
-  getAll(): Promise<{ id: number; name: string }[]> {
+  getAll(): Promise<Project[]> {
     return request.get('/projects/all')
   },
 

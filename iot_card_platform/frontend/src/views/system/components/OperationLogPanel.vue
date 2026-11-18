@@ -43,6 +43,8 @@
           @change="handleSearch"
         >
           <el-option label="修改备注" value="update_remark" />
+          <el-option label="项目转移" value="move_project" />
+          <el-option label="删除项目移出" value="delete_project" />
           <el-option label="停机" value="suspend" />
           <el-option label="复机" value="resume" />
           <el-option label="重启" value="restart" />
@@ -161,6 +163,8 @@ const moduleNames: Record<string, string> = {
 
 const actionNames: Record<string, string> = {
   update_remark: '修改备注',
+  move_project: '项目转移',
+  delete_project: '删除项目移出',
   suspend: '停机',
   resume: '复机',
   restart: '重启',
@@ -191,6 +195,10 @@ const formatDetail = (row: OperationLog) => {
   if (!row.detail) return '-'
   try {
     const detail = JSON.parse(row.detail)
+    if (['move_project', 'delete_project'].includes(row.action)) {
+      const projectLabel = (id: number | null) => id ? `项目 #${id}` : '未分组'
+      return `${projectLabel(detail.old_project_id)} → ${projectLabel(detail.new_project_id)}`
+    }
     if (row.action === 'update_remark') {
       return `备注：${detail.old_remark || '无'} → ${detail.new_remark || '无'}`
     }

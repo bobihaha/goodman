@@ -32,6 +32,8 @@ export interface Card {
   imsi?: string
   msisdn?: string
   user_id?: number
+  project_id?: number | null
+  project_name?: string | null
   supplier_id?: number
   batch_id?: string
   sale_package_id?: number
@@ -92,6 +94,8 @@ export interface Card {
 
 // 卡片列表查询参数
 export interface CardListParams {
+  project_id?: number
+  ungrouped?: boolean
   page?: number
   page_size?: number
   iccid?: string
@@ -137,6 +141,8 @@ export interface CardStats {
 
 // 批量查询请求
 export interface CardBatchQueryRequest {
+  project_id?: number
+  ungrouped?: boolean
   iccids: string[]
 }
 

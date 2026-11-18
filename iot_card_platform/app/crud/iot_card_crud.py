@@ -114,6 +114,7 @@ class IotCardCRUD:
         customer_id: Optional[int] = None,
         batch_id: Optional[str] = None,
         project_id: Optional[int] = None,
+        ungrouped: bool = False,
         stock_out_start: Optional[str] = None,
         stock_out_end: Optional[str] = None,
         activated_start: Optional[str] = None,
@@ -242,6 +243,10 @@ class IotCardCRUD:
             query = query.where(batch_filter).params(stock_out_record_no=batch_keyword)
             count_query = count_query.where(batch_filter).params(stock_out_record_no=batch_keyword)
 
+        if ungrouped:
+            query = query.where(IotCardModel.project_id.is_(None))
+            count_query = count_query.where(IotCardModel.project_id.is_(None))
+
         # 项目过滤
         if project_id is not None:
             query = query.where(IotCardModel.project_id == project_id)
@@ -364,7 +369,7 @@ class IotCardCRUD:
 
         return stats
 
-    async def get_stats_in_scope(self, db: AsyncSession, user_ids: Optional[List[int]] = None) -> dict:
+    async def get_stats_in_scope(self, db: AsyncSession, user_ids: Optional[List[int]] = None, project_id: Optional[int] = None, ungrouped: bool = False) -> dict:
         """获取卡片统计（支持用户可见范围）"""
         query = select(
             IotCardModel.status,
@@ -375,6 +380,10 @@ class IotCardCRUD:
             query = query.where(IotCardModel.user_id.in_(user_ids))
 
         query = query.group_by(IotCardModel.status)
+        if project_id is not None:
+            query = query.where(IotCardModel.project_id == project_id)
+        if ungrouped:
+            query = query.where(IotCardModel.project_id.is_(None))
         result = await db.execute(query)
         rows = result.all()
 
@@ -558,7 +567,9 @@ class IotCardCRUD:
         db: AsyncSession,
         card_ids: List[int],
         user_id: Optional[int] = None,
-        user_ids: Optional[List[int]] = None
+        user_ids: Optional[List[int]] = None,
+        project_id: Optional[int] = None,
+        ungrouped: bool = False
     ) -> List[IotCardModel]:
         """根据ID列表获取卡片"""
         query = select(IotCardModel).where(
@@ -569,6 +580,10 @@ class IotCardCRUD:
             query = query.where(IotCardModel.user_id.in_(user_ids))
         elif user_id is not None:
             query = query.where(IotCardModel.user_id == user_id)
+        if project_id is not None:
+            query = query.where(IotCardModel.project_id == project_id)
+        if ungrouped:
+            query = query.where(IotCardModel.project_id.is_(None))
         result = await db.execute(query)
         return list(result.scalars().all())
 

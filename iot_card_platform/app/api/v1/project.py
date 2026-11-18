@@ -3,7 +3,10 @@
 """
 from fastapi import APIRouter, Depends, Body, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.project import ProjectCreate, ProjectUpdate
+from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectOrderRequest, ProjectMoveRequest
+from app.services.project_service import project_service
+from sqlalchemy import select, func
+from app.db.models.iot_card import IotCardModel
 from app.schemas.common import ResponseModel
 from app.schemas.auth import CurrentUser
 from app.crud.project_crud import project_crud
@@ -35,7 +38,32 @@ async def get_all_projects(
 ):
     """获取当前用户的所有项目（不分页）"""
     projects = await project_crud.get_all_by_user(db, current_user.id)
-    return ResponseModel(data=[{"id": p.id, "name": p.name} for p in projects])
+    counts = dict((await db.execute(select(IotCardModel.project_id, func.count()).where(
+        IotCardModel.user_id == current_user.id, IotCardModel.is_deleted == 0,
+    ).group_by(IotCardModel.project_id))).all())
+    return ResponseModel(data=[{"id": p.id, "name": p.name, "remark": p.remark, "user_id": p.user_id,
+                                "card_count": counts.get(p.id, 0)} for p in projects])
+
+
+@router.put("/order", summary="保存项目顺序", response_model=ResponseModel)
+async def reorder_projects(
+    data: ProjectOrderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    await project_service.reorder(db, current_user.id, data.project_ids)
+    return ResponseModel(msg="排序已保存")
+
+
+@router.post("/move-cards", summary="批量移入、转移或移出项目", response_model=ResponseModel)
+async def move_project_cards(
+    data: ProjectMoveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    result = await project_service.move_cards(db, current_user.id, data, current_user.original_user_id)
+    return ResponseModel(data=result)
+
 
 
 @router.get("/{project_id}", summary="项目详情", response_model=ResponseModel)
@@ -111,5 +139,5 @@ async def delete_project(
         return ResponseModel(code=404, msg="项目不存在")
     if project.user_id != current_user.id:
         return ResponseModel(code=403, msg="无权删除此项目")
-    await project_crud.delete(db, project)
+    await project_service.delete(db, current_user.id, project_id, current_user.original_user_id)
     return ResponseModel(msg="删除成功")

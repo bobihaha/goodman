@@ -19,6 +19,19 @@ export function setupRouterGuards(router: Router): void {
     // 判断是否需要登录
     if (to.meta.requiresAuth) {
       if (authStore.isLoggedIn) {
+        if (!authStore.userInfo) {
+          try {
+            await authStore.getUserInfo()
+          } catch (error) {
+            console.error('恢复登录信息失败:', error)
+            next({
+              path: '/login',
+              query: { redirect: to.fullPath }
+            })
+            return
+          }
+        }
+
         // 已登录，检查菜单权限
         if (to.path !== '/dashboard' && to.path !== '/') {
           // 确保菜单已加载
