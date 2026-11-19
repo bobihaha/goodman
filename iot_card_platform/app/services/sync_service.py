@@ -350,6 +350,8 @@ class SyncService:
         card: IotCardModel,
         lifecycle_status: str
     ) -> str:
+        if getattr(card, "admin_stop_token", None):
+            return card.status.value
         valid_statuses = {status.value for status in CardStatus}
         if not lifecycle_status or lifecycle_status not in valid_statuses:
             current_status = card.status.value if hasattr(card.status, "value") else card.status
@@ -360,6 +362,7 @@ class SyncService:
             SuspendType.expired,
             SuspendType.card_exceed,
             SuspendType.pool_exceed,
+            SuspendType.device_separation,
         }
         current_suspend_type = card.suspend_type or SuspendType.none
 
@@ -886,6 +889,46 @@ class SyncService:
 
     # ============ 单卡同步 ============
 
+    async def refresh_card_lifecycle(self, db, card, supplier, client):
+        """手动刷新时读取实时状态，避免覆盖查询期间出现的新停复机操作。"""
+        from app.services.card_state_reconcile_service import decision
+        from app.db.models.suspend import SuspendLogModel
+
+        identity = (card.user_id, card.supplier_id, card.iccid)
+        before = await self._get_latest_supplier_operation(db, card.id)
+        before_id = before.id if before else None
+        lifecycle = await self._retry_api_call(client.get_card_lifecycle, card.iccid)
+        status = lifecycle.get("status")
+        if status not in {item.value for item in CardStatus}:
+            raise BusinessException(code=502, msg="供应商未返回有效卡状态")
+        await db.refresh(card, with_for_update=True)
+        if card.is_deleted or identity != (card.user_id, card.supplier_id, card.iccid):
+            raise BusinessException(code=409, msg="卡片归属已变化，请重新查询")
+        operation = (await db.execute(select(SupplierSuspendOperationModel).where(
+            SupplierSuspendOperationModel.card_id == card.id,
+            SupplierSuspendOperationModel.is_deleted == 0,
+        ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1).with_for_update()
+          .execution_options(populate_existing=True))).scalar_one_or_none()
+        if before_id != (operation.id if operation else None):
+            return lifecycle
+        if card.admin_stop_token:
+            from app.services.suspend_service import SuspendActionService
+            await SuspendActionService.enforce_admin_stop(db, card, supplier, lifecycle, operation)
+            return lifecycle
+        if operation and operation.callback_status == "pending":
+            return lifecycle
+        if card.status == CardStatus.suspended and status == CardStatus.activated.value:
+            if decision(card, lifecycle, supplier.code, operation, manual_refresh=True) != "repair":
+                return lifecycle
+            db.add(SuspendLogModel(card_id=card.id, iccid=card.iccid, action=SuspendActionType.resume,
+                                   suspend_type=(card.suspend_type or SuspendType.none).value,
+                                   api_called=0, reason="手动刷新：供应商确认已激活"))
+            resolved = status
+        else:
+            resolved = await self._resolve_lifecycle_status(db, card, status)
+        self._apply_resolved_lifecycle_status(card, resolved)
+        return lifecycle
+
     async def sync_single_card(
         self,
         db: AsyncSession,
@@ -969,20 +1012,13 @@ class SyncService:
 
             # 同步流量（带重试）
             usage_data = await self._retry_api_call(client.get_card_usage, iccid)
-            usage_accepted, _, month_usage_reset, usage_reject_reason = self._apply_usage_snapshot(
-                card,
-                usage_data,
-            )
-
             lifecycle_data = {}
             lifecycle_error = None
             supplier_expired_at = None
             preserved_local_expiry = False
             preserved_local_lifecycle_dates = []
             try:
-                lifecycle_data = self._extract_lifecycle_from_usage(usage_data, iccid)
-                if not lifecycle_data.get("status"):
-                    lifecycle_data = await self._retry_api_call(client.get_card_lifecycle, iccid)
+                lifecycle_data = await self.refresh_card_lifecycle(db, card, supplier, client)
                 if lifecycle_data.get("test_expire_date"):
                     supplier_test_expire_date = datetime.strptime(
                         lifecycle_data["test_expire_date"], "%Y-%m-%d"
@@ -1017,15 +1053,17 @@ class SyncService:
                         card,
                         supplier_expired_at
                     )
-                if lifecycle_data.get("status"):
-                    resolved_status = await self._resolve_lifecycle_status(
-                        db,
-                        card,
-                        lifecycle_data["status"]
-                    )
-                    self._apply_resolved_lifecycle_status(card, resolved_status)
+            except BusinessException as exc:
+                if exc.code == 409:
+                    raise
+                lifecycle_error = str(exc)
             except Exception as exc:
                 lifecycle_error = str(exc)
+
+            usage_accepted, _, month_usage_reset, usage_reject_reason = self._apply_usage_snapshot(
+                card,
+                usage_data,
+            )
 
             imei_info = {}
             try:
@@ -1161,6 +1199,7 @@ class SyncService:
                 "failed": 0 if usage_accepted else 1,
                 "status": final_sync_status.value,
                 "usage_reject_reason": usage_reject_reason,
+                "lifecycle_error": lifecycle_error,
                 "changed": bool(changed_fields),
                 "changed_fields": changed_fields,
                 "device_separation_detection_status": detection_status,

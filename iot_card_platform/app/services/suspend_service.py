@@ -6,7 +6,7 @@ import json
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import logging
 
 from app.crud.suspend_crud import (
@@ -264,6 +264,8 @@ class SuspendActionService:
         if not target_status or target_status not in {status.value for status in CardStatus}:
             return
 
+        if getattr(card, "admin_stop_token", None) and target_status != "suspended":
+            return
         card.status = CardStatus(target_status)
 
         if target_status == CardStatus.suspended.value:
@@ -572,6 +574,25 @@ class SuspendActionService:
                     request_result=json.dumps(request_meta, ensure_ascii=False)
                 )
 
+                await db.refresh(card, with_for_update=True)
+                latest_id = (await db.execute(
+                    select(SupplierSuspendOperationModel.id).where(
+                        SupplierSuspendOperationModel.card_id == card.id,
+                        SupplierSuspendOperationModel.is_deleted == 0,
+                    ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1).with_for_update()
+                )).scalar_one_or_none()
+                if latest_id != operation.id:
+                    await SupplierSuspendOperationCRUD.update_callback_result(
+                        db, operation, "{}", "SUPERSEDED", "已有更新的停复机操作，忽略旧对账结果",
+                        lifecycle_status, "failed",
+                    )
+                    await SuspendActionService._safe_update_supplier_action_audit(
+                        db=db, request_meta=request_meta, status="failed",
+                        callback_no=callback_no, supplier_status=lifecycle_status,
+                        error="已有更新的停复机操作，忽略旧对账结果", operation=operation,
+                    )
+                    return
+
                 if not SuspendActionService._matches_operation_target(operation.action, lifecycle_status):
                     if (
                         operation.action == SuspendActionType.resume
@@ -628,6 +649,7 @@ class SuspendActionService:
                             request_meta["suspend_type"],
                         )
                 if not is_expired_operation:
+                    await SuspendActionService.confirm_admin_resume(db, card, expiry_context.get("admin_unlock_token"), lifecycle_status)
                     SuspendActionService.normalize_card_suspend_state(
                         card,
                         lifecycle_status,
@@ -882,13 +904,124 @@ class SuspendActionService:
             return False, callback_no, None
 
     @staticmethod
+    async def set_admin_stop(db, iccid, operator_id, *, release=False):
+        from app.utils.exceptions import BusinessException
+        from app.services.expired_suspend_service import operation_context
+
+        card = (await db.execute(select(IotCardModel).where(
+            IotCardModel.iccid == iccid, IotCardModel.is_deleted == 0
+        ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+        if not card:
+            raise BusinessException(404, "卡片不存在")
+        supplier = await db.get(SupplierModel, card.supplier_id)
+        if not supplier or supplier.is_deleted or not SuspendActionService._supplier_supports_network_switch(card, supplier):
+            raise BusinessException(400, "供应商不支持停复机")
+        latest = (await db.execute(select(SupplierSuspendOperationModel).where(
+            SupplierSuspendOperationModel.card_id == card.id, SupplierSuspendOperationModel.is_deleted == 0,
+        ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1).with_for_update())).scalar_one_or_none()
+        unlocking = latest and latest.action == SuspendActionType.resume and latest.callback_status == "pending"
+        if release:
+            meta = operation_context(latest) if latest else {}
+            if (unlocking and card.admin_stop_token and meta.get("admin_unlock_token") == card.admin_stop_token
+                    and meta.get("submitted") is not False
+                    and latest.created_at >= datetime.now() - timedelta(minutes=10)):
+                return "管理员复机正在处理中"
+            if not card.admin_stop_token:
+                raise BusinessException(400, "该卡未强制锁定")
+            token = card.admin_stop_token
+            ok, callback_no, status = await SuspendActionService._call_supplier_resume(
+                db, card, supplier, operator_id, unlock_token=token)
+            if ok and status in ("activated", "testing", "silent"):
+                confirmed = await SuspendActionService.confirm_admin_resume(db, card, token, status)
+                await db.commit()
+                if not confirmed:
+                    return "卡片锁定状态已变化，请刷新后确认"
+                return "供应商已确认复机，已解除锁定"
+            submitted = await SuspendActionService._admin_switch_submitted(db, ok, callback_no)
+            return "管理员复机已提交，等待供应商确认" if submitted else "复机提交失败，保留锁定"
+        if card.status in (CardStatus.cancelled, CardStatus.stock):
+            raise BusinessException(400, "当前状态不支持强制停卡")
+        if card.admin_stop_token and not unlocking:
+            return "卡片已强制锁定"
+        token = uuid.uuid4().hex
+        card.admin_stop_token = token
+        db.add(SuspendLogModel(card_id=card.id, iccid=card.iccid, action=SuspendActionType.suspend,
+                               suspend_type="manual", operator_id=operator_id, api_called=0,
+                               reason="超级管理员强制锁定"))
+        await db.flush()
+        ok, callback_no, status = await SuspendActionService._call_supplier_suspend(
+            db, card, supplier, "超级管理员强制停卡", operator_id)
+        if ok and status == "suspended":
+            await db.refresh(card, with_for_update=True)
+            latest_callback = (await db.execute(select(SupplierSuspendOperationModel.callback_no).where(
+                SupplierSuspendOperationModel.card_id == card.id, SupplierSuspendOperationModel.is_deleted == 0,
+            ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1).with_for_update())).scalar_one_or_none()
+            if card.admin_stop_token != token or (latest_callback and latest_callback != callback_no):
+                return "卡片锁定状态已变化，请刷新后确认"
+            SuspendActionService.normalize_card_suspend_state(card, status, reason="超级管理员强制停卡")
+        await db.commit()
+        submitted = await SuspendActionService._admin_switch_submitted(db, ok, callback_no)
+        return "已锁定，停机已提交" if submitted else "已锁定，供应商停机提交失败"
+
+    @staticmethod
+    async def _admin_switch_submitted(db, ok, callback_no):
+        from app.services.expired_suspend_service import operation_context
+        if ok or not callback_no:
+            return ok
+        operation = await SupplierSuspendOperationCRUD.get_by_callback_no(db, callback_no)
+        return bool(operation_context(operation).get("submitted"))
+
+    @staticmethod
+    async def confirm_admin_resume(db, card, token, status):
+        if token and status in ("activated", "testing", "silent"):
+            await db.refresh(card, with_for_update=True)
+            if card.admin_stop_token == token:
+                card.admin_stop_token = None
+                SuspendActionService.normalize_card_suspend_state(card, status)
+                return True
+        return False
+
+    @staticmethod
+    async def enforce_admin_stop(db, card, supplier, lifecycle, operation):
+        observed = lifecycle.get("network_status") if supplier.code == "002" else lifecycle.get("status")
+        if observed == "suspended":
+            SuspendActionService.normalize_card_suspend_state(card, observed, reason="超级管理员强制停卡")
+            return
+        if observed not in ("activated", "testing", "silent"):
+            return
+        if operation and operation.action == SuspendActionType.resume and operation.callback_status == "pending":
+            from app.services.expired_suspend_service import operation_context
+            meta = operation_context(operation)
+            if (card.admin_stop_token and meta.get("submitted") is True
+                    and operation.supplier_id == card.supplier_id and operation.iccid == card.iccid
+                    and meta.get("admin_unlock_token") == card.admin_stop_token):
+                if await SuspendActionService.confirm_admin_resume(db, card, card.admin_stop_token, observed):
+                    await SupplierSuspendOperationCRUD.update_callback_result(
+                        db, operation, json.dumps({"source": "supplier_state_reconcile", "status": observed}),
+                        "200", "实时查询确认管理员复机成功", observed, "success",
+                    )
+                return
+        if operation and operation.created_at >= datetime.now() - timedelta(minutes=10):
+            if operation.callback_status == "pending" or (
+                operation.action == SuspendActionType.suspend and operation.callback_status == "failed"
+            ):
+                return
+        await SuspendActionService._call_supplier_suspend(db, card, supplier, "强制锁定期间供应商开网，重新停机")
+
+    @staticmethod
     async def _call_supplier_resume(
         db: AsyncSession,
         card: IotCardModel,
         supplier: Optional[SupplierModel],
         operator_id: Optional[int] = None,
         request_context: Optional[Dict[str, Any]] = None,
+        *, unlock_token: Optional[str] = None,
     ) -> tuple[bool, Optional[str], Optional[str]]:
+        await db.refresh(card, attribute_names=["admin_stop_token"], with_for_update=True)
+        if card.admin_stop_token != unlock_token:
+            return False, None, None
+        if unlock_token:
+            request_context = {**(request_context or {}), "admin_unlock_token": unlock_token}
         if not SuspendActionService._supplier_supports_network_switch(card, supplier):
             logger.warning(
                 "供应商不支持当前卡片网络恢复: supplier_code=%s iccid=%s card_type=%s",
@@ -901,7 +1034,7 @@ class SuspendActionService:
             )
             return False, None, None
         callback_no = SuspendActionService._generate_callback_no(SuspendActionType.resume, card.iccid)
-        request_payload = {"number": card.iccid, "type": "00", "callback_no": callback_no}
+        request_payload = {"number": card.iccid, "type": "00", "callback_no": callback_no, **(request_context or {})}
         operation = await SuspendActionService._create_supplier_operation(
             db=db,
             card=card,
@@ -1168,6 +1301,8 @@ class SuspendActionService:
         force: bool = False
     ) -> Tuple[bool, Optional[str]]:
         """检查卡片是否满足复机条件"""
+        if getattr(card, "admin_stop_token", None):
+            return False, "该卡已强制锁定，仅超级管理员可在强制停卡管理中解除"
         if force:
             return True, None
 
@@ -1718,7 +1853,11 @@ class SupplierCallbackService:
 
         callback_success = callback_code in {"200", "0", "SUCCESS", "success"}
         mapped_status = UPIOT_STATUS_MAP.get(account_status or "", None)
-        latest_operation_id = await SupplierSuspendOperationCRUD.get_latest_id_for_card(db, operation.card_id)
+        card = await db.get(IotCardModel, operation.card_id, with_for_update=True, populate_existing=True)
+        await db.refresh(operation, with_for_update=True)
+        if operation.callback_status != "pending":
+            return
+        latest_operation_id = await SupplierSuspendOperationCRUD.get_latest_id_for_card(db, operation.card_id, for_update=True)
         is_latest_operation = latest_operation_id == operation.id
         action_matches_status = (
             operation.action == SuspendActionType.suspend and mapped_status == CardStatus.suspended.value
@@ -1746,9 +1885,9 @@ class SupplierCallbackService:
 
         from app.services.expired_suspend_service import operation_context, confirm_expired_operation
         is_expired_operation = operation_context(operation).get("operation_source") == "expired"
-        card = await db.get(IotCardModel, operation.card_id)
         previous_status = card.status if card else None
         if card and callback_applies and not is_expired_operation:
+            await SuspendActionService.confirm_admin_resume(db, card, operation_context(operation).get("admin_unlock_token"), mapped_status)
             SuspendActionService.normalize_card_suspend_state(card, mapped_status)
 
         await SupplierSuspendOperationCRUD.update_callback_result(

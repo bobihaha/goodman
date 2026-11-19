@@ -232,10 +232,11 @@ def test_extract_lifecycle_from_usage_reuses_supplier_snapshot():
 
 
 @pytest.mark.asyncio
-async def test_resolve_lifecycle_status_preserves_business_suspend():
+@pytest.mark.parametrize("kind", [SuspendType.manual, SuspendType.device_separation])
+async def test_resolve_lifecycle_status_preserves_business_suspend(kind):
     service = SyncService()
     card = DummyCard()
-    card.suspend_type = SuspendType.manual
+    card.suspend_type = kind
 
     resolved = await service._resolve_lifecycle_status(None, card, CardStatus.activated.value)
 

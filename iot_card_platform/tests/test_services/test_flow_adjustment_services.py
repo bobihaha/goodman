@@ -24,7 +24,7 @@ def mock_db():
 class TestSuspendActionService:
     @pytest.mark.asyncio
     async def test_manual_resume_rejects_manual_suspend_without_force(self, mock_db):
-        card = MagicMock()
+        card = MagicMock(admin_stop_token=None)
         card.id = 1
         card.iccid = "8986000000000000001"
         card.status = CardStatus.suspended
@@ -59,7 +59,7 @@ class TestSuspendActionService:
 
     @pytest.mark.asyncio
     async def test_manual_resume_allows_card_exceed_after_topup(self, mock_db):
-        card = MagicMock()
+        card = MagicMock(admin_stop_token=None)
         card.id = 2
         card.iccid = "8986000000000000002"
         card.status = CardStatus.suspended

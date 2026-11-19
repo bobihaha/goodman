@@ -202,6 +202,7 @@ async def test_h5_suspend_callback_refreshes_pool_stats_after_status_change():
     db = MagicMock()
     db.get = AsyncMock(return_value=card)
 
+    db.refresh = AsyncMock()
     with patch(
         "app.services.suspend_service.SupplierSuspendOperationCRUD.get_by_callback_no",
         AsyncMock(return_value=operation),
@@ -247,6 +248,7 @@ async def test_failed_callback_does_not_change_card_status():
     )
     db = MagicMock(get=AsyncMock(return_value=card))
 
+    db.refresh = AsyncMock()
     with patch(
         "app.services.suspend_service.SupplierSuspendOperationCRUD.get_by_callback_no",
         AsyncMock(return_value=operation),

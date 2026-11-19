@@ -372,6 +372,9 @@ class PackagePeriodService:
             if not card:
                 failed_list.append({"iccid": iccid, "error": "卡片不存在"})
                 continue
+            if getattr(card, "admin_stop_token", None):
+                failed_list.append({"iccid": iccid, "error": "该卡已强制锁定"})
+                continue
             if card.status not in {CardStatus.testing, CardStatus.silent}:
                 failed_list.append({"iccid": iccid, "error": f"仅支持测试期/沉默期卡，当前状态: {card.status.value}"})
                 continue

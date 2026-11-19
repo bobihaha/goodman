@@ -97,6 +97,7 @@ class CardInfo(BaseModel):
     # 状态
     status: Optional[str] = None
     status_name: Optional[str] = None
+    admin_stop_locked: bool = False
     suspend_type: Optional[str] = None
     suspend_type_name: Optional[str] = None
     suspend_at: Optional[str] = None

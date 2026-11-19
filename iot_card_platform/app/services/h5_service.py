@@ -309,6 +309,22 @@ class H5Service:
         ]
         return {"match_type": "fuzzy_multiple", "items": candidates}
 
+    async def sync_card_status(self, db: AsyncSession, slug: str, card_id: int) -> dict:
+        from app.services.sync_service import sync_service
+        user = await self._get_h5_user(db, slug)
+        card = await self._get_card_in_scope(db, user, card_id)
+        if not card:
+            raise BusinessException(code=404, msg="卡片不存在")
+        supplier = await sync_service._get_supplier(db, card.supplier_id)
+        if not supplier:
+            raise BusinessException(code=404, msg="供应商不存在")
+        client = get_supplier_client(supplier_id=supplier.id, api_url=supplier.api_url or "",
+                                     api_key=supplier.api_key or "", api_secret=supplier.api_secret or "",
+                                     supplier_code=supplier.code, api_config=supplier.api_config)
+        await sync_service.refresh_card_lifecycle(db, card, supplier, client)
+        await db.commit()
+        return await self.get_card_detail(db, slug, card_id)
+
     async def get_card_detail(self, db: AsyncSession, slug: str, card_id: int) -> dict:
         user = await self._get_h5_user(db, slug)
         card = await iot_card_service.get_card_detail(
@@ -333,7 +349,7 @@ class H5Service:
             "diagnostics": diagnostics,
             "actions": H5CardActionFlags(
                 allow_suspend=bool(user.h5_allow_suspend),
-                allow_resume=bool(user.h5_allow_resume),
+                allow_resume=bool(user.h5_allow_resume) and not card.get("admin_stop_locked", False),
                 allow_remark=bool(user.h5_allow_remark)
             ).model_dump()
         }
@@ -459,6 +475,8 @@ class H5Service:
         card = await self._get_card_in_scope(db, user, card_id)
         if not card:
             raise BusinessException(code=404, msg="卡片不存在")
+        if getattr(card, "admin_stop_token", None):
+            raise BusinessException(403, "该卡已强制锁定，不允许重启")
         pending_operation = await self._get_pending_action(db, card.id, "restart")
         if pending_operation:
             return self._pending_action_result(card, "restart", pending_operation)

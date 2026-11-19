@@ -45,6 +45,18 @@
           </el-form>
         </el-card>
 
+        <el-card v-if="authStore.userInfo?.user_level === 1" shadow="never" class="result-card">
+          <template #header>异常卡强制停卡</template>
+          <el-form label-width="120px" @submit.prevent>
+            <el-form-item label="ICCID"><el-input v-model.trim="lockIccid" placeholder="输入单张卡的完整 ICCID" /></el-form-item>
+            <el-form-item>
+              <el-button type="danger" :disabled="!lockIccid || lockBusy" @click="setLock(false)">强制停卡</el-button>
+              <el-button :disabled="!lockIccid || lockBusy" @click="setLock(true)">解除锁定并复机</el-button>
+            </el-form-item>
+          </el-form>
+          <p v-if="lockMessage">{{ lockMessage }}</p>
+        </el-card>
+
         <el-card v-if="forceResult" class="result-card" shadow="never">
           <template #header>
             <span>执行结果</span>
@@ -194,10 +206,31 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useAuthStore } from '@/stores/modules/auth'
 import { formatDateTime } from '@/utils/formatter'
 import { packagePeriodApi, type PackagePeriodBatchResult, type PackagePeriodLogRecord } from '@/api/modules/packagePeriod'
 
+const authStore = useAuthStore()
 const activeTab = ref<'force_activate' | 'cancel_period'>('force_activate')
+const lockIccid = ref('')
+const lockBusy = ref(false)
+const lockMessage = ref('')
+const setLock = async (release: boolean) => {
+  const iccid = lockIccid.value
+  const action = release ? '解除锁定并复机' : '强制停卡'
+  try {
+    await ElMessageBox.confirm(release ? `确认对 ${iccid} 解除锁定并复机？` :
+      `确认强制停用 ${iccid}？客户将无法复机，供应商开网后平台会重新停机。`, action)
+    lockBusy.value = true
+    lockMessage.value = ''
+    const result = await packagePeriodApi.setAdminStop(iccid, release)
+    lockMessage.value = `${iccid}：${result.message}`
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error('操作失败，请检查卡号和操作记录')
+  } finally {
+    lockBusy.value = false
+  }
+}
 const forceLoading = ref(false)
 const cancelLoading = ref(false)
 const logLoading = ref(false)

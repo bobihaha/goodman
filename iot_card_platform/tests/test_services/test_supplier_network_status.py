@@ -29,6 +29,7 @@ def test_card_network_status_does_not_default_unknown_to_closed(status, expected
 @pytest.mark.asyncio
 async def test_delayed_simboss_resume_is_scheduled_for_reconcile():
     card = SimpleNamespace(
+        admin_stop_token=None,
         id=11,
         iccid="8986000000000000011",
         msisdn=None,
@@ -48,7 +49,7 @@ async def test_delayed_simboss_resume_is_scheduled_for_reconcile():
         resume_card=AsyncMock(return_value=False),
         last_sor_result={"submitted": True, "verification_pending": True},
     )
-    db = SimpleNamespace()
+    db = SimpleNamespace(refresh=AsyncMock())
 
     with patch.object(
         SuspendActionService,
@@ -304,14 +305,17 @@ async def test_pool_exceed_reconcile_preserves_reason_and_creates_suspend_log():
     supplier_result.scalar_one_or_none.return_value = supplier
     db = MagicMock()
     db.get = AsyncMock(return_value=card)
-    db.execute = AsyncMock(return_value=supplier_result)
+    latest_result = MagicMock()
+    latest_result.scalar_one_or_none.return_value = operation.id
+    db.refresh = AsyncMock()
+    db.execute = AsyncMock(side_effect=[supplier_result, latest_result])
     db.commit = AsyncMock()
     session_context = MagicMock()
     session_context.__aenter__ = AsyncMock(return_value=db)
     session_context.__aexit__ = AsyncMock(return_value=None)
     supplier_client = MagicMock()
     supplier_client.get_card_lifecycle = AsyncMock(
-        return_value={"status": CardStatus.suspended.value}
+        return_value={"status": CardStatus.suspended.value, "network_status": CardStatus.suspended.value}
     )
 
     with patch("app.services.suspend_service.asyncio.sleep", AsyncMock()), patch(

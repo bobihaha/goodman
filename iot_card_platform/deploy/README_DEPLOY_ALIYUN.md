@@ -413,3 +413,7 @@ bash deploy/scripts/predeploy_check.sh
 - 已备份并添加可空 customer_remark 字段，迁移使用 INSTANT 和 5 秒元数据锁等待限制。
 - 生产备份目录为 `/home/deploy/iot_card_platform/release_backups/20261118_175806_customer_order_enhancement_20261118/`。发布范围见 `deploy/release_manifests/customer_order_enhancement_20261118.txt`。
 - 7 项后端回归测试、前端类型检查及构建通过。浏览器模拟接口验证备注保存/刷新/清空及跳转/刷新恢复。生产真实客户只读验证订单日期回退、日期筛选、明细/下载数量和跨账号隔离。
+
+### 2026-11-19 手动刷新与异常卡强制停卡
+生产已应用 20261119_admin_stop_token.sql，仅重建 app 和 frontend。迁移后 2141 张存量卡均未设置强制锁。H5 刷新尾号 8472 返回 activated，未登录请求强制停卡接口返回 401，HTTPS 200，前后端健康。未对真实客户卡执行强制停复机验收。
+生产备份目录为 release_backups/20261119_1107_manual_sync_admin_lock，包含原文件、MySQL、Redis 和发布文件校验清单。回滚镜像为 iot_card_platform:rollback-admin-lock-1119 和 iot_card_frontend:rollback-admin-lock-1119。回滚前先检查是否已有强制锁定卡；旧版本不能执行锁定策略，有锁时须先落实逐卡管控。可空字段保留，无需恢复整库。

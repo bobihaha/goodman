@@ -630,6 +630,8 @@ class IotCardService:
         if not card:
             raise BusinessException(code=404, msg="卡片不存在或无权访问")
 
+        if getattr(card, "admin_stop_token", None):
+            raise BusinessException(403, "该卡已强制锁定，不允许重启")
         current_card_status = card.status.value if card.status else None
         if current_card_status not in self.RESTART_ALLOWED_STATUSES:
             raise BusinessException(code=400, msg=f"当前卡片状态不支持重启: {current_card_status or '-'}")

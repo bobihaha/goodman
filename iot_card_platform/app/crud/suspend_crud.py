@@ -521,13 +521,12 @@ class SupplierSuspendOperationCRUD:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_latest_id_for_card(db: AsyncSession, card_id: int) -> Optional[int]:
-        result = await db.execute(
-            select(func.max(SupplierSuspendOperationModel.id)).where(
+    async def get_latest_id_for_card(db: AsyncSession, card_id: int, *, for_update: bool = False) -> Optional[int]:
+        query = select(SupplierSuspendOperationModel.id).where(
                 SupplierSuspendOperationModel.card_id == card_id,
                 SupplierSuspendOperationModel.is_deleted == 0,
-            )
-        )
+        ).order_by(SupplierSuspendOperationModel.id.desc()).limit(1)
+        result = await db.execute(query.with_for_update() if for_update else query)
         return result.scalar_one_or_none()
 
     @staticmethod

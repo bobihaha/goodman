@@ -76,6 +76,10 @@ export const h5Api = {
     return get<H5CardDetail>(`/h5/${slug}/card/${cardId}`)
   },
 
+  syncCardStatus(slug: string, cardId: number): Promise<H5CardDetail> {
+    return post<H5CardDetail>(`/h5/${slug}/card/${cardId}/sync-status`, {})
+  },
+
   suspendCard(slug: string, cardId: number, reason?: string): Promise<H5CardActionResult> {
     return post<H5CardActionResult>(`/h5/${slug}/card/${cardId}/suspend`, { reason })
   },

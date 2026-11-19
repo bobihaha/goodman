@@ -43,6 +43,15 @@ async def sync_supplier_usage(supplier_id: int = None):
             logger.error(f"定时同步失败 - 供应商ID: {supplier_id}, 错误: {str(e)}")
 
 
+    # 独立事务：状态查询失败不能回滚已完成的流量同步。
+    if supplier_id is not None:
+        from app.services.card_state_reconcile_service import reconcile_supplier
+        try:
+            await reconcile_supplier(supplier_id)
+        except Exception:
+            logger.exception("供应商卡状态对账失败: %s", supplier_id)
+
+
 async def send_card_expiry_reminders():
     """发送本月到期卡邮件提醒"""
     async with AsyncSessionLocal() as db:

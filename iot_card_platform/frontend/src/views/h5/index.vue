@@ -143,7 +143,7 @@
           <div class="detail-header">
             <div class="panel-title">核心信息</div>
             <div class="status-chip" :class="getStatusClass(detail.card.status_name || detail.card.status)">
-              {{ detail.card.status_name || detail.card.status || '-' }}
+              {{ detail.card.status_name || detail.card.status || '-' }}{{ detail.card.admin_stop_locked ? ' · 管理员锁定' : '' }}
             </div>
           </div>
 
@@ -547,7 +547,8 @@ const resetState = () => {
 
 const refreshCurrentView = async () => {
   if (detail.value?.card?.id) {
-    await refreshDetail()
+    detail.value = await h5Api.syncCardStatus(slug.value, detail.value.card.id)
+    fillRemark()
     return
   }
 

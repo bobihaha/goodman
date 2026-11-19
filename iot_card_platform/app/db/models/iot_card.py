@@ -147,6 +147,7 @@ class IotCardModel(BaseModel):
     
     # 停卡信息
     suspend_type = Column(Enum(SuspendType), default=SuspendType.none, comment="停卡类型")
+    admin_stop_token = Column(String(32), nullable=True)
     suspend_at = Column(DateTime, nullable=True, comment="停卡时间")
     suspend_reason = Column(String(200), nullable=True, comment="停卡原因")
     
@@ -257,6 +258,7 @@ class IotCardModel(BaseModel):
             # 停卡信息
             "suspend_type": self.suspend_type.value if self.suspend_type else None,
             "suspend_type_name": SUSPEND_TYPE_NAMES.get(self.suspend_type.value, "") if self.suspend_type else None,
+            "admin_stop_locked": bool(self.admin_stop_token),
             "suspend_at": self.suspend_at.isoformat() if self.suspend_at else None,
             "suspend_reason": self.suspend_reason,
             # 流量池

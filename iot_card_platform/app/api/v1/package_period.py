@@ -21,6 +21,14 @@ from app.utils.auth import require_super_admin
 router = APIRouter(prefix="/package-period", tags=["套餐周期管理"])
 
 
+@router.post("/admin-stop/{iccid}", summary="强制锁定停卡或解除锁定并复机")
+async def admin_stop_card(iccid: str, release: bool = False, db: AsyncSession = Depends(get_db),
+                          current_user: CurrentUser = Depends(require_super_admin)):
+    from app.services.suspend_service import SuspendActionService
+    message = await SuspendActionService.set_admin_stop(db, iccid, current_user.id, release=release)
+    return ResponseModel(data={"message": message})
+
+
 @router.post("/force-activate", summary="批量强制激活")
 async def batch_force_activate(
     data: BatchForceActivateRequest,

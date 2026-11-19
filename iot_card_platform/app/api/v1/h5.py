@@ -46,6 +46,11 @@ async def get_h5_card_detail(
     return ResponseModel(data=result)
 
 
+@router.post("/{slug}/card/{card_id}/sync-status", summary="H5同步卡状态", response_model=ResponseModel)
+async def sync_h5_card_status(slug: str, card_id: int, db: AsyncSession = Depends(get_db)):
+    return ResponseModel(data=await h5_service.sync_card_status(db, slug, card_id))
+
+
 @router.post("/{slug}/card/{card_id}/suspend", summary="H5停机", response_model=ResponseModel)
 async def suspend_h5_card(
     slug: str = Path(...),

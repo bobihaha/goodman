@@ -462,6 +462,7 @@
                 <el-tag :type="getStatusMeta(row.status).type">
                   {{ getStatusMeta(row.status).label }}
                 </el-tag>
+                <el-tag v-if="row.admin_stop_locked" type="danger">强制锁定</el-tag>
               </template>
               <template v-else-if="column.key === 'data_used_month'">
                 {{ formatFlowValue(row.data_used_month) }}
@@ -563,20 +564,20 @@
                     </el-dropdown-item>
                     <el-dropdown-item
                       command="resume"
-                      :disabled="row.status !== 'suspended'"
+                      :disabled="row.admin_stop_locked || row.status !== 'suspended'"
                     >
                       复机
                     </el-dropdown-item>
                     <el-dropdown-item
                       command="restart"
-                      :disabled="!['activated', 'testing', 'silent', 'suspended'].includes(row.status)"
+                      :disabled="row.admin_stop_locked || !['activated', 'testing', 'silent', 'suspended'].includes(row.status)"
                     >
                       重启
                     </el-dropdown-item>
                     <el-dropdown-item
                       v-if="isSuperAdmin"
                       command="forceResume"
-                      :disabled="row.status !== 'suspended'"
+                      :disabled="row.admin_stop_locked || row.status !== 'suspended'"
                     >
                       强制复机
                     </el-dropdown-item>
@@ -1597,7 +1598,9 @@ const handleRowRefresh = async (card: Card) => {
   try {
     const result = await cardApi.syncSingleCard(card.iccid)
     const changedFields = result.changed_fields || []
-    if (result.changed) {
+    if (result.lifecycle_error) {
+      ElMessage.warning("供应商状态查询失败，请稍后重试")
+    } else if (result.changed) {
       ElMessage.success(
         changedFields.length
           ? `卡片 ${card.iccid} 已同步，更新字段：${changedFields.join('、')}`

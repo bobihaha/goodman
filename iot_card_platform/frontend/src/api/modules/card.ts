@@ -47,6 +47,7 @@ export const cardApi = {
 
   // 同步单卡用量
   syncSingleCard(iccid: string): Promise<{
+    lifecycle_error?: string
     sync_no: string
     sync_type: string
     total: number

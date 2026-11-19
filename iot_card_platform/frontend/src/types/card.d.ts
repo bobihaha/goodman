@@ -71,6 +71,7 @@ export interface Card {
   imei_separation_detected?: boolean
   status: CardStatus
   status_name?: string
+  admin_stop_locked?: boolean
   suspend_type?: SuspendType
   suspend_type_name?: string
   suspend_at?: string

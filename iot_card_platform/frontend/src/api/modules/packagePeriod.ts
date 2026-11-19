@@ -27,6 +27,9 @@ export interface PackagePeriodLogResult {
 }
 
 export const packagePeriodApi = {
+  setAdminStop(iccid: string, release: boolean) {
+    return post<{ message: string }>(`/package-period/admin-stop/${encodeURIComponent(iccid)}?release=${release}`, {})
+  },
   batchForceActivate(data: { iccids: string[]; reason?: string }) {
     return post<PackagePeriodBatchResult>('/package-period/force-activate', data)
   },
